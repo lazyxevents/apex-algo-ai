@@ -43,3 +43,12 @@ class StrategyState(Base):
     counts_json: Mapped[str] = mapped_column(Text, default="{}")
     last_processed_trade_id: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class ResearchRun(Base):
+    __tablename__ = "research_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_date: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    results_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
