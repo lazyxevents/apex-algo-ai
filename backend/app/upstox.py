@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from time import sleep
 from urllib.parse import quote
 
 import httpx
@@ -7,15 +8,19 @@ from .core import settings
 
 
 class UpstoxService:
-    def __init__(self):
-        self._contracts_cache: dict[str, tuple[date, list[dict]]] = {}
-
     api_v2 = "https://api.upstox.com/v2"
     api_v3 = "https://api.upstox.com/v3"
     sandbox_v3 = "https://api-sandbox.upstox.com/v3"
 
+    def __init__(self):
+        self._contracts_cache: dict[str, tuple[date, list[dict]]] = {}
+
     def _headers(self, token: str) -> dict[str, str]:
-        return {"Accept": "application/json", "Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+        return {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
 
     @property
     def market_ready(self) -> bool:
@@ -33,6 +38,23 @@ class UpstoxService:
             "paperBroker": settings.paper_broker,
         }
 
+    @staticmethod
+    def _parse_candles(raw: list) -> list[dict]:
+        candles = []
+        for row in raw or []:
+            if len(row) < 6:
+                continue
+            candles.append({
+                "timestamp": str(row[0]),
+                "open": float(row[1]),
+                "high": float(row[2]),
+                "low": float(row[3]),
+                "close": float(row[4]),
+                "volume": float(row[5] or 0),
+                "oi": float(row[6] or 0) if len(row) > 6 else 0,
+            })
+        return sorted(candles, key=lambda x: x["timestamp"])
+
     def intraday_candles(self, instrument_key: str) -> list[dict]:
         if not self.market_ready:
             raise RuntimeError("UPSTOX_ACCESS_TOKEN is missing")
@@ -42,16 +64,21 @@ class UpstoxService:
             res = client.get(url, headers=self._headers(settings.upstox_access_token))
             res.raise_for_status()
             raw = res.json().get("data", {}).get("candles", [])
-        candles = []
-        for row in raw:
-            if len(row) < 6:
-                continue
-            candles.append({
-                "timestamp": str(row[0]), "open": float(row[1]), "high": float(row[2]),
-                "low": float(row[3]), "close": float(row[4]), "volume": float(row[5] or 0),
-                "oi": float(row[6] or 0) if len(row) > 6 else 0,
-            })
-        return sorted(candles, key=lambda x: x["timestamp"])
+        return self._parse_candles(raw)
+
+    def historical_candles(self, instrument_key: str, from_date: date, to_date: date) -> list[dict]:
+        if not self.market_ready:
+            raise RuntimeError("UPSTOX_ACCESS_TOKEN is missing")
+        encoded = quote(instrument_key, safe="")
+        url = (
+            f"{self.api_v3}/historical-candle/{encoded}/minutes/{settings.candle_interval_minutes}/"
+            f"{to_date.isoformat()}/{from_date.isoformat()}"
+        )
+        with httpx.Client(timeout=20) as client:
+            res = client.get(url, headers=self._headers(settings.upstox_access_token))
+            res.raise_for_status()
+            raw = res.json().get("data", {}).get("candles", [])
+        return self._parse_candles(raw)
 
     def candles_fresh(self, candles: list[dict]) -> bool:
         if not candles:
@@ -158,6 +185,36 @@ class UpstoxService:
                 raise RuntimeError(f"Upstox sandbox order failed: {body}")
         data = body.get("data") or {}
         return {"ok": True, "mode": "upstox_sandbox", "orderId": data.get("order_id"), "raw": body}
+
+    def cancel_sandbox_order(self, order_id: str | None) -> dict:
+        if settings.paper_broker != "upstox_sandbox" or not order_id:
+            return {"ok": True, "mode": "internal", "orderId": order_id}
+        if not self.sandbox_ready:
+            return {"ok": False, "error": "sandbox token missing", "orderId": order_id}
+        with httpx.Client(timeout=12) as client:
+            res = client.delete(
+                f"{self.sandbox_v3}/order/cancel",
+                params={"order_id": order_id},
+                headers=self._headers(settings.upstox_sandbox_token),
+            )
+            try:
+                body = res.json()
+            except Exception:
+                body = {"text": res.text}
+            return {"ok": res.status_code < 400, "orderId": order_id, "raw": body}
+
+    def sandbox_exit_with_retry(self, instrument_key: str, quantity: int, tag: str) -> dict:
+        last_error = None
+        attempts = max(1, settings.force_exit_retry_count)
+        for attempt in range(1, attempts + 1):
+            try:
+                result = self.place_sandbox_order(instrument_key, quantity, "SELL", f"{tag}-{attempt}")
+                return {**result, "attempts": attempt}
+            except Exception as exc:
+                last_error = str(exc)
+                if attempt < attempts:
+                    sleep(max(0.0, settings.force_exit_retry_delay_seconds))
+        return {"ok": False, "error": last_error, "attempts": attempts}
 
 
 upstox_service = UpstoxService()
