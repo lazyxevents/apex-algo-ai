@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Literal
@@ -6,18 +7,36 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .core import settings, init_db, db_health
+from .core import db_health, init_db, settings
 from .kite import kite_service
+from .strategy import adaptive_learner
 from .trading import trading_engine
+from .upstox import upstox_service
+
+
+async def automation_loop():
+    trading_engine.state.automation_running = True
+    try:
+        while True:
+            await asyncio.to_thread(trading_engine.automation_cycle, upstox_service)
+            await asyncio.sleep(max(15, settings.auto_scan_interval_seconds))
+    finally:
+        trading_engine.state.automation_running = False
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
+    task = asyncio.create_task(automation_loop())
     yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
-app = FastAPI(title="APEX Algo AI", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="APEX Algo AI", version="0.2.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -32,14 +51,14 @@ class ModeRequest(BaseModel):
 
 
 class PaperOrderRequest(BaseModel):
-    symbol: str = Field(min_length=2, max_length=64)
+    symbol: str = Field(min_length=2, max_length=128)
     direction: Literal["CE", "PE"]
     entry: float = Field(gt=0)
     stop: float = Field(gt=0)
     target: float = Field(gt=0)
     lot_size: int = Field(gt=0)
     quantity: int | None = Field(default=None, gt=0)
-    reason: str = Field(default="manual paper signal", max_length=500)
+    reason: str = Field(default="{}", max_length=4000)
 
 
 @app.get("/api/health")
@@ -49,12 +68,13 @@ def health():
         "time": datetime.now(timezone.utc).isoformat(),
         "database": db_health(),
         "mode": trading_engine.state.mode,
+        "automation": trading_engine.state.automation_running,
     }
 
 
 @app.get("/api/system/status")
 def system_status():
-    return trading_engine.status(kite_service.connection_status())
+    return trading_engine.status(kite_service.connection_status(), upstox_service.status())
 
 
 @app.post("/api/system/mode")
@@ -66,24 +86,39 @@ def set_mode(body: ModeRequest):
             trading_engine.set_mode(body.mode)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return trading_engine.status(kite_service.connection_status())
+    return system_status()
 
 
 @app.post("/api/risk/kill-switch")
 def kill_switch():
     trading_engine.kill_switch("manual dashboard kill switch")
-    return trading_engine.status(kite_service.connection_status())
+    return system_status()
 
 
 @app.post("/api/risk/reset-kill-switch")
 def reset_kill_switch():
     trading_engine.reset_kill_switch()
-    return trading_engine.status(kite_service.connection_status())
+    return system_status()
 
 
 @app.get("/api/risk/status")
 def risk_status():
     return trading_engine.risk_snapshot()
+
+
+@app.get("/api/performance")
+def performance():
+    return trading_engine.performance_snapshot()
+
+
+@app.get("/api/strategy/status")
+def strategy_status():
+    return adaptive_learner.snapshot()
+
+
+@app.post("/api/automation/run-once")
+def automation_run_once():
+    return trading_engine.automation_cycle(upstox_service)
 
 
 @app.get("/api/trades")
@@ -131,7 +166,7 @@ async def ws_status(ws: WebSocket):
     await ws.accept()
     try:
         while True:
-            await ws.send_json(trading_engine.status(kite_service.connection_status()))
-            await ws.receive_text()
+            await ws.send_json(system_status())
+            await asyncio.sleep(3)
     except WebSocketDisconnect:
         return
