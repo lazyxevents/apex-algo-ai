@@ -36,7 +36,7 @@ async def lifespan(_: FastAPI):
         pass
 
 
-app = FastAPI(title="APEX Algo AI", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="APEX Algo AI", version="0.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -58,7 +58,7 @@ class PaperOrderRequest(BaseModel):
     target: float = Field(gt=0)
     lot_size: int = Field(gt=0)
     quantity: int | None = Field(default=None, gt=0)
-    reason: str = Field(default="{}", max_length=4000)
+    reason: str = Field(default="{}", max_length=8000)
 
 
 @app.get("/api/health")
@@ -79,20 +79,28 @@ def system_status():
 
 @app.post("/api/system/mode")
 def set_mode(body: ModeRequest):
+    flatten = []
     if body.mode == "KILLED":
         trading_engine.kill_switch("manual mode request")
+        flatten = trading_engine.force_flatten(upstox_service, "manual KILLED mode")
     else:
         try:
             trading_engine.set_mode(body.mode)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return system_status()
+    return {"status": system_status(), "flatten": flatten}
 
 
 @app.post("/api/risk/kill-switch")
 def kill_switch():
     trading_engine.kill_switch("manual dashboard kill switch")
-    return system_status()
+    flatten = trading_engine.force_flatten(upstox_service, "manual kill switch")
+    return {"status": system_status(), "flatten": flatten}
+
+
+@app.post("/api/risk/flatten")
+def flatten_positions():
+    return {"flatten": trading_engine.force_flatten(upstox_service, "manual emergency flatten"), "status": system_status()}
 
 
 @app.post("/api/risk/reset-kill-switch")
@@ -114,6 +122,14 @@ def performance():
 @app.get("/api/strategy/status")
 def strategy_status():
     return adaptive_learner.snapshot()
+
+
+@app.post("/api/research/run-once")
+def research_run_once():
+    try:
+        return adaptive_learner.daily_research(upstox_service)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/automation/run-once")
