@@ -1,14 +1,16 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from math import floor
+from time import sleep
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
 from .models import AuditLog, Trade
-from .strategy import adaptive_learner, evaluate_signal, select_option
+from .strategy import adaptive_learner, evaluate_signal, market_context, select_option
 
 IST = ZoneInfo(settings.timezone)
 
@@ -61,21 +63,20 @@ class TradingEngine:
     def _closed_rows(self, db) -> list[Trade]:
         return list(db.execute(select(Trade).where(Trade.status != "OPEN").order_by(Trade.id.asc())).scalars().all())
 
+    def _open_rows(self, db) -> list[Trade]:
+        return list(db.execute(select(Trade).where(Trade.status == "OPEN").order_by(Trade.id.asc())).scalars().all())
+
     def _today_count(self, db) -> int:
         today = datetime.now(IST).date()
         return sum(1 for t in db.execute(select(Trade)).scalars().all() if self._as_ist(t.opened_at).date() == today)
-
-    def _open_rows(self, db) -> list[Trade]:
-        return list(db.execute(select(Trade).where(Trade.status == "OPEN").order_by(Trade.id.asc())).scalars().all())
 
     def _open_count(self, db) -> int:
         return db.scalar(select(func.count()).select_from(Trade).where(Trade.status == "OPEN")) or 0
 
     def _period_pnl(self, db, period: str) -> float:
         now = datetime.now(IST)
-        rows = self._closed_rows(db)
         values = []
-        for trade in rows:
+        for trade in self._closed_rows(db):
             closed = self._as_ist(trade.closed_at)
             if not closed:
                 continue
@@ -90,11 +91,32 @@ class TradingEngine:
     def _all_realized_pnl(self, db) -> float:
         return float(sum(t.pnl for t in self._closed_rows(db)))
 
+    def _apply_cap_ceiling(self, capital: float) -> float:
+        if settings.max_deployable_capital > 0:
+            return min(capital, settings.max_deployable_capital)
+        return capital
+
     def _effective_capital(self, db) -> float:
-        # CAPITAL is the hard maximum allocation. Profits do not automatically increase it.
-        # Losses reduce available paper equity until the user changes CAPITAL explicitly.
         realized = self._all_realized_pnl(db)
-        return max(0.0, min(settings.capital, settings.capital + min(realized, 0.0)))
+        if settings.auto_compound_profits:
+            equity = settings.capital + realized
+        else:
+            equity = settings.capital + min(realized, 0.0)
+        return max(0.0, self._apply_cap_ceiling(equity))
+
+    def _month_start_equity(self, db) -> float:
+        now = datetime.now(IST)
+        month_start = datetime(now.year, now.month, 1, tzinfo=IST)
+        pnl_before_month = 0.0
+        for trade in self._closed_rows(db):
+            closed = self._as_ist(trade.closed_at)
+            if closed and closed < month_start:
+                pnl_before_month += trade.pnl
+        if settings.auto_compound_profits:
+            equity = settings.capital + pnl_before_month
+        else:
+            equity = settings.capital + min(pnl_before_month, 0.0)
+        return max(0.0, self._apply_cap_ceiling(equity))
 
     def _limits(self, db) -> dict:
         capital = self._effective_capital(db)
@@ -110,6 +132,20 @@ class TradingEngine:
             "daily": settings.max_daily_loss,
             "weekly": settings.max_weekly_loss,
             "monthly": settings.max_monthly_drawdown,
+        }
+
+    def _monthly_target(self, db) -> dict:
+        month_start_equity = self._month_start_equity(db)
+        month_pnl = self._period_pnl(db, "month")
+        target_amount = month_start_equity * settings.monthly_profit_target_pct / 100
+        reached = bool(settings.monthly_target_lock and target_amount > 0 and month_pnl >= target_amount)
+        return {
+            "monthStartEquity": round(month_start_equity, 2),
+            "targetPct": settings.monthly_profit_target_pct,
+            "targetAmount": round(target_amount, 2),
+            "monthPnl": round(month_pnl, 2),
+            "remaining": round(max(0.0, target_amount - month_pnl), 2),
+            "reached": reached,
         }
 
     def _quantity_for_risk(self, entry: float, stop: float, lot_size: int, db=None) -> int:
@@ -133,21 +169,16 @@ class TradingEngine:
         with SessionLocal() as db:
             rows = self._closed_rows(db)
             pnls = [float(t.pnl) for t in rows]
-            wins = [p for p in pnls if p > 0]
-            losses = [p for p in pnls if p < 0]
-            gross_win = sum(wins)
-            gross_loss = abs(sum(losses))
+            wins, losses = [p for p in pnls if p > 0], [p for p in pnls if p < 0]
+            gross_win, gross_loss = sum(wins), abs(sum(losses))
             equity = settings.capital
-            peak = equity
-            max_dd = 0.0
+            peak, max_dd = equity, 0.0
             for pnl in pnls:
                 equity += pnl
                 peak = max(peak, equity)
                 max_dd = max(max_dd, peak - equity)
             return {
-                "trades": len(pnls),
-                "wins": len(wins),
-                "losses": len(losses),
+                "trades": len(pnls), "wins": len(wins), "losses": len(losses),
                 "winRate": round(len(wins) / len(pnls) * 100, 2) if pnls else 0.0,
                 "netPnl": round(sum(pnls), 2),
                 "averageWin": round(gross_win / len(wins), 2) if wins else 0.0,
@@ -164,11 +195,14 @@ class TradingEngine:
             day_pnl = self._period_pnl(db, "day")
             week_pnl = self._period_pnl(db, "week")
             month_pnl = self._period_pnl(db, "month")
+            target = self._monthly_target(db)
             return {
                 "configuredCapital": settings.capital,
                 "effectiveCapital": round(capital, 2),
                 "minimumCapital": settings.min_trading_capital,
                 "capitalUsagePct": settings.capital_usage_pct,
+                "autoCompoundProfits": settings.auto_compound_profits,
+                "maxDeployableCapital": settings.max_deployable_capital,
                 "dynamicLimits": settings.dynamic_risk_limits,
                 "riskPerTrade": round(limits["perTrade"], 2),
                 "maxDailyLoss": round(limits["daily"], 2),
@@ -183,7 +217,9 @@ class TradingEngine:
                 "monthlyPnl": round(month_pnl, 2),
                 "dailyLocked": day_pnl <= -limits["daily"],
                 "weeklyLocked": week_pnl <= -limits["weekly"],
-                "monthlyLocked": month_pnl <= -limits["monthly"],
+                "monthlyLossLocked": month_pnl <= -limits["monthly"],
+                "monthlyTarget": target,
+                "monthlyTargetLocked": target["reached"],
                 "killSwitch": self.state.killed,
             }
 
@@ -195,6 +231,8 @@ class TradingEngine:
         capital = self._effective_capital(db)
         if capital < settings.min_trading_capital:
             raise ValueError("Effective capital is below MIN_TRADING_CAPITAL")
+        if self._monthly_target(db)["reached"]:
+            raise ValueError("Monthly profit target reached; trading locked until next month")
         if self._open_count(db) >= settings.max_concurrent_positions:
             raise ValueError("Concurrent position limit reached")
         if self._today_count(db) >= settings.max_trades_per_day:
@@ -228,33 +266,27 @@ class TradingEngine:
             if not (0 < stop < entry < target):
                 raise ValueError("Option-buying trade requires 0 < stop < entry < target")
             allowed_qty = self._quantity_for_risk(entry, stop, lot_size, db)
-            requested = payload.get("quantity")
-            qty = int(requested or allowed_qty)
+            qty = int(payload.get("quantity") or allowed_qty)
             if qty <= 0 or qty % lot_size != 0:
                 raise ValueError("Quantity must be one or more valid whole lots")
             if qty > allowed_qty:
                 raise ValueError(f"Risk/capital budget permits at most {allowed_qty} units")
-
             trade = Trade(
                 symbol=payload["symbol"], direction=payload["direction"], entry=entry, stop=stop,
                 target=target, quantity=qty, lot_size=lot_size, current_price=entry,
                 pnl=0, status="OPEN", reason=payload.get("reason", "{}"),
             )
-            db.add(trade)
-            db.commit(); db.refresh(trade)
+            db.add(trade); db.commit(); db.refresh(trade)
             self._audit("trade.opened", {"tradeId": trade.id, "symbol": trade.symbol, "qty": qty})
             return self._trade_dict(trade)
 
-    def mark_trade(self, trade_id: int, ltp: float, force_exit: bool = False) -> dict:
+    def mark_trade(self, trade_id: int, ltp: float, force_status: str | None = None) -> dict:
         with SessionLocal() as db:
             trade = db.get(Trade, trade_id)
             if not trade or trade.status != "OPEN":
                 raise ValueError("Open trade not found")
             trade.current_price = float(ltp)
             trade.pnl = round((trade.current_price - trade.entry) * trade.quantity, 2)
-
-            # Simple protected trailing: at 50% of target distance move stop to breakeven,
-            # at 75% protect 25% of reward distance. No averaging down.
             reward_distance = max(0.01, trade.target - trade.entry)
             progress = (trade.current_price - trade.entry) / reward_distance
             if progress >= 0.75:
@@ -262,8 +294,8 @@ class TradingEngine:
             elif progress >= 0.50:
                 trade.stop = max(trade.stop, trade.entry)
 
-            if force_exit:
-                trade.status = "TIME_EXIT"
+            if force_status:
+                trade.status = force_status
                 trade.closed_at = datetime.now(timezone.utc)
             elif trade.current_price <= trade.stop:
                 trade.status = "STOPPED"
@@ -276,25 +308,64 @@ class TradingEngine:
                 self._audit("trade.closed", {"tradeId": trade.id, "status": trade.status, "pnl": trade.pnl})
             return self._trade_dict(trade)
 
+    def _best_exit_price(self, provider, trade: Trade) -> tuple[float, bool, str | None]:
+        last_error = None
+        attempts = max(1, settings.force_exit_retry_count)
+        for attempt in range(attempts):
+            try:
+                return float(provider.quote_ltp(trade.symbol)), True, None
+            except Exception as exc:
+                last_error = str(exc)
+                if attempt + 1 < attempts:
+                    sleep(max(0.0, settings.force_exit_retry_delay_seconds))
+        return float(trade.current_price or trade.entry), False, last_error
+
+    def force_flatten(self, provider, reason: str = "manual emergency flatten") -> list[dict]:
+        with SessionLocal() as db:
+            open_rows = self._open_rows(db)
+        results = []
+        for trade in open_rows:
+            price, fresh, quote_error = self._best_exit_price(provider, trade) if provider.market_ready else (float(trade.current_price or trade.entry), False, "market data unavailable")
+            closed = self.mark_trade(trade.id, price, force_status="FORCED_EXIT")
+            sandbox = provider.sandbox_exit_with_retry(trade.symbol, trade.quantity, f"apex-flat-{trade.id}")
+            item = {"trade": closed, "freshExitPrice": fresh, "quoteError": quote_error, "sandbox": sandbox, "reason": reason}
+            results.append(item)
+            self._audit("risk.force_flatten", item)
+        return results
+
     def list_trades(self, limit: int = 100) -> list[dict]:
         with SessionLocal() as db:
             rows = db.execute(select(Trade).order_by(Trade.id.desc()).limit(limit)).scalars().all()
             return [self._trade_dict(t) for t in rows]
 
     def _update_open_trades(self, provider, phase: dict) -> list[dict]:
+        if self.state.killed:
+            return self.force_flatten(provider, "kill switch")
+        if phase["forceExit"]:
+            return self.force_flatten(provider, "scheduled force exit")
         actions = []
         with SessionLocal() as db:
             open_rows = self._open_rows(db)
         for trade in open_rows:
             try:
                 ltp = provider.quote_ltp(trade.symbol)
-                result = self.mark_trade(trade.id, ltp, force_exit=phase["forceExit"])
+                result = self.mark_trade(trade.id, ltp)
                 if result["status"] != "OPEN":
-                    sandbox = provider.place_sandbox_order(trade.symbol, trade.quantity, "SELL", f"apex-exit-{trade.id}")
+                    sandbox = provider.sandbox_exit_with_retry(trade.symbol, trade.quantity, f"apex-exit-{trade.id}")
                     actions.append({"exit": result, "sandbox": sandbox})
             except Exception as exc:
                 self._audit("trade.monitor_error", {"tradeId": trade.id, "error": str(exc)})
         return actions
+
+    def _scan_one(self, provider, name: str, key: str, capital: float) -> dict:
+        candles = provider.intraday_candles(key)
+        if not provider.candles_fresh(candles):
+            return {"action": "NO_TRADE", "score": 0.0, "reason": "stale/missing market data", "index": name, "underlyingKey": key}
+        context = market_context(candles)
+        arm = adaptive_learner.choose_arm(context, capital)
+        signal = evaluate_signal(candles, arm)
+        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name})
+        return signal
 
     def automation_cycle(self, provider) -> dict:
         self.state.last_cycle_at = datetime.now(timezone.utc).isoformat()
@@ -303,9 +374,25 @@ class TradingEngine:
         decision: dict = {"phase": phase, "action": "NO_TRADE"}
         try:
             adaptive_learner.learn()
-            exits = self._update_open_trades(provider, phase) if provider.market_ready else []
+            now_ist = datetime.now(IST)
+            if provider.market_ready and now_ist.weekday() < 5 and now_ist.strftime("%H:%M") >= settings.daily_research_time:
+                decision["research"] = adaptive_learner.daily_research(provider)
+
+            exits = self._update_open_trades(provider, phase) if provider.market_ready or self.state.killed or phase["forceExit"] else []
             decision["exits"] = exits
 
+            risk = self.risk_snapshot()
+            if risk["monthlyTargetLocked"]:
+                if risk["openPositions"]:
+                    decision["monthlyTargetFlatten"] = self.force_flatten(provider, "monthly profit target reached")
+                self.state.mode = "SAFE"
+                decision["reason"] = "monthly profit target reached; SAFE lock until next month"
+                self.state.last_decision = decision
+                return decision
+            if self.state.killed:
+                decision["reason"] = "kill switch active"
+                self.state.last_decision = decision
+                return decision
             if self.state.mode != "PAPER" or not settings.auto_trading_enabled:
                 decision["reason"] = "automation disabled or mode is not PAPER"
                 self.state.last_decision = decision
@@ -318,26 +405,25 @@ class TradingEngine:
                 decision["reason"] = phase["reason"]
                 self.state.last_decision = decision
                 return decision
+
             with SessionLocal() as db:
                 self._authorize(db)
                 capital = self._effective_capital(db)
                 deployable = capital * settings.capital_usage_pct / 100
 
-            arm = adaptive_learner.choose_arm()
             ranked = []
-            for name, key in settings.underlying_keys.items():
-                candles = provider.intraday_candles(key)
-                if not provider.candles_fresh(candles):
-                    ranked.append({"action": "NO_TRADE", "score": 0.0, "reason": "stale/missing market data", "index": name, "underlyingKey": key})
-                    continue
-                signal = evaluate_signal(candles, arm)
-                signal.update({"index": name, "underlyingKey": key})
-                ranked.append(signal)
+            with ThreadPoolExecutor(max_workers=len(settings.underlying_keys)) as pool:
+                futures = {pool.submit(self._scan_one, provider, name, key, capital): name for name, key in settings.underlying_keys.items()}
+                for future in as_completed(futures):
+                    try:
+                        ranked.append(future.result())
+                    except Exception as exc:
+                        ranked.append({"action": "NO_TRADE", "score": 0.0, "reason": f"scan failure: {exc}", "index": futures[future]})
             ranked.sort(key=lambda x: x.get("score", 0), reverse=True)
-            best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
             decision["signals"] = ranked
+            best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
             if best.get("action") not in {"CE", "PE"}:
-                decision["reason"] = "no strategy setup passed threshold"
+                decision["reason"] = "no strategy setup passed score + candlestick confirmation"
                 self.state.last_decision = decision
                 return decision
 
@@ -353,7 +439,6 @@ class TradingEngine:
                 self.state.last_decision = decision
                 return decision
 
-            # Lot size is resolved from the option-contract master, never hard-coded.
             contracts = provider.option_contracts(best["underlyingKey"])
             contract = next((x for x in contracts if x.get("instrument_key") == option["instrumentKey"]), None)
             if not contract:
@@ -379,11 +464,15 @@ class TradingEngine:
                 return decision
 
             initial_risk = round((entry - stop) * qty, 2)
+            context = best.get("context") or {}
             meta = {
-                "strategy": arm.name,
+                "strategy": best.get("chosenStrategy") or best.get("strategy"),
                 "signalScore": best["score"],
                 "index": best["index"],
                 "underlyingKey": best["underlyingKey"],
+                "contextKey": context.get("key", "UNKNOWN"),
+                "context": context,
+                "patterns": best.get("patterns"),
                 "expiry": expiry,
                 "strike": option["strike"],
                 "selectionScore": option["selectionScore"],
@@ -391,8 +480,10 @@ class TradingEngine:
                 "delta": option["delta"],
                 "initialRisk": initial_risk,
                 "riskLimit": round(risk_limit, 2),
+                "capitalAtEntry": round(capital, 2),
             }
             sandbox = provider.place_sandbox_order(option["instrumentKey"], qty, "BUY", f"apex-entry-{best['index'].lower()}")
+            meta["sandboxEntryOrderId"] = sandbox.get("orderId")
             trade = self.open_paper_trade({
                 "symbol": option["instrumentKey"], "direction": best["action"], "entry": entry,
                 "stop": stop, "target": target, "lot_size": lot_size, "quantity": qty,
@@ -437,6 +528,7 @@ class TradingEngine:
                 "lastError": self.state.last_error,
                 "tradeWindow": f"{settings.trade_start_time}-{settings.stop_new_trade_time}",
                 "forceExit": settings.force_exit_time,
+                "researchTime": settings.daily_research_time,
             },
             "broker": broker,
             "market": market or {},
