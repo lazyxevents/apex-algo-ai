@@ -1,388 +1,342 @@
-# APEX Algo AI
+# APEX Algo AI — Adaptive Paper-Trading Engine
 
-APEX Algo AI is a **risk-first options trading research and paper-trading platform** based on the supplied master specification. This repository intentionally keeps the codebase compact while preserving the critical design rule: **live orders are disabled by default and are not implemented in this MVP**.
+APEX is an automated Indian index-options research + paper-trading system. It scans NIFTY, BANK NIFTY and SENSEX, builds deterministic technical signals, selects a liquid option contract, sizes the position from configured capital, manages SL/target/trailing/time-exit, records performance, and adapts among pre-approved strategy variants from closed paper trades.
 
-## What is included
+**No live broker order endpoint exists in this version. Zerodha is intentionally reserved for a later phase.**
 
-- FastAPI backend
-- PostgreSQL via Docker (SQLite fallback for simple local development)
-- Zerodha Kite Connect login/session/profile adapter
-- Paper trading order endpoint
-- Whole-lot risk-based position sizing
-- Daily trade-count and concurrent-position limits
-- Daily loss lock
-- Emergency kill switch
-- Trade persistence + audit logs
-- React/Vite dashboard
-- Docker Compose
-- Basic pytest test
-- Git-ready repository
+## Automatic flow
 
-## Architecture
+~~~text
+Backend starts
+→ background scan every 60 sec
+→ India time + stale-data + risk checks
+→ Upstox intraday candles
+→ adaptive strategy arm
+→ EMA + RSI + breakout + volume + ATR scoring
+→ NO TRADE / CE / PE
+→ nearest expiry + option chain + Greeks
+→ spread + volume + delta + ATM/near-OTM + affordability filters
+→ dynamic whole-lot quantity from CAPITAL
+→ optional Upstox Sandbox BUY
+→ internal paper trade in PostgreSQL
+→ monitor LTP
+→ SL / trailing / target / time exit
+→ optional Upstox Sandbox SELL
+→ P&L + win rate + expectancy + profit factor + drawdown
+→ learner updates strategy reward
+~~~
 
-```text
-Browser / React Dashboard
-          |
-          | REST
-          v
-     FastAPI API
-          |
-   +------+--------+----------------+
-   |               |                |
-Risk Engine    Paper Engine    Zerodha Adapter
-   |               |                |
-   +-------+-------+                |
-           |                        |
-       PostgreSQL              Kite Connect
+NO TRADE is a valid outcome.
 
-Safety flow for any future execution:
-Signal -> Strategy Validation -> Market/Liquidity Validation -> Risk Validation
-       -> Position Size -> Kill Switch -> Execution Validation -> Order
+## Compact structure
 
-Current MVP stops at PAPER execution.
-```
-
-## Project files (kept intentionally small)
-
-```text
+~~~text
 apex-algo-ai/
-├── backend/
-│   ├── app/
-│   │   ├── main.py       # API endpoints
-│   │   ├── core.py       # settings + DB
-│   │   ├── models.py     # trade + audit tables
-│   │   ├── trading.py    # risk + paper execution
-│   │   └── kite.py       # Zerodha adapter
-│   ├── tests/test_risk.py
-│   ├── requirements.txt
-│   └── Dockerfile
+├── backend/app/
+│   ├── main.py       FastAPI + background automation
+│   ├── core.py       env/settings + DB
+│   ├── models.py     Trade, AuditLog, StrategyState
+│   ├── strategy.py   indicators, option selector, learning
+│   ├── trading.py    risk, sizing, exits, analytics
+│   ├── upstox.py     market data + Sandbox
+│   └── kite.py       Zerodha reserved for later
 ├── frontend/
-│   ├── src/App.tsx
-│   ├── src/main.tsx
-│   ├── src/styles.css
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── index.html
-│   └── Dockerfile
 ├── .env.example
-├── .gitignore
 ├── docker-compose.yml
 └── README.md
-```
+~~~
 
-# 1. Fastest way to run (Docker)
+## APIs/accounts required now
 
-Requirements:
-- Docker Desktop
-- Git
+### Upstox market data
 
-```bash
-git clone https://github.com/lazyxevents/apex-algo-ai.git
-cd apex-algo-ai
+Used for GET requests only: intraday candles, option contracts, option chain and quotes.
+
+Official docs:
+- https://upstox.com/developer/api-documentation/
+- https://upstox.com/developer/api-documentation/v3/get-intra-day-candle-data/
+- https://upstox.com/developer/api-documentation/get-option-contracts/
+- https://upstox.com/developer/api-documentation/get-pc-option-chain/
+- https://upstox.com/developer/api-documentation/get-full-market-quote-v3/
+
+Add a valid market-data token:
+
+~~~env
+UPSTOX_ACCESS_TOKEN=YOUR_MARKET_DATA_TOKEN
+~~~
+
+This project never sends that token to a live order endpoint.
+
+### Upstox Sandbox — optional but recommended
+
+Docs:
+- https://upstox.com/developer/api-documentation/sandbox/
+- https://upstox.com/developer/api-documentation/v3/place-order/
+
+After creating a Sandbox App and token:
+
+~~~env
+PAPER_BROKER=upstox_sandbox
+UPSTOX_SANDBOX_TOKEN=YOUR_SANDBOX_TOKEN
+UPSTOX_SANDBOX_PRODUCT=I
+~~~
+
+Without sandbox:
+
+~~~env
+PAPER_BROKER=internal
+~~~
+
+The complete strategy still runs internally; only the external sandbox order mirror is skipped.
+
+## Setup
+
+You already cloned the repo:
+
+~~~bash
+git pull origin main
 cp .env.example .env
+~~~
 
+Edit .env once:
+
+~~~env
+TRADING_MODE=PAPER
+AUTO_TRADING_ENABLED=true
+CAPITAL=20000
+UPSTOX_ACCESS_TOKEN=...
+PAPER_BROKER=internal
+~~~
+
+Then run:
+
+~~~bash
 docker compose up --build
-```
+~~~
 
 Open:
-- Dashboard: `http://localhost:5173`
-- Backend: `http://localhost:8000`
-- Swagger API: `http://localhost:8000/docs`
-- Health: `http://localhost:8000/api/health`
 
-Stop:
+~~~text
+Dashboard: http://localhost:5173
+Swagger:   http://localhost:8000/docs
+Health:    http://localhost:8000/api/health
+~~~
 
-```bash
+After PAPER mode + market token are configured, normal scanning starts automatically with the backend.
+
+For future code updates:
+
+~~~bash
+git pull origin main
 docker compose down
-```
+docker compose up --build
+~~~
 
-Delete local PostgreSQL volume too:
+## Capital and quantity scaling
 
-```bash
-docker compose down -v
-```
+CAPITAL is the hard maximum paper allocation.
 
-# 2. Local run without Docker
+Defaults:
 
-## Backend
-
-Python 3.12 recommended.
-
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cd ..
-cp .env.example .env
-```
-
-For a simple local run, change in `.env`:
-
-```env
-DATABASE_URL=sqlite:///./apex.db
-```
-
-Then:
-
-```bash
-cd backend
-uvicorn app.main:app --reload --port 8000
-```
-
-## Frontend
-
-In another terminal:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`.
-
-# 3. `.env` explained
-
-Never commit `.env`.
-
-### App
-
-```env
-APP_NAME=APEX Algo AI
-APP_ENV=development
-CORS_ORIGINS_RAW=http://localhost:5173
-```
-
-### Database
-
-Docker:
-
-```env
-DATABASE_URL=postgresql+psycopg://apex:apex@db:5432/apex
-```
-
-Simple local development:
-
-```env
-DATABASE_URL=sqlite:///./apex.db
-```
-
-For production, replace username/password/database/host with strong private values.
-
-### Trading safety
-
-```env
-TRADING_MODE=OFF
+~~~env
 CAPITAL=20000
-MAX_RISK_PER_TRADE=200
-MAX_DAILY_LOSS=400
-MAX_WEEKLY_LOSS=800
-MAX_MONTHLY_DRAWDOWN=2000
-MAX_TRADES_PER_DAY=2
-MAX_CONCURRENT_POSITIONS=1
-ALLOW_LIVE_ORDERS=false
-```
+DYNAMIC_RISK_LIMITS=true
+RISK_PER_TRADE_PCT=1
+MAX_DAILY_LOSS_PCT=2
+MAX_WEEKLY_LOSS_PCT=4
+MAX_MONTHLY_DRAWDOWN_PCT=10
+~~~
 
-`ALLOW_LIVE_ORDERS=false` must stay false for this MVP. The code intentionally has no live-order endpoint.
+At ₹20,000 this is approximately:
 
-### Zerodha Kite Connect
+~~~text
+Risk / trade = ₹200
+Daily lock   = ₹400
+Weekly lock  = ₹800
+Monthly lock = ₹2,000
+~~~
 
-```env
-KITE_API_KEY=
-KITE_API_SECRET=
-KITE_ACCESS_TOKEN=
-```
+If CAPITAL becomes 30000, percentage budgets scale to approximately ₹300 / ₹600 / ₹1,200 / ₹3,000 and whole-lot quantity can increase automatically.
 
-Where they come from:
-1. Create a Kite Connect app from Zerodha's developer platform.
-2. Add the API key and API secret.
-3. Start backend.
-4. Open `GET /api/kite/login-url`.
-5. Open returned Zerodha login URL in your browser.
-6. After successful login, Zerodha redirects to your configured redirect URL with a `request_token`.
-7. Send that token to `POST /api/kite/session`:
+Quantity must satisfy all three:
 
-```json
-{
-  "request_token": "TOKEN_FROM_REDIRECT"
-}
-```
+~~~text
+risk budget
+AND premium cash budget (CAPITAL_USAGE_PCT)
+AND exchange lot size
+~~~
 
-8. The endpoint returns the session/access token. For development you may place the current access token in `.env` and restart.
-9. Check `GET /api/kite/profile`.
+If one valid lot does not fit, the result is NO TRADE. MIN_TRADING_CAPITAL blocks new entries below the configured minimum.
 
-Do not commit API key secrets or access tokens.
+## Strategy
 
-# 4. Trading flow in this MVP
+Approved variants:
 
-System starts in `OFF`.
+~~~text
+APEX_BREAKOUT_BALANCED
+APEX_BREAKOUT_FAST
+APEX_BREAKOUT_STABLE
+~~~
 
-```text
-OFF
-  |
-  | manual API/dashboard action
-  v
-PAPER
-  |
-  | paper order request
-  v
-Risk checks
-  |-- kill switch active? -> reject
-  |-- max trades/day reached? -> reject
-  |-- open-position limit reached? -> reject
-  |-- daily loss lock reached? -> reject
-  |-- valid whole-lot quantity? -> reject if invalid
-  |-- per-trade rupee risk fits? -> reject if not
-  v
-Paper Trade OPEN
-  |
-  | mark LTP
-  +--> <= stop   -> STOPPED
-  +--> >= target -> TARGET
-  +--> otherwise -> OPEN
-```
+Signals use:
+- fast/slow EMA trend
+- RSI momentum
+- breakout/breakdown
+- relative volume
+- candle direction
+- ATR volatility sanity check
 
-The project deliberately treats **NO TRADE** as valid behavior.
+Below SIGNAL_MIN_SCORE → NO TRADE.
+Bullish valid setup → CE.
+Bearish valid setup → PE.
 
-# 5. Try a paper trade
+No win rate is hard-coded or assumed.
 
-First put system in PAPER mode:
+## ATM / OTM decision
 
-```bash
-curl -X POST http://localhost:8000/api/system/mode \
-  -H 'Content-Type: application/json' \
-  -d '{"mode":"PAPER"}'
-```
+The selector considers ATM and up to MAX_OTM_STEPS near-OTM strikes and ranks them using:
+- delta proximity
+- bid/ask spread
+- volume
+- distance from spot
+- premium affordability
+- actual lot size from the instrument master
 
-Then create a paper option-premium trade:
+A cheaper OTM option can be selected when ATM is inefficient for the capital, but cheap illiquid/wide-spread contracts are rejected.
 
-```bash
-curl -X POST http://localhost:8000/api/paper/orders \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "symbol":"NIFTY26OCT25000CE",
-    "direction":"CE",
-    "entry":100,
-    "stop":98,
-    "target":106,
-    "lot_size":25,
-    "reason":"manual breakout test"
-  }'
-```
+## Adaptive learning
 
-The backend calculates the maximum whole-lot quantity allowed by `MAX_RISK_PER_TRADE` unless you explicitly provide a smaller valid whole-lot quantity.
+The learner is a bounded epsilon-greedy multi-armed bandit.
 
-Mark price for trade `1`:
+For each closed automated paper trade:
 
-```bash
-curl -X POST 'http://localhost:8000/api/paper/mark/1?ltp=106'
-```
+~~~text
+reward = realized P&L / initial rupee risk
+~~~
 
-List trades:
+The reward is clipped and updates only the strategy arm that generated that trade.
 
-```bash
-curl http://localhost:8000/api/trades
-```
+~~~env
+ADAPTIVE_LEARNING_ENABLED=true
+EXPLORATION_RATE=0.10
+LEARNING_RATE=0.08
+MINIMUM_LEARNING_TRADES=20
+~~~
 
-# 6. Kill switch
+Learning can select among approved strategy variants, but it cannot change:
+- kill switch
+- capital limits
+- daily/weekly/monthly locks
+- lot-size rules
+- trading hours
+- live-order authorization
+- core execution safety
 
-Activate immediately:
+## India market time behavior
 
-```bash
-curl -X POST http://localhost:8000/api/risk/kill-switch
-```
+NSE equity-derivatives regular trading currently opens at 09:15 IST. APEX waits until 09:20 by default.
 
-New paper trades are blocked.
+~~~env
+TRADE_START_TIME=09:20
+STOP_NEW_TRADE_TIME=15:00
+FORCE_EXIT_TIME=15:10
+~~~
 
-Reset manually:
+~~~text
+before 09:20 → no entry
+09:20–15:00  → strategy may enter
+after 15:00  → no new entry
+15:10+       → open paper trade time-exit
+weekend      → no entry
+stale data   → NO TRADE
+~~~
 
-```bash
-curl -X POST http://localhost:8000/api/risk/reset-kill-switch
-```
+On a holiday, missing/stale data also leads to NO TRADE.
 
-Reset intentionally returns the system to `OFF`, not PAPER.
+## Exit logic
 
-# 7. Tests
+~~~env
+OPTION_STOP_PCT=18
+REWARD_RISK_RATIO=1.8
+~~~
 
-```bash
+~~~text
+initial stop = configured % below option premium
+target       = risk distance × reward/risk ratio
+50% progress → move stop to breakeven
+75% progress → protect part of the move
+SL hit       → exit
+target hit   → exit
+15:10        → time exit
+~~~
+
+No martingale and no averaging down.
+
+## Performance
+
+Dashboard/API tracks:
+- trades / wins / losses
+- win rate
+- net P&L
+- average win/loss
+- expectancy
+- profit factor
+- max drawdown
+- day/week/month P&L
+- strategy Q-values and experiment counts
+
+Endpoints:
+
+~~~text
+GET  /api/system/status
+GET  /api/performance
+GET  /api/risk/status
+GET  /api/strategy/status
+GET  /api/trades
+POST /api/automation/run-once
+~~~
+
+## Tests
+
+~~~bash
 cd backend
 pytest -q
-```
+~~~
 
-# 8. Git / GitHub setup
+Current tests cover dynamic whole-lot sizing and a NO TRADE strategy case.
 
-Repository:
+## Current limitations
 
-```bash
-git clone https://github.com/lazyxevents/apex-algo-ai.git
-cd apex-algo-ai
-```
+This is an automated paper engine, not a proven profitable system.
 
-Recommended workflow:
+Still pending before any live phase:
+- long historical option backtests
+- out-of-sample and walk-forward validation
+- realistic fees/slippage calibration
+- exchange holiday calendar
+- WebSocket feed (current version polls)
+- news/event lockout
+- FinBERT/news layer
+- broker reconciliation
+- Zerodha live adapter
+- any live-order mode
 
-```bash
-git checkout -b develop
-git checkout -b feature/market-data
-# make changes
-git add .
-git commit -m "feat: add market data service"
-git push -u origin feature/market-data
-```
+A win rate after a small sample of paper trades is not statistically reliable.
 
-# 9. What is NOT faked / NOT implemented yet
+## Zerodha later
 
-This repository is a runnable foundation/MVP, not a claim that the entire production trading platform is finished.
+Kite placeholders remain, but current automation does not use Zerodha.
 
-Not fabricated here:
-- Historical expired-option data
-- Option-chain Greeks where no reliable data source is configured
-- FinBERT/news feed
-- Historical options backtester
-- Live WebSocket tick-to-candle pipeline
-- Automated strike selection
-- Automatic strategy signal generation
-- Partial fills / broker reconciliation
-- Weekly/monthly loss-window calculations beyond the stored configuration
-- Live broker order placement
+Recommended progression:
 
-Those belong to the next development phases and must be built/tested against real broker/data capabilities.
+~~~text
+paper automation
+→ historical option backtest
+→ out-of-sample / walk-forward
+→ extended paper validation
+→ restart/failure tests
+→ manual review
+→ separate limited live adapter
+~~~
 
-# 10. Recommended next implementation order
-
-```text
-1. Zerodha instrument sync
-2. KiteTicker live WebSocket service
-3. Candle builder + stale-data detector
-4. One deterministic strategy version (APEX_BREAKOUT_V1)
-5. Option contract selector
-6. Expanded risk engine (weekly/monthly/session locks)
-7. Realistic paper fill/slippage engine
-8. Restart recovery + broker reconciliation
-9. Historical data importer/backtester
-10. Dashboard scanner/options/backtest pages
-11. News/event filter
-12. Extended paper validation
-13. Only after validation: separately designed limited live adapter
-```
-
-# 11. Production/VPS outline
-
-For a VPS:
-
-```text
-Ubuntu VPS
-  -> Docker Engine
-  -> PostgreSQL private volume
-  -> FastAPI backend
-  -> React frontend/build
-  -> Nginx reverse proxy
-  -> HTTPS
-  -> monitoring + backups
-```
-
-Keep `.env` only on the server and never inside Git.
-
-# Important safety rule
-
-This project starts in `OFF`, supports `PAPER`, and deliberately does **not** expose live-order placement. A trading strategy should not be judged by win rate alone. Backtesting must include realistic fees/slippage and option-specific historical data; do not fabricate expired-option prices or treat index-only results as a valid options execution backtest.
+Live trading must remain explicit and separate; better paper results must never automatically enable it.
