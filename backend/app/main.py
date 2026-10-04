@@ -12,13 +12,26 @@ from .kite import kite_service
 from .strategy import adaptive_learner
 from .trading import trading_engine
 from .upstox import upstox_service
+from .yahoo import yahoo_service
+
+
+def get_market_service():
+    provider = settings.market_data_provider.strip().lower()
+    if provider in {"yfinance", "yahoo"}:
+        return yahoo_service
+    if provider == "upstox":
+        return upstox_service
+    raise RuntimeError(f"Unsupported MARKET_DATA_PROVIDER={settings.market_data_provider}")
+
+
+market_service = get_market_service()
 
 
 async def automation_loop():
     trading_engine.state.automation_running = True
     try:
         while True:
-            await asyncio.to_thread(trading_engine.automation_cycle, upstox_service)
+            await asyncio.to_thread(trading_engine.automation_cycle, market_service)
             await asyncio.sleep(max(15, settings.auto_scan_interval_seconds))
     finally:
         trading_engine.state.automation_running = False
@@ -36,7 +49,7 @@ async def lifespan(_: FastAPI):
         pass
 
 
-app = FastAPI(title="APEX Algo AI", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="APEX Algo AI", version="0.4.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -69,12 +82,13 @@ def health():
         "database": db_health(),
         "mode": trading_engine.state.mode,
         "automation": trading_engine.state.automation_running,
+        "marketProvider": market_service.status(),
     }
 
 
 @app.get("/api/system/status")
 def system_status():
-    return trading_engine.status(kite_service.connection_status(), upstox_service.status())
+    return trading_engine.status(kite_service.connection_status(), market_service.status())
 
 
 @app.post("/api/system/mode")
@@ -82,7 +96,7 @@ def set_mode(body: ModeRequest):
     flatten = []
     if body.mode == "KILLED":
         trading_engine.kill_switch("manual mode request")
-        flatten = trading_engine.force_flatten(upstox_service, "manual KILLED mode")
+        flatten = trading_engine.force_flatten(market_service, "manual KILLED mode")
     else:
         try:
             trading_engine.set_mode(body.mode)
@@ -94,13 +108,13 @@ def set_mode(body: ModeRequest):
 @app.post("/api/risk/kill-switch")
 def kill_switch():
     trading_engine.kill_switch("manual dashboard kill switch")
-    flatten = trading_engine.force_flatten(upstox_service, "manual kill switch")
+    flatten = trading_engine.force_flatten(market_service, "manual kill switch")
     return {"status": system_status(), "flatten": flatten}
 
 
 @app.post("/api/risk/flatten")
 def flatten_positions():
-    return {"flatten": trading_engine.force_flatten(upstox_service, "manual emergency flatten"), "status": system_status()}
+    return {"flatten": trading_engine.force_flatten(market_service, "manual emergency flatten"), "status": system_status()}
 
 
 @app.post("/api/risk/reset-kill-switch")
@@ -127,14 +141,14 @@ def strategy_status():
 @app.post("/api/research/run-once")
 def research_run_once():
     try:
-        return adaptive_learner.daily_research(upstox_service)
+        return adaptive_learner.daily_research(market_service)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/automation/run-once")
 def automation_run_once():
-    return trading_engine.automation_cycle(upstox_service)
+    return trading_engine.automation_cycle(market_service)
 
 
 @app.get("/api/trades")
