@@ -67,8 +67,18 @@ class Settings(BaseSettings):
     force_exit_retry_count: int = 3
     force_exit_retry_delay_seconds: float = 1.0
 
-    market_data_provider: str = "upstox"
+    market_data_provider: str = "yfinance"
     paper_broker: str = "internal"
+
+    yfinance_nifty_symbol: str = "^NSEI"
+    yfinance_banknifty_symbol: str = "^NSEBANK"
+    yfinance_sensex_symbol: str = "^BSESN"
+    yfinance_intraday_period: str = "5d"
+    yfinance_max_delay_minutes: int = 30
+    yfinance_synthetic_premium_pct: float = 0.50
+    yfinance_synthetic_delta: float = 0.45
+    yfinance_synthetic_lot_size: int = 1
+
     upstox_access_token: str = ""
     upstox_sandbox_token: str = ""
     upstox_sandbox_product: str = "I"
@@ -92,6 +102,13 @@ class Settings(BaseSettings):
 
     @property
     def underlying_keys(self) -> dict[str, str]:
+        provider = self.market_data_provider.strip().lower()
+        if provider in {"yfinance", "yahoo"}:
+            return {
+                "NIFTY": self.yfinance_nifty_symbol,
+                "BANKNIFTY": self.yfinance_banknifty_symbol,
+                "SENSEX": self.yfinance_sensex_symbol,
+            }
         return {
             "NIFTY": self.upstox_nifty_key,
             "BANKNIFTY": self.upstox_banknifty_key,
