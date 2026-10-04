@@ -60,6 +60,13 @@ class TradingEngine:
             value = value.replace(tzinfo=timezone.utc)
         return value.astimezone(IST)
 
+    @staticmethod
+    def _meta(trade: Trade) -> dict:
+        try:
+            return json.loads(trade.reason or "{}")
+        except json.JSONDecodeError:
+            return {"note": trade.reason}
+
     def _closed_rows(self, db) -> list[Trade]:
         return list(db.execute(select(Trade).where(Trade.status != "OPEN").order_by(Trade.id.asc())).scalars().all())
 
@@ -178,7 +185,9 @@ class TradingEngine:
                 peak = max(peak, equity)
                 max_dd = max(max_dd, peak - equity)
             return {
-                "trades": len(pnls), "wins": len(wins), "losses": len(losses),
+                "trades": len(pnls),
+                "wins": len(wins),
+                "losses": len(losses),
                 "winRate": round(len(wins) / len(pnls) * 100, 2) if pnls else 0.0,
                 "netPnl": round(sum(pnls), 2),
                 "averageWin": round(gross_win / len(wins), 2) if wins else 0.0,
@@ -272,11 +281,21 @@ class TradingEngine:
             if qty > allowed_qty:
                 raise ValueError(f"Risk/capital budget permits at most {allowed_qty} units")
             trade = Trade(
-                symbol=payload["symbol"], direction=payload["direction"], entry=entry, stop=stop,
-                target=target, quantity=qty, lot_size=lot_size, current_price=entry,
-                pnl=0, status="OPEN", reason=payload.get("reason", "{}"),
+                symbol=payload["symbol"],
+                direction=payload["direction"],
+                entry=entry,
+                stop=stop,
+                target=target,
+                quantity=qty,
+                lot_size=lot_size,
+                current_price=entry,
+                pnl=0,
+                status="OPEN",
+                reason=payload.get("reason", "{}"),
             )
-            db.add(trade); db.commit(); db.refresh(trade)
+            db.add(trade)
+            db.commit()
+            db.refresh(trade)
             self._audit("trade.opened", {"tradeId": trade.id, "symbol": trade.symbol, "qty": qty})
             return self._trade_dict(trade)
 
@@ -303,17 +322,26 @@ class TradingEngine:
             elif trade.current_price >= trade.target:
                 trade.status = "TARGET"
                 trade.closed_at = datetime.now(timezone.utc)
-            db.commit(); db.refresh(trade)
+            db.commit()
+            db.refresh(trade)
             if trade.status != "OPEN":
                 self._audit("trade.closed", {"tradeId": trade.id, "status": trade.status, "pnl": trade.pnl})
             return self._trade_dict(trade)
+
+    def _trade_ltp(self, provider, trade: Trade) -> float:
+        meta = self._meta(trade)
+        if meta.get("syntheticDemo"):
+            if not hasattr(provider, "synthetic_option_ltp"):
+                raise RuntimeError("Synthetic paper trade requires a synthetic-capable market provider")
+            return float(provider.synthetic_option_ltp(meta))
+        return float(provider.quote_ltp(trade.symbol))
 
     def _best_exit_price(self, provider, trade: Trade) -> tuple[float, bool, str | None]:
         last_error = None
         attempts = max(1, settings.force_exit_retry_count)
         for attempt in range(attempts):
             try:
-                return float(provider.quote_ltp(trade.symbol)), True, None
+                return self._trade_ltp(provider, trade), True, None
             except Exception as exc:
                 last_error = str(exc)
                 if attempt + 1 < attempts:
@@ -325,10 +353,20 @@ class TradingEngine:
             open_rows = self._open_rows(db)
         results = []
         for trade in open_rows:
-            price, fresh, quote_error = self._best_exit_price(provider, trade) if provider.market_ready else (float(trade.current_price or trade.entry), False, "market data unavailable")
+            price, fresh, quote_error = (
+                self._best_exit_price(provider, trade)
+                if provider.market_ready
+                else (float(trade.current_price or trade.entry), False, "market data unavailable")
+            )
             closed = self.mark_trade(trade.id, price, force_status="FORCED_EXIT")
             sandbox = provider.sandbox_exit_with_retry(trade.symbol, trade.quantity, f"apex-flat-{trade.id}")
-            item = {"trade": closed, "freshExitPrice": fresh, "quoteError": quote_error, "sandbox": sandbox, "reason": reason}
+            item = {
+                "trade": closed,
+                "freshExitPrice": fresh,
+                "quoteError": quote_error,
+                "sandbox": sandbox,
+                "reason": reason,
+            }
             results.append(item)
             self._audit("risk.force_flatten", item)
         return results
@@ -348,10 +386,14 @@ class TradingEngine:
             open_rows = self._open_rows(db)
         for trade in open_rows:
             try:
-                ltp = provider.quote_ltp(trade.symbol)
+                ltp = self._trade_ltp(provider, trade)
                 result = self.mark_trade(trade.id, ltp)
                 if result["status"] != "OPEN":
-                    sandbox = provider.sandbox_exit_with_retry(trade.symbol, trade.quantity, f"apex-exit-{trade.id}")
+                    sandbox = provider.sandbox_exit_with_retry(
+                        trade.symbol,
+                        trade.quantity,
+                        f"apex-exit-{trade.id}",
+                    )
                     actions.append({"exit": result, "sandbox": sandbox})
             except Exception as exc:
                 self._audit("trade.monitor_error", {"tradeId": trade.id, "error": str(exc)})
@@ -360,25 +402,54 @@ class TradingEngine:
     def _scan_one(self, provider, name: str, key: str, capital: float) -> dict:
         candles = provider.intraday_candles(key)
         if not provider.candles_fresh(candles):
-            return {"action": "NO_TRADE", "score": 0.0, "reason": "stale/missing market data", "index": name, "underlyingKey": key}
+            return {
+                "action": "NO_TRADE",
+                "score": 0.0,
+                "reason": "stale/missing market data",
+                "index": name,
+                "underlyingKey": key,
+            }
         context = market_context(candles)
         arm = adaptive_learner.choose_arm(context, capital)
         signal = evaluate_signal(candles, arm)
         signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name})
         return signal
 
+    def _real_option_candidate(self, provider, best: dict, deployable: float) -> tuple[dict | None, int, str | None]:
+        expiry = provider.nearest_expiry(best["underlyingKey"])
+        if not expiry:
+            return None, 0, None
+        chain = provider.option_chain(best["underlyingKey"], expiry)
+        option = select_option(chain, best["action"], best["underlyingPrice"], deployable)
+        if not option:
+            return None, 0, expiry
+        contracts = provider.option_contracts(best["underlyingKey"])
+        contract = next((x for x in contracts if x.get("instrument_key") == option["instrumentKey"]), None)
+        if not contract:
+            return None, 0, expiry
+        lot_size = int(contract.get("lot_size") or contract.get("minimum_lot") or 0)
+        return option, lot_size, expiry
+
     def automation_cycle(self, provider) -> dict:
         self.state.last_cycle_at = datetime.now(timezone.utc).isoformat()
         self.state.last_error = None
         phase = self._market_phase()
-        decision: dict = {"phase": phase, "action": "NO_TRADE"}
+        decision: dict = {"phase": phase, "action": "NO_TRADE", "provider": provider.status()}
         try:
             adaptive_learner.learn()
             now_ist = datetime.now(IST)
-            if provider.market_ready and now_ist.weekday() < 5 and now_ist.strftime("%H:%M") >= settings.daily_research_time:
+            if (
+                provider.market_ready
+                and now_ist.weekday() < 5
+                and now_ist.strftime("%H:%M") >= settings.daily_research_time
+            ):
                 decision["research"] = adaptive_learner.daily_research(provider)
 
-            exits = self._update_open_trades(provider, phase) if provider.market_ready or self.state.killed or phase["forceExit"] else []
+            exits = (
+                self._update_open_trades(provider, phase)
+                if provider.market_ready or self.state.killed or phase["forceExit"]
+                else []
+            )
             decision["exits"] = exits
 
             risk = self.risk_snapshot()
@@ -398,7 +469,7 @@ class TradingEngine:
                 self.state.last_decision = decision
                 return decision
             if not provider.market_ready:
-                decision["reason"] = "market data token missing"
+                decision["reason"] = "market data provider is not ready"
                 self.state.last_decision = decision
                 return decision
             if not phase["newTrades"]:
@@ -412,13 +483,22 @@ class TradingEngine:
                 deployable = capital * settings.capital_usage_pct / 100
 
             ranked = []
-            with ThreadPoolExecutor(max_workers=len(settings.underlying_keys)) as pool:
-                futures = {pool.submit(self._scan_one, provider, name, key, capital): name for name, key in settings.underlying_keys.items()}
+            keys = settings.underlying_keys
+            with ThreadPoolExecutor(max_workers=len(keys)) as pool:
+                futures = {
+                    pool.submit(self._scan_one, provider, name, key, capital): name
+                    for name, key in keys.items()
+                }
                 for future in as_completed(futures):
                     try:
                         ranked.append(future.result())
                     except Exception as exc:
-                        ranked.append({"action": "NO_TRADE", "score": 0.0, "reason": f"scan failure: {exc}", "index": futures[future]})
+                        ranked.append({
+                            "action": "NO_TRADE",
+                            "score": 0.0,
+                            "reason": f"scan failure: {exc}",
+                            "index": futures[future],
+                        })
             ranked.sort(key=lambda x: x.get("score", 0), reverse=True)
             decision["signals"] = ranked
             best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
@@ -427,29 +507,26 @@ class TradingEngine:
                 self.state.last_decision = decision
                 return decision
 
-            expiry = provider.nearest_expiry(best["underlyingKey"])
-            if not expiry:
-                decision["reason"] = "no current option expiry available"
-                self.state.last_decision = decision
-                return decision
-            chain = provider.option_chain(best["underlyingKey"], expiry)
-            option = select_option(chain, best["action"], best["underlyingPrice"], deployable)
-            if not option:
-                decision["reason"] = "no liquid/affordable option contract passed filters"
-                self.state.last_decision = decision
-                return decision
-
-            contracts = provider.option_contracts(best["underlyingKey"])
-            contract = next((x for x in contracts if x.get("instrument_key") == option["instrumentKey"]), None)
-            if not contract:
-                decision["reason"] = "selected contract missing from instrument master"
-                self.state.last_decision = decision
-                return decision
-            lot_size = int(contract.get("lot_size") or contract.get("minimum_lot") or 0)
-            if lot_size <= 0:
-                decision["reason"] = "invalid contract lot size"
-                self.state.last_decision = decision
-                return decision
+            synthetic_demo = not bool(getattr(provider, "supports_option_chain", True))
+            expiry = None
+            if synthetic_demo:
+                option = provider.synthetic_option_candidate(
+                    best["index"],
+                    best["underlyingKey"],
+                    best["action"],
+                    best["underlyingPrice"],
+                )
+                lot_size = int(option.get("lotSize") or 1)
+            else:
+                option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
+                if not option:
+                    decision["reason"] = "no liquid/affordable option contract passed filters"
+                    self.state.last_decision = decision
+                    return decision
+                if lot_size <= 0:
+                    decision["reason"] = "selected option has invalid/missing exchange lot size"
+                    self.state.last_decision = decision
+                    return decision
 
             entry = float(option["ltp"])
             stop_distance = max(entry * settings.option_stop_pct / 100, 0.05)
@@ -459,7 +536,7 @@ class TradingEngine:
                 qty = self._quantity_for_risk(entry, stop, lot_size, db)
                 risk_limit = self._limits(db)["perTrade"]
             if qty <= 0:
-                decision["reason"] = "one valid lot does not fit capital/risk budget"
+                decision["reason"] = "one valid paper unit/lot does not fit capital/risk budget"
                 self.state.last_decision = decision
                 return decision
 
@@ -473,6 +550,7 @@ class TradingEngine:
                 "contextKey": context.get("key", "UNKNOWN"),
                 "context": context,
                 "patterns": best.get("patterns"),
+                "direction": best["action"],
                 "expiry": expiry,
                 "strike": option["strike"],
                 "selectionScore": option["selectionScore"],
@@ -481,15 +559,42 @@ class TradingEngine:
                 "initialRisk": initial_risk,
                 "riskLimit": round(risk_limit, 2),
                 "capitalAtEntry": round(capital, 2),
+                "syntheticDemo": synthetic_demo,
             }
-            sandbox = provider.place_sandbox_order(option["instrumentKey"], qty, "BUY", f"apex-entry-{best['index'].lower()}")
+            if synthetic_demo:
+                meta.update({
+                    "underlyingEntry": float(option["underlyingEntry"]),
+                    "syntheticEntryPremium": entry,
+                    "syntheticModel": "entryPremium + directional underlying move × fixed delta",
+                    "syntheticWarning": "Strategy demo only; not real NSE option premium, Greeks, spread or exchange lot execution.",
+                })
+
+            sandbox = provider.place_sandbox_order(
+                option["instrumentKey"],
+                qty,
+                "BUY",
+                f"apex-entry-{best['index'].lower()}",
+            )
             meta["sandboxEntryOrderId"] = sandbox.get("orderId")
             trade = self.open_paper_trade({
-                "symbol": option["instrumentKey"], "direction": best["action"], "entry": entry,
-                "stop": stop, "target": target, "lot_size": lot_size, "quantity": qty,
+                "symbol": option["instrumentKey"],
+                "direction": best["action"],
+                "entry": entry,
+                "stop": stop,
+                "target": target,
+                "lot_size": lot_size,
+                "quantity": qty,
                 "reason": json.dumps(meta),
             })
-            decision.update({"action": best["action"], "trade": trade, "option": option, "sandbox": sandbox, "meta": meta})
+            decision.update({
+                "action": best["action"],
+                "trade": trade,
+                "option": option,
+                "sandbox": sandbox,
+                "meta": meta,
+            })
+            if synthetic_demo:
+                decision["warning"] = "Yahoo demo uses synthetic option premium and unit sizing; do not interpret as real options execution."
             self._audit("automation.trade_decision", decision)
         except ValueError as exc:
             decision["reason"] = str(exc)
@@ -507,9 +612,18 @@ class TradingEngine:
         except json.JSONDecodeError:
             meta = {"note": t.reason}
         return {
-            "id": t.id, "symbol": t.symbol, "direction": t.direction, "entry": t.entry,
-            "stop": t.stop, "target": t.target, "quantity": t.quantity, "lotSize": t.lot_size,
-            "currentPrice": t.current_price, "pnl": t.pnl, "status": t.status, "meta": meta,
+            "id": t.id,
+            "symbol": t.symbol,
+            "direction": t.direction,
+            "entry": t.entry,
+            "stop": t.stop,
+            "target": t.target,
+            "quantity": t.quantity,
+            "lotSize": t.lot_size,
+            "currentPrice": t.current_price,
+            "pnl": t.pnl,
+            "status": t.status,
+            "meta": meta,
             "openedAt": t.opened_at.isoformat() if t.opened_at else None,
             "closedAt": t.closed_at.isoformat() if t.closed_at else None,
         }
