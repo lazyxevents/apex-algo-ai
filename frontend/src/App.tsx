@@ -32,6 +32,9 @@ export default function App() {
   const learning = status.learning || {}
   const mt = r.monthlyTarget || {}
   const researchInfo = learning.latestResearch || {}
+  const market = status.market || {}
+  const providerReady = market.marketDataConfigured !== false
+
   return <main className="wrap">
     <header><div><h1>APEX Algo AI</h1><p>Context-aware Indian index options paper trading</p></div><b className={`mode ${status.mode}`}>{status.mode}</b></header>
 
@@ -53,14 +56,21 @@ export default function App() {
 
     <section className="panel"><h2>Automation & Safety</h2>
       <p>Entry window: <b>{status.automation.tradeWindow}</b> • Forced exit: <b>{status.automation.forceExit}</b> • Research: <b>{status.automation.researchTime}</b></p>
-      <p>Loop: <b>{status.automation.running ? 'Running' : 'Stopped'}</b> • Market data: <b>{status.market?.marketDataConfigured ? 'Configured' : 'Token missing'}</b> • Paper broker: <b>{status.market?.paperBroker}</b></p>
+      <p>
+        Loop: <b>{status.automation.running ? 'Running' : 'Stopped'}</b>
+        {' '}• Provider: <b>{market.provider || 'unknown'}</b>
+        {' '}• Market data: <b>{providerReady ? 'Ready' : 'Not ready'}</b>
+        {' '}• Token required: <b>{market.tokenRequired ? 'Yes' : 'No'}</b>
+        {' '}• Paper broker: <b>{market.paperBroker}</b>
+      </p>
+      {market.syntheticPaper && <p className="muted"><b>Demo mode:</b> Yahoo supplies index candles; option premium/lot execution is synthetic and is not a real NSE option-chain simulation.</p>}
       <div className="actions">
         <button onClick={()=>mode('OFF')}>OFF</button><button onClick={()=>mode('PAPER')}>PAPER</button>
         <button onClick={()=>mode('SAFE')}>SAFE</button><button onClick={scan}>Run Scan Now</button>
         <button onClick={research}>Run Research</button><button onClick={flatten}>Flatten</button>
         <button className="danger" onClick={kill}>KILL + FLATTEN</button><button onClick={reset}>Reset Kill → OFF</button>
       </div>
-      <p className="muted">Kill and scheduled exits close internal paper positions even if fresh quote retrieval fails; sandbox exit attempts are retried. Live trading remains disabled.</p>
+      <p className="muted">Kill and scheduled exits close internal paper positions even if fresh quote retrieval fails. Live trading remains disabled.</p>
     </section>
 
     <section className="grid">
@@ -81,7 +91,7 @@ export default function App() {
     <section className="panel"><h2>Last Decision</h2><pre>{JSON.stringify(status.automation.lastDecision || {action:'waiting'}, null, 2)}</pre></section>
 
     <section className="panel"><h2>Paper Trades</h2>
-      {trades.length===0 ? <p>No paper trades yet. Configure market data and switch to PAPER.</p> :
+      {trades.length===0 ? <p>No paper trades yet. Switch to PAPER and keep market data available.</p> :
       <div className="table"><div className="row head"><span>Instrument</span><span>Dir</span><span>Qty</span><span>Status</span><span>P&L</span></div>
       {trades.map(t=><div className="row" key={t.id}><span>{t.symbol}</span><span>{t.direction}</span><span>{t.quantity}</span><span>{t.status}</span><span>₹{t.pnl}</span></div>)}</div>}
     </section>
