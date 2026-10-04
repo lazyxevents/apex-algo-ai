@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core import init_db
+from app.core import init_db, settings
 from app.strategy import ARMS, detect_candlestick_patterns, evaluate_signal, market_context
 from app.trading import TradingEngine
 
@@ -40,3 +40,9 @@ def test_market_context_has_key():
         for i in range(40)
     ]
     assert "|" in market_context(candles)["key"]
+
+
+def test_default_demo_provider_needs_no_broker_token():
+    assert settings.market_data_provider.lower() in {"yfinance", "yahoo"}
+    assert settings.underlying_keys["NIFTY"] == settings.yfinance_nifty_symbol
+    assert settings.yfinance_nifty_symbol == "^NSEI"
