@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import floor
 from time import sleep
+from threading import Lock
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -20,7 +21,9 @@ class RuntimeState:
     mode: str = settings.trading_mode
     killed: bool = False
     automation_running: bool = False
+    position_monitor_running: bool = False
     last_cycle_at: str | None = None
+    last_position_update_at: str | None = None
     last_decision: dict | None = None
     last_error: str | None = None
 
@@ -28,6 +31,7 @@ class RuntimeState:
 class TradingEngine:
     def __init__(self):
         self.state = RuntimeState()
+        self._position_lock = Lock()
 
     def _audit(self, event: str, detail: str | dict) -> None:
         payload = detail if isinstance(detail, str) else json.dumps(detail, default=str)
@@ -399,6 +403,12 @@ class TradingEngine:
                 self._audit("trade.monitor_error", {"tradeId": trade.id, "error": str(exc)})
         return actions
 
+    def monitor_open_positions(self, provider, phase: dict | None = None) -> list[dict]:
+        """Refresh open paper positions without running a full strategy scan."""
+        with self._position_lock:
+            self.state.last_position_update_at = datetime.now(timezone.utc).isoformat()
+            return self._update_open_trades(provider, phase or self._market_phase())
+
     def _scan_one(self, provider, name: str, key: str, capital: float) -> dict:
         candles = provider.intraday_candles(key)
         if not provider.candles_fresh(candles):
@@ -446,7 +456,7 @@ class TradingEngine:
                 decision["research"] = adaptive_learner.daily_research(provider)
 
             exits = (
-                self._update_open_trades(provider, phase)
+                self.monitor_open_positions(provider, phase)
                 if provider.market_ready or self.state.killed or phase["forceExit"]
                 else []
             )
@@ -638,6 +648,11 @@ class TradingEngine:
                 "enabled": settings.auto_trading_enabled,
                 "running": self.state.automation_running,
                 "lastCycleAt": self.state.last_cycle_at,
+                "positionMonitor": {
+                    "running": self.state.position_monitor_running,
+                    "intervalSeconds": settings.position_monitor_interval_seconds,
+                    "lastUpdateAt": self.state.last_position_update_at,
+                },
                 "lastDecision": self.state.last_decision,
                 "lastError": self.state.last_error,
                 "tradeWindow": f"{settings.trade_start_time}-{settings.stop_new_trade_time}",
