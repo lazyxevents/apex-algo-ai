@@ -11,6 +11,8 @@ class UpstoxService:
     api_v2 = "https://api.upstox.com/v2"
     api_v3 = "https://api.upstox.com/v3"
     sandbox_v3 = "https://api-sandbox.upstox.com/v3"
+    supports_option_chain = True
+    synthetic_paper = False
 
     def __init__(self):
         self._contracts_cache: dict[str, tuple[date, list[dict]]] = {}
@@ -34,6 +36,9 @@ class UpstoxService:
         return {
             "provider": "upstox",
             "marketDataConfigured": self.market_ready,
+            "tokenRequired": True,
+            "supportsOptionChain": True,
+            "syntheticPaper": False,
             "sandboxConfigured": self.sandbox_ready,
             "paperBroker": settings.paper_broker,
         }
