@@ -37,19 +37,35 @@ async def automation_loop():
         trading_engine.state.automation_running = False
 
 
+async def position_monitor_loop():
+    trading_engine.state.position_monitor_running = True
+    try:
+        while True:
+            try:
+                await asyncio.to_thread(trading_engine.monitor_open_positions, market_service)
+            except Exception as exc:
+                trading_engine.state.last_error = f"position monitor: {exc}"
+            await asyncio.sleep(max(1.0, settings.position_monitor_interval_seconds))
+    finally:
+        trading_engine.state.position_monitor_running = False
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    task = asyncio.create_task(automation_loop())
+    automation_task = asyncio.create_task(automation_loop())
+    position_task = asyncio.create_task(position_monitor_loop())
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    automation_task.cancel()
+    position_task.cancel()
+    for task in (automation_task, position_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
-app = FastAPI(title="APEX Algo AI", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="APEX Algo AI", version="0.5.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
