@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     trading_mode: str = "OFF"
     auto_trading_enabled: bool = True
     auto_scan_interval_seconds: int = 30
+    position_monitor_interval_seconds: float = 2.0
     timezone: str = "Asia/Kolkata"
     trade_start_time: str = "09:20"
     stop_new_trade_time: str = "15:00"
