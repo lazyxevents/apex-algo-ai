@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from math import isfinite
 from zoneinfo import ZoneInfo
 
 import yfinance as yf
@@ -54,11 +55,12 @@ class YahooFinanceService:
                 high = float(row["High"])
                 low = float(row["Low"])
                 close = float(row["Close"])
-                volume = float(row.get("Volume", 0) or 0)
+                raw_volume = float(row.get("Volume", 0) or 0)
             except (TypeError, ValueError, KeyError):
                 continue
-            if min(open_, high, low, close) <= 0:
+            if not all(isfinite(v) and v > 0 for v in (open_, high, low, close)):
                 continue
+            volume = raw_volume if isfinite(raw_volume) and raw_volume > 0 else 0.0
             rows.append({
                 "timestamp": dt.isoformat(),
                 "open": open_,
@@ -81,7 +83,6 @@ class YahooFinanceService:
         return self._frame_to_candles(frame)
 
     def historical_candles(self, instrument_key: str, from_date: date, to_date: date) -> list[dict]:
-        # yfinance end date is exclusive, hence +1 day.
         end = to_date + timedelta(days=1)
         frame = yf.Ticker(instrument_key).history(
             start=from_date.isoformat(),
