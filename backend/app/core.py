@@ -100,6 +100,11 @@ class Settings(BaseSettings):
     news_query_limit: int = 6
     news_results_per_query: int = 5
 
+    learning_worker_enabled: bool = True
+    learning_worker_interval_minutes: int = 60
+    learning_worker_daily_hours: int = 15
+    learning_worker_max_sources: int = 120
+
     upstox_access_token: str = ""
     upstox_sandbox_token: str = ""
     upstox_sandbox_product: str = "I"
