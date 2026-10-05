@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
 from .llm_research import ollama_research
+from .learning_worker import learning_worker
 from .market_research import build_market_research
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
@@ -721,6 +722,7 @@ class TradingEngine:
             "risk": self.risk_snapshot(),
             "performance": self.performance_snapshot(),
             "learning": adaptive_learner.snapshot(),
+            "learningWorker": learning_worker.snapshot(),
         }
 
 
