@@ -165,7 +165,7 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from .models import AuditLog, ResearchRun, StrategyState, Trade  # noqa: F401
+    from .models import AuditLog, LearningSample, ModelEvaluation, ResearchRun, StrategyState, Trade  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
