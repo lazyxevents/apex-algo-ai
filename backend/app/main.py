@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .core import db_health, init_db, settings
 from .kite import kite_service
+from .learning_worker import learning_worker
 from .strategy import adaptive_learner
 from .trading import trading_engine
 from .upstox import upstox_service
@@ -37,6 +38,12 @@ async def automation_loop():
         trading_engine.state.automation_running = False
 
 
+async def learning_loop():
+    while True:
+        await asyncio.to_thread(learning_worker.run_cycle, market_service)
+        await asyncio.sleep(max(300, settings.learning_worker_interval_minutes * 60))
+
+
 async def position_monitor_loop():
     trading_engine.state.position_monitor_running = True
     try:
@@ -55,17 +62,22 @@ async def lifespan(_: FastAPI):
     init_db()
     automation_task = asyncio.create_task(automation_loop())
     position_task = asyncio.create_task(position_monitor_loop())
+    learning_task = asyncio.create_task(learning_loop()) if settings.learning_worker_enabled else None
     yield
     automation_task.cancel()
     position_task.cancel()
-    for task in (automation_task, position_task):
+    if learning_task:
+        learning_task.cancel()
+    for task in (automation_task, position_task, learning_task):
+        if task is None:
+            continue
         try:
             await task
         except asyncio.CancelledError:
             pass
 
 
-app = FastAPI(title="APEX Algo AI", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="APEX Algo AI", version="0.6.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -152,6 +164,16 @@ def performance():
 @app.get("/api/strategy/status")
 def strategy_status():
     return adaptive_learner.snapshot()
+
+
+@app.get("/api/learning/status")
+def learning_status():
+    return learning_worker.snapshot()
+
+
+@app.post("/api/learning/run-once")
+def learning_run_once():
+    return learning_worker.run_cycle(market_service, force=True)
 
 
 @app.post("/api/research/run-once")
