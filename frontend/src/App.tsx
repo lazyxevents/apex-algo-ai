@@ -177,6 +177,7 @@ export default function App() {
   const marketResearch = status.marketResearch || {}
   const researchMarkets = marketResearch.analytics?.markets || {}
   const positionMonitor = automation.positionMonitor || {}
+  const worker = status.learningWorker || {}
   const providerReady = market.marketDataConfigured !== false
   const killed = Boolean(status.killSwitch || r.killSwitch)
   const phase = automation.lastDecision?.phase || {}
@@ -260,6 +261,28 @@ export default function App() {
       </div>
       {marketResearch.llm?.summary && <p className="panel-note"><b>Ollama summary:</b> {marketResearch.llm.summary}</p>}
       <p className="panel-note">News/LLM research stays optional and does not place orders or override hard risk controls.</p>
+    </section>
+
+    <section className="panel learning-panel">
+      <div className="section-head compact">
+        <div><div className="eyebrow">APEX LEARNING ENGINE</div><h2>Research → Patterns → Backtest → Candidate Model</h2><p>Live worker visibility. Research cannot bypass hard risk controls or place orders directly.</p></div>
+        <span className={`badge subtle ${worker.running ? 'worker-live' : ''}`}>{worker.running ? 'LEARNING NOW' : (worker.stage || 'WAITING')}</span>
+      </div>
+      <div className="learning-grid">
+        <SystemItem label="Worker" value={worker.enabled ? 'Enabled' : 'Disabled'} good={worker.enabled} />
+        <SystemItem label="Stage" value={worker.stage || 'idle'} />
+        <SystemItem label="Cycles today" value={worker.cyclesToday ?? 0} />
+        <SystemItem label="Runtime today" value={`${worker.researchHoursToday ?? 0}h / ${worker.dailyHourBudget ?? 15}h`} />
+        <SystemItem label="Sources reviewed" value={worker.sourcesReviewed ?? 0} />
+        <SystemItem label="Patterns found" value={worker.patternsDetected ?? 0} />
+        <SystemItem label="Hypotheses" value={worker.hypothesesTested ?? 0} />
+        <SystemItem label="Backtests" value={worker.backtestsRun ?? 0} />
+        <SystemItem label="Candidate score" value={worker.candidateScore != null ? Number(worker.candidateScore).toFixed(2) : '—'} />
+      </div>
+      <div className="worker-status"><b>{worker.currentTask || 'Waiting for next research cycle'}</b><span>Heartbeat {formatDateTime(worker.lastHeartbeatAt)}</span></div>
+      {worker.lastSummary && <p className="panel-note">{worker.lastSummary}</p>}
+      {worker.lastError && <p className="panel-note negative"><b>Safe failure:</b> {worker.lastError}</p>}
+      <div className="actions"><ActionButton label="Run Learning Cycle" disabled={Boolean(busy || !providerReady)} tip="Run one bounded research, pattern and backtest cycle now." onClick={() => runAction('learning', 'Learning cycle completed.', () => fetchJson('/api/learning/run-once', {method:'POST'}))} /></div>
     </section>
 
     <section className="panel positions-panel">
