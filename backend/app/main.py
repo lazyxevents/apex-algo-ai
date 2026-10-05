@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .core import db_health, init_db, settings
+from .dataset_model import dataset_model_service
 from .kite import kite_service
 from .learning_worker import learning_worker
 from .strategy import adaptive_learner
@@ -174,6 +175,16 @@ def learning_status():
 @app.post("/api/learning/run-once")
 def learning_run_once():
     return learning_worker.run_cycle(market_service, force=True)
+
+
+@app.get("/api/learning/dataset")
+def learning_dataset():
+    return dataset_model_service.snapshot()
+
+
+@app.post("/api/learning/evaluate-candidate")
+def learning_evaluate_candidate():
+    return dataset_model_service.evaluate_candidate()
 
 
 @app.post("/api/research/run-once")
