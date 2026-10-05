@@ -61,6 +61,8 @@ class Settings(BaseSettings):
 
     daily_research_enabled: bool = True
     daily_research_time: str = "15:45"
+    premarket_research_enabled: bool = True
+    premarket_research_time: str = "08:00"
     backtest_lookback_days: int = 30
     backtest_max_hold_bars: int = 6
     backtest_atr_stop_mult: float = 1.0
@@ -79,6 +81,24 @@ class Settings(BaseSettings):
     yfinance_synthetic_premium_pct: float = 0.50
     yfinance_synthetic_delta: float = 0.45
     yfinance_synthetic_lot_size: int = 1
+
+    synthetic_roundtrip_cost_pct: float = 0.20
+    option_brokerage_per_order: float = 20.0
+    option_stt_sell_pct: float = 0.15
+    nse_option_transaction_pct: float = 0.03553
+    bse_option_transaction_pct: float = 0.0325
+    sebi_turnover_pct: float = 0.0001
+    option_stamp_buy_pct: float = 0.003
+    gst_pct: float = 18.0
+
+    ollama_enabled: bool = False
+    ollama_base_url: str = ""
+    ollama_model: str = "llama3.1:8b"
+    ollama_api_key: str = ""
+    ollama_timeout_seconds: float = 12.0
+    ollama_web_search_enabled: bool = False
+    news_query_limit: int = 6
+    news_results_per_query: int = 5
 
     upstox_access_token: str = ""
     upstox_sandbox_token: str = ""
