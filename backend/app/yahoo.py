@@ -33,12 +33,16 @@ class YahooFinanceService:
         }
 
     @staticmethod
-    def _interval() -> str:
-        minutes = int(settings.candle_interval_minutes)
+    def _interval_for_minutes(minutes: int) -> str:
+        minutes = int(minutes)
         allowed = {1, 2, 5, 15, 30, 60, 90}
         if minutes not in allowed:
             raise ValueError(f"Unsupported Yahoo candle interval: {minutes}m")
         return f"{minutes}m"
+
+    @classmethod
+    def _interval(cls) -> str:
+        return cls._interval_for_minutes(settings.candle_interval_minutes)
 
     @staticmethod
     def _frame_to_candles(frame) -> list[dict]:
@@ -73,9 +77,13 @@ class YahooFinanceService:
         return rows
 
     def intraday_candles(self, instrument_key: str) -> list[dict]:
+        return self.intraday_candles_interval(instrument_key, settings.candle_interval_minutes)
+
+    def intraday_candles_interval(self, instrument_key: str, minutes: int) -> list[dict]:
+        period = "5d" if int(minutes) <= 5 else settings.yfinance_intraday_period
         frame = yf.Ticker(instrument_key).history(
-            period=settings.yfinance_intraday_period,
-            interval=self._interval(),
+            period=period,
+            interval=self._interval_for_minutes(minutes),
             auto_adjust=False,
             actions=False,
             prepost=False,
