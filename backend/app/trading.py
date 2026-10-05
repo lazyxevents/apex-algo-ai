@@ -10,7 +10,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
+from .llm_research import ollama_research
+from .market_research import build_market_research
 from .models import AuditLog, Trade
+from .paper_costs import estimate_paper_costs
 from .strategy import adaptive_learner, evaluate_signal, market_context, select_option
 
 IST = ZoneInfo(settings.timezone)
@@ -24,6 +27,8 @@ class RuntimeState:
     position_monitor_running: bool = False
     last_cycle_at: str | None = None
     last_position_update_at: str | None = None
+    last_premarket_date: str | None = None
+    market_research: dict | None = None
     last_decision: dict | None = None
     last_error: str | None = None
 
@@ -309,7 +314,21 @@ class TradingEngine:
             if not trade or trade.status != "OPEN":
                 raise ValueError("Open trade not found")
             trade.current_price = float(ltp)
-            trade.pnl = round((trade.current_price - trade.entry) * trade.quantity, 2)
+            meta = self._meta(trade)
+            gross_pnl = (trade.current_price - trade.entry) * trade.quantity
+            exchange = "BSE" if str(meta.get("index") or "").upper() == "SENSEX" else "NSE"
+            costs = estimate_paper_costs(
+                trade.entry,
+                trade.current_price,
+                trade.quantity,
+                exchange=exchange,
+                synthetic=bool(meta.get("syntheticDemo")),
+            )
+            trade.pnl = round(gross_pnl - float(costs["total"]), 2)
+            meta["grossPnl"] = round(gross_pnl, 2)
+            meta["estimatedCharges"] = float(costs["total"])
+            meta["costModel"] = costs
+            trade.reason = json.dumps(meta, default=str)
             reward_distance = max(0.01, trade.target - trade.entry)
             progress = (trade.current_price - trade.entry) / reward_distance
             if progress >= 0.75:
@@ -409,6 +428,30 @@ class TradingEngine:
             self.state.last_position_update_at = datetime.now(timezone.utc).isoformat()
             return self._update_open_trades(provider, phase or self._market_phase())
 
+    def run_premarket_research(self, provider, force: bool = False) -> dict:
+        today = datetime.now(IST).date().isoformat()
+        if not force and self.state.last_premarket_date == today and self.state.market_research:
+            return self.state.market_research
+        if not provider.market_ready:
+            result = {"status": "market_data_unavailable", "runDate": today}
+            self.state.market_research = result
+            return result
+        analytics = build_market_research(provider)
+        news = ollama_research.news_research()
+        llm_summary = ollama_research.summarize(analytics, news)
+        result = {
+            "status": "completed",
+            "runDate": today,
+            "scheduledTime": settings.premarket_research_time,
+            "analytics": analytics,
+            "news": news,
+            "llm": llm_summary,
+        }
+        self.state.last_premarket_date = today
+        self.state.market_research = result
+        self._audit("research.premarket", result)
+        return result
+
     def _scan_one(self, provider, name: str, key: str, capital: float) -> dict:
         candles = provider.intraday_candles(key)
         if not provider.candles_fresh(candles):
@@ -448,6 +491,15 @@ class TradingEngine:
         try:
             adaptive_learner.learn()
             now_ist = datetime.now(IST)
+            if (
+                settings.premarket_research_enabled
+                and provider.market_ready
+                and now_ist.weekday() < 5
+                and now_ist.strftime("%H:%M") >= settings.premarket_research_time
+                and self.state.last_premarket_date != now_ist.date().isoformat()
+            ):
+                decision["premarketResearch"] = self.run_premarket_research(provider)
+
             if (
                 provider.market_ready
                 and now_ist.weekday() < 5
@@ -632,6 +684,9 @@ class TradingEngine:
             "lotSize": t.lot_size,
             "currentPrice": t.current_price,
             "pnl": t.pnl,
+            "grossPnl": meta.get("grossPnl", t.pnl),
+            "estimatedCharges": meta.get("estimatedCharges", 0.0),
+            "costModel": meta.get("costModel", {}),
             "status": t.status,
             "meta": meta,
             "openedAt": t.opened_at.isoformat() if t.opened_at else None,
@@ -658,7 +713,9 @@ class TradingEngine:
                 "tradeWindow": f"{settings.trade_start_time}-{settings.stop_new_trade_time}",
                 "forceExit": settings.force_exit_time,
                 "researchTime": settings.daily_research_time,
+                "premarketResearchTime": settings.premarket_research_time,
             },
+            "marketResearch": self.state.market_research or {},
             "broker": broker,
             "market": market or {},
             "risk": self.risk_snapshot(),
