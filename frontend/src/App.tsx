@@ -174,6 +174,8 @@ export default function App() {
   const mt = r.monthlyTarget || {}
   const market = status.market || {}
   const automation = status.automation || {}
+  const marketResearch = status.marketResearch || {}
+  const researchMarkets = marketResearch.analytics?.markets || {}
   const positionMonitor = automation.positionMonitor || {}
   const providerReady = market.marketDataConfigured !== false
   const killed = Boolean(status.killSwitch || r.killSwitch)
@@ -228,6 +230,38 @@ export default function App() {
       <Metric title="Max Drawdown" value={money(p.maxDrawdown)} sub={`Monthly cap ${money(r.maxMonthlyDrawdown)}`} tone={Number(p.maxDrawdown) > 0 ? 'negative' : 'neutral'} />
     </section>
 
+
+    <section className="panel">
+      <div className="section-head compact">
+        <div>
+          <div className="eyebrow">MARKET RESEARCH</div>
+          <h2>1m / 5m / 15m Structure Snapshot</h2>
+          <p>Research-only analytics: trend, support/resistance, BOS/CHOCH proxy, liquidity sweep, FVG and fake-breakout labels. Scheduled from <b>{automation.premarketResearchTime || '08:00'} IST</b>.</p>
+        </div>
+        <span className="badge subtle">{marketResearch.status || 'waiting'}</span>
+      </div>
+      <div className="system-strip">
+        {['NIFTY','BANKNIFTY','SENSEX'].map(name => {
+          const m = researchMarkets[name] || {}
+          const f1 = m.frames?.['1m'] || {}
+          const f5 = m.frames?.['5m'] || {}
+          const f15 = m.frames?.['15m'] || {}
+          return <div className="system-item" key={name}>
+            <small>{name}</small>
+            <b>{m.state || 'WAITING'}</b>
+            <span style={{display:'block',marginTop:6,fontSize:10,color:'#71849a'}}>
+              1m {f1.trend || '—'} • 5m {f5.trend || '—'} • 15m {f15.trend || '—'}
+            </span>
+            <span style={{display:'block',marginTop:4,fontSize:10,color:'#71849a'}}>
+              S {f5.structure?.levels?.support ?? '—'} • R {f5.structure?.levels?.resistance ?? '—'}
+            </span>
+          </div>
+        })}
+      </div>
+      {marketResearch.llm?.summary && <p className="panel-note"><b>Ollama summary:</b> {marketResearch.llm.summary}</p>}
+      <p className="panel-note">News/LLM research stays optional and does not place orders or override hard risk controls.</p>
+    </section>
+
     <section className="panel positions-panel">
       <div className="section-head">
         <div>
@@ -249,7 +283,7 @@ export default function App() {
       <div className="table-scroll">
         <table className="trade-table open-table">
           <thead><tr>
-            <th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>LTP</th><th>Stop</th><th>Target</th><th>Running P&L</th><th>P&L %</th><th>Opened</th>
+            <th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>LTP</th><th>Stop</th><th>Target</th><th>Gross</th><th>Est. costs</th><th>Net P&L</th><th>P&L %</th><th>Opened</th>
           </tr></thead>
           <tbody>{openTrades.map(t => <tr key={t.id}>
             <td>
@@ -262,6 +296,8 @@ export default function App() {
             <td className="ltp">{money(t.currentPrice)}</td>
             <td>{money(t.stop)}</td>
             <td>{money(t.target)}</td>
+            <td>{money((t as any).grossPnl ?? t.pnl)}</td>
+            <td>{money((t as any).estimatedCharges ?? 0)}</td>
             <td className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl) > 0 ? '+' : ''}{money(t.pnl)}</td>
             <td className={`pnl ${pnlClass(tradePnlPct(t))}`}>{tradePnlPct(t) > 0 ? '+' : ''}{percent(tradePnlPct(t))}</td>
             <td className="time-cell">{formatDateTime(t.openedAt)}</td>
@@ -364,7 +400,7 @@ export default function App() {
       {closedTrades.length === 0 ? <div className="empty-line">No closed paper trades yet.</div> :
       <div className="table-scroll">
         <table className="trade-table history-table">
-          <thead><tr><th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Status</th><th>P&L</th><th>Opened</th><th>Closed</th></tr></thead>
+          <thead><tr><th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Status</th><th>Gross</th><th>Costs</th><th>Net P&L</th><th>Opened</th><th>Closed</th></tr></thead>
           <tbody>{closedTrades.map(t => <tr key={t.id}>
             <td><div className="instrument">{instrumentName(t.symbol)}</div><small>#{t.id}</small></td>
             <td><span className={`side ${t.direction}`}>{t.direction}</span></td>
@@ -372,6 +408,8 @@ export default function App() {
             <td>{money(t.entry)}</td>
             <td>{money(t.currentPrice)}</td>
             <td><span className={`trade-status ${t.status}`}>{t.status}</span></td>
+            <td>{money((t as any).grossPnl ?? t.pnl)}</td>
+            <td>{money((t as any).estimatedCharges ?? 0)}</td>
             <td className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl) > 0 ? '+' : ''}{money(t.pnl)}</td>
             <td className="time-cell">{formatDateTime(t.openedAt)}</td>
             <td className="time-cell">{formatDateTime(t.closedAt)}</td>
