@@ -52,3 +52,33 @@ class ResearchRun(Base):
     run_date: Mapped[str] = mapped_column(String(16), unique=True, index=True)
     results_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class LearningSample(Base):
+    __tablename__ = "learning_samples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    instrument: Mapped[str] = mapped_column(String(64), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), index=True)
+    setup_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    direction: Mapped[str] = mapped_column(String(8), index=True)
+    strategy: Mapped[str] = mapped_column(String(64), index=True)
+    features_json: Mapped[str] = mapped_column(Text, default="{}")
+    label: Mapped[int] = mapped_column(Integer, default=0)
+    outcome: Mapped[str] = mapped_column(String(32), default="UNKNOWN")
+    mae_r: Mapped[float] = mapped_column(Float, default=0.0)
+    mfe_r: Mapped[float] = mapped_column(Float, default=0.0)
+    net_r: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class ModelEvaluation(Base):
+    __tablename__ = "model_evaluations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version: Mapped[str] = mapped_column(String(64), index=True)
+    role: Mapped[str] = mapped_column(String(24), default="CANDIDATE")
+    status: Mapped[str] = mapped_column(String(24), default="EVALUATED")
+    samples: Mapped[int] = mapped_column(Integer, default=0)
+    metrics_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
