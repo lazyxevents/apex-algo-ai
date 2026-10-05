@@ -162,6 +162,14 @@ def research_run_once():
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/research/premarket")
+def premarket_research_run_once():
+    try:
+        return trading_engine.run_premarket_research(market_service, force=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.post("/api/automation/run-once")
 def automation_run_once():
     return trading_engine.automation_cycle(market_service)
