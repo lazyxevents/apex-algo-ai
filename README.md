@@ -184,6 +184,10 @@ GET  /api/system/status
 GET  /api/risk/status
 GET  /api/performance
 GET  /api/strategy/status
+GET  /api/learning/status
+GET  /api/learning/dataset
+POST /api/learning/run-once
+POST /api/learning/evaluate-candidate
 GET  /api/trades
 POST /api/automation/run-once
 POST /api/research/run-once
@@ -198,6 +202,14 @@ POST /api/risk/reset-kill-switch
 cd backend
 pytest -q
 ```
+
+## Stage 1 learning pipeline
+
+The continuous worker now records structured 1-minute directional setup samples with EMA/RSI/ATR/volume, candlestick patterns and SMC context (BOS, CHOCH, liquidity sweep, FVG and fake breakout), plus target-before-stop labels, MAE/MFE and R-multiple outcome. Candidate evaluation uses chronological train/validation/out-of-sample splits.
+
+The current candidate scorer is deliberately labelled a deterministic baseline, **not a trained neural network**. A neural model should only be promoted after the historical dataset is large enough, leakage checks pass, calibration is acceptable and walk-forward/OOS performance is stable.
+
+Research/LLM output cannot place orders or override deterministic risk locks.
 
 ## Still pending before real-money mode
 
