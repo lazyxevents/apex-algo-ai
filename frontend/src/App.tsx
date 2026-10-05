@@ -277,10 +277,13 @@ export default function App() {
         <SystemItem label="Patterns found" value={worker.patternsDetected ?? 0} />
         <SystemItem label="Hypotheses" value={worker.hypothesesTested ?? 0} />
         <SystemItem label="Backtests" value={worker.backtestsRun ?? 0} />
+        <SystemItem label="Dataset" value={worker.datasetSize ?? 0} />
+        <SystemItem label="Candidate" value={worker.candidateVersion || 'not ready'} />
         <SystemItem label="Candidate score" value={worker.candidateScore != null ? Number(worker.candidateScore).toFixed(2) : '—'} />
       </div>
       <div className="worker-status"><b>{worker.currentTask || 'Waiting for next research cycle'}</b><span>Heartbeat {formatDateTime(worker.lastHeartbeatAt)}</span></div>
       {worker.lastSummary && <p className="panel-note">{worker.lastSummary}</p>}
+      {worker.candidateMetrics && <details className="candidate-detail"><summary>Candidate validation metrics</summary><pre>{JSON.stringify(worker.candidateMetrics, null, 2)}</pre></details>}
       {worker.lastError && <p className="panel-note negative"><b>Safe failure:</b> {worker.lastError}</p>}
       <div className="actions"><ActionButton label="Run Learning Cycle" disabled={Boolean(busy || !providerReady)} tip="Run one bounded research, pattern and backtest cycle now." onClick={() => runAction('learning', 'Learning cycle completed.', () => fetchJson('/api/learning/run-once', {method:'POST'}))} /></div>
     </section>
