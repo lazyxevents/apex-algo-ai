@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from .core import settings
 from .llm_research import ollama_research
+from .dataset_model import dataset_model_service
 from .market_research import build_market_research
 from .strategy import adaptive_learner
 
@@ -31,6 +32,9 @@ class LearningState:
     candidateScore: float | None = None
     lastSummary: str = ""
     lastError: str | None = None
+    datasetSize: int = 0
+    candidateVersion: str | None = None
+    candidateMetrics: dict | None = None
 
 
 class ContinuousLearningWorker:
@@ -110,12 +114,21 @@ class ContinuousLearningWorker:
             observations = summary.get("observations") or []
             self.state.hypothesesTested += max(1, len(observations))
 
+            self._heartbeat("dataset", "Building structured 1-minute setup/outcome dataset")
+            dataset = dataset_model_service.ingest(provider)
+            self.state.datasetSize = int(dataset.get("datasetSize", 0))
+
             self._heartbeat("backtest", "Running approved strategy walk-forward research")
             backtest = adaptive_learner.daily_research(provider)
             arms = backtest.get("arms") or {}
             self.state.backtestsRun += len(arms)
             scores = [float(v.get("score", 0) or 0) for v in arms.values() if isinstance(v, dict)]
             self.state.candidateScore = round(max(scores), 4) if scores else None
+
+            self._heartbeat("candidate_evaluation", "Evaluating candidate probability baseline on chronological holdout data")
+            candidate = dataset_model_service.evaluate_candidate()
+            self.state.candidateVersion = candidate.get("version")
+            self.state.candidateMetrics = candidate
 
             elapsed_hours = max((datetime.now(IST) - started).total_seconds() / 3600, 0.01)
             self.state.researchHoursToday = round(min(settings.learning_worker_daily_hours, self.state.researchHoursToday + elapsed_hours), 3)
