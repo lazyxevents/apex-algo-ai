@@ -415,15 +415,30 @@ class AdaptiveLearner:
             if context:
                 contextual = {arm.name: float(q_values.get(f"{context}::{arm.name}", global_q[arm.name])) for arm in ARMS}
             best = max(ARMS, key=lambda a: global_q[a.name]).name
+            reward_rows = list(db.execute(
+                select(LearningRewardEvent).order_by(LearningRewardEvent.id.desc()).limit(10)
+            ).scalars().all())
+            total_rewards = sum(global_counts.values())
             return {
                 "enabled": settings.adaptive_learning_enabled,
-                "method": "contextual epsilon-greedy reinforcement bandit + daily OOS research prior",
+                "method": "contextual epsilon-greedy reinforcement bandit + shaped net-R reward + daily OOS research prior",
                 "qValues": global_q,
                 "counts": global_counts,
                 "contextQ": contextual,
                 "bestArm": best,
                 "explorationRate": settings.exploration_rate,
                 "learningRate": settings.learning_rate,
+                "rewardUpdates": int(total_rewards),
+                "recentRewards": [{
+                    "tradeId": row.trade_id,
+                    "strategy": row.strategy,
+                    "context": row.context_key,
+                    "status": row.status,
+                    "pnl": row.pnl,
+                    "rawReward": row.raw_reward,
+                    "shapedReward": row.shaped_reward,
+                    "createdAt": row.created_at.isoformat() if row.created_at else None,
+                } for row in reward_rows],
                 "latestResearch": self._latest_research(db),
                 "arms": [asdict(a) for a in ARMS],
             }
