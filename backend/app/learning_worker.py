@@ -9,6 +9,7 @@ from .core import settings
 from .llm_research import ollama_research
 from .dataset_model import dataset_model_service
 from .market_research import build_market_research
+from .research_engine import research_engine
 from .strategy import adaptive_learner
 
 IST = ZoneInfo(settings.timezone)
@@ -35,6 +36,10 @@ class LearningState:
     datasetSize: int = 0
     candidateVersion: str | None = None
     candidateMetrics: dict | None = None
+    researchPhase: str = "IDLE"
+    knowledgeCount: int = 0
+    latestPlan: dict | None = None
+    sectorsTracked: int = 0
 
 
 class ContinuousLearningWorker:
@@ -51,6 +56,10 @@ class ContinuousLearningWorker:
 
     def snapshot(self) -> dict:
         data = asdict(self.state)
+        intelligence = research_engine.snapshot()
+        data["knowledgeCount"] = int(intelligence.get("knowledgeCount") or 0)
+        data["latestPlan"] = intelligence.get("latestPlan") or {}
+        data["sectorsTracked"] = len(intelligence.get("latestSectors") or [])
         data.update({
             "intervalMinutes": settings.learning_worker_interval_minutes,
             "dailyHourBudget": settings.learning_worker_daily_hours,
@@ -58,6 +67,17 @@ class ContinuousLearningWorker:
             "safetyBoundary": "research_only_no_direct_orders_no_risk_override",
         })
         return data
+
+    @staticmethod
+    def _research_phase(now: datetime) -> str:
+        hm = now.strftime("%H:%M")
+        if now.weekday() >= 5:
+            return "WEEKEND_RESEARCH"
+        if hm < settings.market_open_time:
+            return "PREMARKET"
+        if hm < settings.stop_new_trade_time:
+            return "LIVE_SESSION"
+        return "POSTMARKET"
 
     @staticmethod
     def _pattern_count(analytics: dict) -> int:
@@ -95,7 +115,9 @@ class ContinuousLearningWorker:
             self.state.enabled = True
             self.state.running = True
             self.state.lastError = None
-            self._heartbeat("market_research", "Reading 1m / 5m / 15m market structure and candlestick evidence")
+            phase = self._research_phase(started)
+            self.state.researchPhase = phase
+            self._heartbeat("market_research", f"{phase}: reading 1m / 5m / 15m structure and candlestick evidence")
             if not provider.market_ready:
                 self._heartbeat("waiting_market", "Market provider is not ready; no fabricated research generated")
                 return self.snapshot()
@@ -104,17 +126,27 @@ class ContinuousLearningWorker:
             patterns = self._pattern_count(analytics)
             self.state.patternsDetected += patterns
 
-            self._heartbeat("source_research", "Collecting bounded news/macro sources for context")
-            news = ollama_research.news_research()
-            sources = min(len(news.get("results") or []), settings.learning_worker_max_sources)
-            self.state.sourcesReviewed += sources
+            deep_research = force or phase in {"POSTMARKET", "PREMARKET", "WEEKEND_RESEARCH"}
+            research_bundle = {"session": phase, "sources": [], "news": [], "sectors": [], "plan": {}}
+            if deep_research:
+                self._heartbeat("source_research", f"{phase}: reading public education, Google News RSS and Indian sector data")
+                research_bundle = research_engine.run(analytics, phase)
+                reviewed = len(research_bundle.get("sources") or []) + len(research_bundle.get("news") or [])
+                self.state.sourcesReviewed += min(reviewed, settings.learning_worker_max_sources)
+                self.state.sectorsTracked = len(research_bundle.get("sectors") or [])
+                self.state.latestPlan = research_bundle.get("plan") or {}
+                self._heartbeat("hypothesis", "Connecting research evidence to scalp/swing/SMC hypotheses")
+                summary = ollama_research.summarize(analytics, research_bundle)
+                observations = summary.get("observations") or []
+                self.state.hypothesesTested += max(1, len(observations))
+            else:
+                self._heartbeat("live_session", "Live session: external crawler paused; learning only from market structure and outcomes until 15:15")
+                summary = {
+                    "summary": f"Live session learning: {patterns} current pattern/SMC observations. Deep web/sector research starts after {settings.stop_new_trade_time} IST.",
+                    "observations": [],
+                }
 
-            self._heartbeat("hypothesis", "Generating evidence summary and market-regime hypotheses")
-            summary = ollama_research.summarize(analytics, news)
-            observations = summary.get("observations") or []
-            self.state.hypothesesTested += max(1, len(observations))
-
-            self._heartbeat("dataset", "Building structured 1-minute setup/outcome dataset")
+            self._heartbeat("dataset", "Building structured 1-minute scalp/swing setup/outcome dataset")
             dataset = dataset_model_service.ingest(provider)
             self.state.datasetSize = int(dataset.get("datasetSize", 0))
 
@@ -133,7 +165,9 @@ class ContinuousLearningWorker:
             elapsed_hours = max((datetime.now(IST) - started).total_seconds() / 3600, 0.01)
             self.state.researchHoursToday = round(min(settings.learning_worker_daily_hours, self.state.researchHoursToday + elapsed_hours), 3)
             self.state.cyclesToday += 1
-            self.state.lastSummary = str(summary.get("summary") or f"Cycle completed: {patterns} pattern/structure observations; {len(arms)} approved arms backtested.")[:600]
+            plan = research_bundle.get("plan") or {}
+            plan_note = f" Next plan: {plan.get('planDate')} • bias {plan.get('marketBias')}." if plan else ""
+            self.state.lastSummary = str(summary.get("summary") or f"Cycle completed: {patterns} pattern/structure observations; {len(arms)} approved arms backtested.")[:520] + plan_note
             self.state.lastCompletedAt = datetime.now(IST).isoformat()
             self._heartbeat("complete", "Research cycle complete; waiting for next scheduled cycle")
             return self.snapshot()
