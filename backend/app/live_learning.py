@@ -16,6 +16,14 @@ class LiveLearningService:
 
     def observe(self, signal: dict[str, Any], *, candle_time: datetime | None = None) -> dict[str, Any]:
         context = signal.get("context") or {}
+        smc = signal.get("smc") or {}
+        stored_context = {
+            **context,
+            "smc": smc,
+            "smcOverride": bool(signal.get("smcOverride")),
+            "entryReason": signal.get("entryReason"),
+            "entryThreshold": signal.get("entryThreshold"),
+        }
         patterns = signal.get("patterns") or {}
         now = datetime.now(timezone.utc)
         with SessionLocal() as db:
@@ -40,7 +48,8 @@ class LiveLearningService:
                     "action": signal.get("action", "NO_TRADE"),
                     "signalScore": signal.get("score", 0),
                     "strategy": signal.get("chosenStrategy") or signal.get("strategy"),
-                    "context": context,
+                    "context": stored_context,
+                    "smc": smc,
                     "patterns": patterns,
                     "instruction": "Review the current market moment only. Do not override hard risk or place orders.",
                 })
@@ -65,13 +74,16 @@ class LiveLearningService:
                 action=str(signal.get("action") or "NO_TRADE"),
                 signal_score=float(signal.get("score") or 0.0),
                 strategy=str(signal.get("chosenStrategy") or signal.get("strategy") or ""),
-                context_json=json.dumps(context, default=str),
+                context_json=json.dumps(stored_context, default=str),
                 patterns_json=json.dumps(patterns, default=str),
                 llm_json=json.dumps(llm, default=str),
                 decision_json=json.dumps({
                     "reason": signal.get("reason"),
                     "previousHigh": signal.get("previousHigh"),
                     "previousLow": signal.get("previousLow"),
+                    "entryReason": signal.get("entryReason"),
+                    "entryThreshold": signal.get("entryThreshold"),
+                    "smcOverride": bool(signal.get("smcOverride")),
                 }, default=str),
             )
             db.add(row)
