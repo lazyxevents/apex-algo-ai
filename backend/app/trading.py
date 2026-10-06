@@ -470,7 +470,8 @@ class TradingEngine:
         context = market_context(candles)
         arm = adaptive_learner.choose_arm(context, capital)
         signal = evaluate_signal(candles, arm)
-        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name})
+        latest_candle_time = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date") if candles else None
+        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name, "candleTime": latest_candle_time})
         return signal
 
     def _real_option_candidate(self, provider, best: dict, deployable: float) -> tuple[dict | None, int, str | None]:
@@ -570,7 +571,13 @@ class TradingEngine:
             live_observations = []
             for signal in ranked:
                 try:
-                    live_observations.append(live_learning_service.observe(signal))
+                    candle_time = signal.get("candleTime")
+                    if isinstance(candle_time, str):
+                        try:
+                            candle_time = datetime.fromisoformat(candle_time.replace("Z", "+00:00"))
+                        except ValueError:
+                            candle_time = None
+                    live_observations.append(live_learning_service.observe(signal, candle_time=candle_time if isinstance(candle_time, datetime) else None))
                 except Exception as exc:
                     self._audit("learning.live_observation_error", {"index": signal.get("index"), "error": str(exc)})
             decision["liveObservations"] = live_observations
