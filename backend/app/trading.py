@@ -81,14 +81,24 @@ class TradingEngine:
             return {"note": trade.reason}
 
     def _closed_rows(self, db) -> list[Trade]:
-        return list(db.execute(select(Trade).where(Trade.status != "OPEN").order_by(Trade.id.asc())).scalars().all())
+        return list(db.execute(
+            select(Trade).where(
+                Trade.status != "OPEN",
+                Trade.status != "INVALID_CONTRACT",
+            ).order_by(Trade.id.asc())
+        ).scalars().all())
 
     def _open_rows(self, db) -> list[Trade]:
         return list(db.execute(select(Trade).where(Trade.status == "OPEN").order_by(Trade.id.asc())).scalars().all())
 
     def _today_count(self, db) -> int:
         today = datetime.now(IST).date()
-        return sum(1 for t in db.execute(select(Trade)).scalars().all() if self._as_ist(t.opened_at).date() == today)
+        rows = db.execute(select(Trade).where(Trade.status != "INVALID_CONTRACT")).scalars().all()
+        return sum(
+            1
+            for t in rows
+            if self._as_ist(t.opened_at) and self._as_ist(t.opened_at).date() == today
+        )
 
     def _open_count(self, db) -> int:
         return db.scalar(select(func.count()).select_from(Trade).where(Trade.status == "OPEN")) or 0
@@ -770,6 +780,10 @@ class TradingEngine:
                 "chartUrl": chart_url,
                 "ollamaReview": llm_review,
                 "signalScore": best["score"],
+                "entryReason": best.get("entryReason", "STANDARD_SIGNAL"),
+                "entryThreshold": best.get("entryThreshold", settings.signal_min_score),
+                "smcOverride": bool(best.get("smcOverride")),
+                "smc": best.get("smc") or {},
                 "index": best["index"],
                 "underlyingKey": best["underlyingKey"],
                 "contextKey": context.get("key", "UNKNOWN"),
@@ -888,6 +902,11 @@ class TradingEngine:
                 "forceExit": settings.force_exit_time,
                 "researchTime": settings.daily_research_time,
                 "premarketResearchTime": settings.premarket_research_time,
+                "entryPolicy": {
+                    "standardMinScore": settings.signal_min_score,
+                    "smcOverrideMinScore": settings.smc_override_min_score,
+                    "smcOverrideRule": "CHOCH or liquidity sweep, or BOS with directional candle confirmation",
+                },
             },
             "marketResearch": self.state.market_research or {},
             "broker": broker,
