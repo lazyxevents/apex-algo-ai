@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from .core import SessionLocal, settings
-from .models import ResearchRun, StrategyState, Trade
+from .models import LearningRewardEvent, ResearchRun, StrategyState, Trade
 from .market_research import analyze_structure
 
 IST = ZoneInfo(settings.timezone)
@@ -482,14 +482,36 @@ class AdaptiveLearner:
                 initial_risk = float(meta.get("initialRisk") or 0)
                 if arm not in {a.name for a in ARMS} or initial_risk <= 0:
                     continue
-                reward = trade.pnl / initial_risk
-                if not isfinite(reward):
+                raw_reward = trade.pnl / initial_risk
+                if not isfinite(raw_reward):
                     continue
-                reward = max(-2.0, min(2.0, reward))
+                outcome_adjustment = 0.10 if trade.status == "TARGET" else -0.10 if trade.status == "STOPPED" else -0.03 if trade.status == "FORCED_EXIT" else 0.0
+                late_penalty = -0.05 if "|LATE|" in str(context) else 0.0
+                reward = max(-2.0, min(2.0, raw_reward + outcome_adjustment + late_penalty))
                 for key in (arm, f"{context}::{arm}"):
                     old = float(q_values.get(key, 0.0))
                     q_values[key] = round(old + settings.learning_rate * (reward - old), 6)
                     counts[key] = int(counts.get(key, 0)) + 1
+                meta["learningReward"] = {
+                    "raw": round(raw_reward, 6),
+                    "shaped": round(reward, 6),
+                    "outcomeAdjustment": outcome_adjustment,
+                    "latePenalty": late_penalty,
+                    "learnedAt": datetime.now(IST).isoformat(),
+                }
+                trade.reason = json.dumps(meta, default=str)
+                if not db.scalar(select(LearningRewardEvent.id).where(LearningRewardEvent.trade_id == trade.id)):
+                    db.add(LearningRewardEvent(
+                        trade_id=trade.id,
+                        strategy=arm,
+                        context_key=str(context),
+                        status=trade.status,
+                        pnl=float(trade.pnl),
+                        initial_risk=initial_risk,
+                        raw_reward=round(raw_reward, 6),
+                        shaped_reward=round(reward, 6),
+                        detail_json=json.dumps(meta["learningReward"]),
+                    ))
                 processed += 1
             if rows:
                 state.q_values_json = json.dumps(q_values)
