@@ -213,6 +213,13 @@ export default function App() {
   const liveLearning = status.liveLearning || {}
   const liveMoments = Array.isArray(liveLearning.latest) ? liveLearning.latest : []
   const intelligence = status.researchIntelligence || {}
+  const neuralModel = status.neuralModel || worker.neural || {}
+  const neuralProduction = neuralModel.production || {}
+  const neuralLatest = neuralModel.latest || {}
+  const activeNeural = Object.keys(neuralProduction).length ? neuralProduction : neuralLatest
+  const neuralMetrics = activeNeural.metrics || {}
+  const neuralOos = neuralMetrics.outOfSample || {}
+  const rewardEvents = Array.isArray(learning.recentRewards) ? learning.recentRewards : []
   const nextPlan = intelligence.latestPlan || {}
   const researchSources = Array.isArray(intelligence.sources) ? intelligence.sources : []
   const hypotheses = Array.isArray(intelligence.hypotheses) ? intelligence.hypotheses : []
@@ -286,7 +293,7 @@ export default function App() {
       </div>
 
       <div className="intelligence-layout">
-        <KnowledgeGraph research={intelligence} worker={worker} marketResearch={marketResearch} />
+        <KnowledgeGraph research={intelligence} worker={worker} marketResearch={marketResearch} neuralModel={neuralModel} learning={learning} />
         <div className="next-plan-card">
           <div className="plan-glow" />
           <small>NEXT SESSION PLAN</small>
@@ -413,6 +420,46 @@ export default function App() {
         <SystemItem label="LLM provider" value={ollama.configured ? (ollama.provider || 'Connected') : 'Not configured'} good={ollama.configured} />
         <SystemItem label="LLM model" value={ollama.model || '—'} />
       </div>
+
+      <div className="auto-learning-core">
+        <div className="learning-core-card neural-core-card">
+          <div className="core-card-head">
+            <div><small>REAL NEURAL MODEL</small><h3>{activeNeural.version || 'Waiting for labeled data'}</h3></div>
+            <span className={`model-role ${String(activeNeural.role || activeNeural.status || 'waiting').toLowerCase()}`}>{activeNeural.role || activeNeural.status || 'WAITING'}</span>
+          </div>
+          <div className="core-stat-grid">
+            <span><small>Architecture</small><b>{activeNeural.architecture || '14 → 24 → 1 MLP'}</b></span>
+            <span><small>Training samples</small><b>{activeNeural.trainedSamples ?? worker.neuralTrainedSamples ?? 0}</b></span>
+            <span><small>OOS AUC</small><b>{neuralOos.auc != null ? Number(neuralOos.auc).toFixed(3) : '—'}</b></span>
+            <span><small>OOS Brier</small><b>{neuralOos.brier != null ? Number(neuralOos.brier).toFixed(3) : '—'}</b></span>
+          </div>
+          <div className="learning-flow-line">
+            <span>SMC V2 labels</span><i>→</i><span>postmarket train</span><i>→</i><span>validation/OOS</span><i>→</i><span>promote or shadow</span>
+          </div>
+          <p>Weights stay frozen during live candles. A new model is promoted only after chronological validation and out-of-sample gates pass.</p>
+        </div>
+
+        <div className="learning-core-card rl-core-card">
+          <div className="core-card-head">
+            <div><small>REINFORCEMENT BANDIT</small><h3>{learning.bestArm || 'Context learner'}</h3></div>
+            <span className="model-role production">AUTO</span>
+          </div>
+          <div className="core-stat-grid">
+            <span><small>Reward updates</small><b>{learning.rewardUpdates ?? 0}</b></span>
+            <span><small>Learning rate</small><b>{learning.learningRate != null ? Number(learning.learningRate).toFixed(2) : '—'}</b></span>
+            <span><small>Exploration</small><b>{learning.explorationRate != null ? `${Math.round(Number(learning.explorationRate)*100)}%` : '—'}</b></span>
+            <span><small>Latest reward</small><b>{rewardEvents[0]?.shapedReward != null ? Number(rewardEvents[0].shapedReward).toFixed(2)+'R' : '—'}</b></span>
+          </div>
+          <div className="reward-stream">
+            {rewardEvents.length === 0 ? <span className="reward-empty">Valid closed paper trades will create automatic reward updates.</span> :
+              rewardEvents.slice(0,4).map((ev:any)=><span key={ev.tradeId} className={Number(ev.shapedReward)>=0?'reward-good':'reward-bad'}>
+                #T{ev.tradeId} {ev.strategy} <b>{Number(ev.shapedReward)>=0?'+':''}{Number(ev.shapedReward).toFixed(2)}R</b>
+              </span>)}
+          </div>
+          <p>Closed valid trades update contextual strategy preferences immediately; invalid contracts are excluded.</p>
+        </div>
+      </div>
+
       <div className="worker-status"><b>{worker.currentTask || 'Waiting for next research cycle'}</b><span>Heartbeat {formatDateTime(worker.lastHeartbeatAt)}</span></div>
       {worker.lastSummary && <p className="panel-note">{worker.lastSummary}</p>}
       {worker.candidateMetrics && <details className="candidate-detail"><summary>Candidate validation metrics</summary><pre>{JSON.stringify(worker.candidateMetrics, null, 2)}</pre></details>}
@@ -650,11 +697,14 @@ export default function App() {
   </main>
 }
 
-function KnowledgeGraph({research, worker, marketResearch}:{research:any, worker:any, marketResearch:any}) {
+function KnowledgeGraph({research, worker, marketResearch, neuralModel, learning}:{research:any, worker:any, marketResearch:any, neuralModel:any, learning:any}) {
   const sensex = marketResearch?.analytics?.markets?.SENSEX || {}
   const knowledge = Number(research?.knowledgeCount || 0)
   const patternCount = Number(worker?.patternsDetected || 0)
   const sectorCount = Array.isArray(research?.latestSectors) ? research.latestSectors.length : 0
+  const production = neuralModel?.production || {}
+  const modelLabel = production?.version ? String(production.version).replace('nn-','NN ') : 'NN SHADOW'
+  const rewardUpdates = Number(learning?.rewardUpdates || 0)
 
   const inputs = [
     {id:'market', label:'SENSEX', sub:sensex?.state || 'MARKET'},
@@ -681,6 +731,7 @@ function KnowledgeGraph({research, worker, marketResearch}:{research:any, worker
     {id:'timing', label:'TIMING', sub:'entry window'},
     {id:'risk', label:'RISK', sub:'SL / size / lock'},
     {id:'memoryfit', label:'MEMORY FIT', sub:'historical analog'},
+    {id:'neural', label:'NEURAL P', sub:modelLabel},
   ]
 
   const outputs = [
@@ -688,6 +739,7 @@ function KnowledgeGraph({research, worker, marketResearch}:{research:any, worker
     {id:'swing', label:'SWING', sub:'15m / 5m / 1m'},
     {id:'wait', label:'NO TRADE', sub:'quality gate'},
     {id:'plan', label:'NEXT PLAN', sub:'postmarket'},
+    {id:'reward', label:'REWARD', sub:`${rewardUpdates} updates`},
   ]
 
   const layers = [
@@ -764,7 +816,7 @@ function KnowledgeGraph({research, worker, marketResearch}:{research:any, worker
         <circle r="38" className="brain-halo"/>
         <circle r="25" className="brain-core"/>
         <text textAnchor="middle" y="-2" className="brain-title">APEX</text>
-        <text textAnchor="middle" y="11" className="brain-sub">AI CORE</text>
+        <text textAnchor="middle" y="11" className="brain-sub">{production?.version ? 'TRAINED CORE' : 'AI CORE'}</text>
       </g>
     </svg>
 
@@ -773,7 +825,7 @@ function KnowledgeGraph({research, worker, marketResearch}:{research:any, worker
       <span><i className="legend-line red"/> conflicting evidence</span>
       <span><i className="legend-dot"/> live research memory</span>
     </div>
-    <div className="graph-caption"><span className="pulse"/> Neural-style evidence map • visualization only, not a claim of trained neural weights.</div>
+    <div className="graph-caption"><span className="pulse"/> {production?.version ? `Promoted model ${production.version} is active in paper scoring.` : 'Neural visualization active; trained model remains shadow until validation gates pass.'}</div>
   </div>
 }
 
