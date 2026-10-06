@@ -33,6 +33,8 @@ class RuntimeState:
     last_cycle_at: str | None = None
     last_position_update_at: str | None = None
     last_premarket_date: str | None = None
+    last_premarket_learning_date: str | None = None
+    last_postmarket_learning_date: str | None = None
     market_research: dict | None = None
     last_decision: dict | None = None
     last_error: str | None = None
@@ -676,6 +678,25 @@ class TradingEngine:
         try:
             adaptive_learner.learn()
             now_ist = datetime.now(IST)
+            today_key = now_ist.date().isoformat()
+            hm = now_ist.strftime("%H:%M")
+            if (
+                settings.learning_worker_enabled
+                and now_ist.weekday() < 5
+                and settings.premarket_research_time <= hm < settings.market_open_time
+                and self.state.last_premarket_learning_date != today_key
+            ):
+                decision["premarketLearning"] = learning_worker.run_cycle(provider, force=True)
+                self.state.last_premarket_learning_date = today_key
+            if (
+                settings.learning_worker_enabled
+                and now_ist.weekday() < 5
+                and settings.stop_new_trade_time <= hm < settings.market_close_time
+                and self.state.last_postmarket_learning_date != today_key
+            ):
+                decision["postmarketLearning"] = learning_worker.run_cycle(provider, force=True)
+                self.state.last_postmarket_learning_date = today_key
+
             if (
                 settings.premarket_research_enabled
                 and provider.market_ready
