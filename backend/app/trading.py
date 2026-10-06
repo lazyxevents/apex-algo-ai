@@ -6,11 +6,13 @@ from math import floor
 from time import sleep
 from threading import Lock
 from zoneinfo import ZoneInfo
+from urllib.parse import quote
 
 from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
 from .llm_research import ollama_research
+from .llm_advisor import ollama_advisor
 from .learning_worker import learning_worker
 from .market_research import build_market_research
 from .models import AuditLog, Trade
@@ -620,6 +622,25 @@ class TradingEngine:
 
             initial_risk = round((entry - stop) * qty, 2)
             context = best.get("context") or {}
+            chart_symbol = "BSE:SENSEX" if best["index"] == "SENSEX" else ("NSE:BANKNIFTY" if best["index"] == "BANKNIFTY" else "NSE:NIFTY")
+            chart_url = f"https://www.tradingview.com/chart/?symbol={quote(chart_symbol, safe='')}"
+            llm_review = ollama_advisor.analyze_trade({
+                "index": best["index"],
+                "direction": best["action"],
+                "signalScore": best["score"],
+                "strategy": strategy_name,
+                "context": context,
+                "patterns": best.get("patterns"),
+                "underlyingPrice": best["underlyingPrice"],
+                "previousCandleLow": previous_low,
+                "previousCandleHigh": previous_high,
+                "entry": entry,
+                "stop": stop,
+                "target": target,
+                "quantity": qty,
+                "lotSize": lot_size,
+                "paperOnly": True,
+            })
             meta = {
                 "strategy": strategy_name,
                 "tradeStyle": "SCALP" if is_scalp else "SWING",
@@ -631,6 +652,9 @@ class TradingEngine:
                 "runnerTarget": target,
                 "partialBookPct": 0.0 if is_scalp else settings.swing_partial_pct,
                 "pullbackEntryPoints": settings.scalp_entry_pullback_points if is_scalp else 0.0,
+                "chartSymbol": chart_symbol,
+                "chartUrl": chart_url,
+                "ollamaReview": llm_review,
                 "signalScore": best["score"],
                 "index": best["index"],
                 "underlyingKey": best["underlyingKey"],
@@ -716,6 +740,8 @@ class TradingEngine:
             "meta": meta,
             "openedAt": t.opened_at.isoformat() if t.opened_at else None,
             "closedAt": t.closed_at.isoformat() if t.closed_at else None,
+            "chartUrl": meta.get("chartUrl"),
+            "chartSymbol": meta.get("chartSymbol"),
         }
 
     def status(self, broker: dict, market: dict | None = None) -> dict:
@@ -747,6 +773,13 @@ class TradingEngine:
             "performance": self.performance_snapshot(),
             "learning": adaptive_learner.snapshot(),
             "learningWorker": learning_worker.snapshot(),
+            "ollama": {
+                "enabled": settings.ollama_enabled,
+                "configured": ollama_advisor.configured,
+                "model": settings.ollama_model,
+                "webSearchEnabled": settings.ollama_web_search_enabled,
+                "role": "advisory research/review only; hard risk remains deterministic",
+            },
         }
 
 
