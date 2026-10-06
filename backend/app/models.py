@@ -82,3 +82,25 @@ class ModelEvaluation(Base):
     samples: Mapped[int] = mapped_column(Integer, default=0)
     metrics_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class LiveMarketObservation(Base):
+    __tablename__ = "live_market_observations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    instrument: Mapped[str] = mapped_column(String(64), index=True)
+    timeframe: Mapped[str] = mapped_column(String(16), default="1m", index=True)
+    candle_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    market_price: Mapped[float] = mapped_column(Float, default=0.0)
+    action: Mapped[str] = mapped_column(String(16), default="NO_TRADE", index=True)
+    signal_score: Mapped[float] = mapped_column(Float, default=0.0)
+    strategy: Mapped[str] = mapped_column(String(64), default="")
+    context_json: Mapped[str] = mapped_column(Text, default="{}")
+    patterns_json: Mapped[str] = mapped_column(Text, default="{}")
+    llm_json: Mapped[str] = mapped_column(Text, default="{}")
+    decision_json: Mapped[str] = mapped_column(Text, default="{}")
+    trade_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    outcome: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
+    outcome_pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
