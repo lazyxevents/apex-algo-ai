@@ -3,7 +3,8 @@ from __future__ import annotations
 import html
 import json
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus
 from xml.etree import ElementTree
 
@@ -13,6 +14,8 @@ from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
 from .models import DailyMarketPlan, ResearchKnowledge, StrategyHypothesis
+
+IST = ZoneInfo(settings.timezone)
 
 EDUCATION_SOURCES = [
     {"category": "TECHNICAL_ANALYSIS", "title": "Zerodha Varsity - Technical Analysis", "url": "https://zerodha.com/varsity/module/technical-analysis/", "tags": ["price-action", "candlestick", "trend"]},
@@ -100,7 +103,7 @@ class ResearchIntelligenceEngine:
         self.timeout = max(3.0, settings.research_source_timeout_seconds)
 
     def _upsert_knowledge(self, *, source_type: str, category: str, title: str, url: str, summary: str, tags: list[str]) -> None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         with SessionLocal() as db:
             row = db.scalar(select(ResearchKnowledge).where(ResearchKnowledge.url == url))
             if row is None:
@@ -239,7 +242,7 @@ class ResearchIntelligenceEngine:
         return touched
 
     def build_plan(self, analytics: dict, sectors: list[dict], research: dict, session: str) -> dict:
-        now = datetime.now()
+        now = datetime.now(IST)
         sensex = ((analytics.get("markets") or {}).get("SENSEX") or {})
         frames = sensex.get("frames") or {}
         f1, f5, f15 = frames.get("1m") or {}, frames.get("5m") or {}, frames.get("15m") or {}
