@@ -146,6 +146,10 @@ def _structure(candles: list[dict]) -> dict:
     }
 
 
+def analyze_structure(candles: list[dict]) -> dict:
+    """Public SMC structure helper shared by research and live entry scoring."""
+    return _structure(candles)
+
 def _fetch(provider, key: str, minutes: int) -> list[dict]:
     if hasattr(provider, "intraday_candles_interval"):
         return provider.intraday_candles_interval(key, minutes)
