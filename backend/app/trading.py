@@ -324,16 +324,28 @@ class TradingEngine:
 
     def _market_phase(self) -> dict:
         now = datetime.now(IST)
+        base = {
+            "now": now.isoformat(),
+            "liveScan": False,
+            "researchPhase": False,
+            "tradable": False,
+            "newTrades": False,
+            "forceExit": False,
+        }
         if now.weekday() >= 5:
-            return {"tradable": False, "newTrades": False, "forceExit": False, "reason": "weekend", "now": now.isoformat()}
+            return {**base, "researchPhase": True, "reason": "weekend research"}
         hm = now.strftime("%H:%M")
+        if hm < settings.market_open_time:
+            return {**base, "researchPhase": True, "reason": "premarket research"}
+        if hm >= settings.market_close_time:
+            return {**base, "researchPhase": True, "reason": "postmarket research"}
         if hm < settings.trade_start_time:
-            return {"tradable": False, "newTrades": False, "forceExit": False, "reason": "before entry window", "now": now.isoformat()}
+            return {**base, "tradable": True, "reason": "market open buffer"}
         if hm >= settings.force_exit_time:
-            return {"tradable": True, "newTrades": False, "forceExit": True, "reason": "force-exit window", "now": now.isoformat()}
+            return {**base, "tradable": True, "researchPhase": True, "forceExit": True, "reason": "force-exit window"}
         if hm >= settings.stop_new_trade_time:
-            return {"tradable": True, "newTrades": False, "forceExit": False, "reason": "new entries stopped", "now": now.isoformat()}
-        return {"tradable": True, "newTrades": True, "forceExit": False, "reason": "entry window", "now": now.isoformat()}
+            return {**base, "tradable": True, "researchPhase": True, "reason": "15:15 trade cutoff; research phase"}
+        return {**base, "tradable": True, "newTrades": True, "liveScan": True, "reason": "entry window"}
 
     def open_paper_trade(self, payload: dict) -> dict:
         with SessionLocal() as db:
