@@ -181,6 +181,8 @@ export default function App() {
   const positionMonitor = automation.positionMonitor || {}
   const worker = status.learningWorker || {}
   const ollama = status.ollama || {}
+  const liveLearning = status.liveLearning || {}
+  const liveMoments = Array.isArray(liveLearning.latest) ? liveLearning.latest : []
   const providerReady = market.marketDataConfigured !== false
   const killed = Boolean(status.killSwitch || r.killSwitch)
   const phase = automation.lastDecision?.phase || {}
@@ -292,6 +294,36 @@ export default function App() {
       {worker.candidateMetrics && <details className="candidate-detail"><summary>Candidate validation metrics</summary><pre>{JSON.stringify(worker.candidateMetrics, null, 2)}</pre></details>}
       {worker.lastError && <p className="panel-note negative"><b>Safe failure:</b> {worker.lastError}</p>}
       <div className="actions"><ActionButton label="Run Learning Cycle" disabled={Boolean(busy || !providerReady)} tip="Run one bounded research, pattern and backtest cycle now." onClick={() => runAction('learning', 'Learning cycle completed.', () => fetchJson('/api/learning/run-once', {method:'POST'}))} /></div>
+    </section>
+
+    <section className="panel live-learning-panel">
+      <div className="section-head compact">
+        <div><div className="eyebrow">LIVE MARKET LEARNING</div><h2>SENSEX 1m Moment Memory</h2><p>Every scan stores the current SMC/price-action context before the outcome is known. Paper trades are linked back and labelled after exit.</p></div>
+        <span className="badge subtle">{liveLearning.totalObservations ?? 0} OBSERVATIONS</span>
+      </div>
+      <div className="learning-grid">
+        <SystemItem label="Mode" value={liveLearning.mode || 'waiting'} good={Boolean(liveLearning.enabled)} />
+        <SystemItem label="Moments stored" value={liveLearning.totalObservations ?? 0} />
+        <SystemItem label="Pending outcomes" value={liveLearning.pendingOutcomes ?? 0} />
+        <SystemItem label="Ollama live review" value={ollama.configured ? 'Active' : 'Waiting for endpoint'} good={ollama.configured} />
+      </div>
+      {liveMoments.length === 0 ? <div className="empty-line">Waiting for the next live SENSEX scan.</div> :
+      <div className="table-scroll">
+        <table className="trade-table">
+          <thead><tr><th>Time</th><th>Market</th><th>Action</th><th>Score</th><th>Strategy</th><th>SMC / Context</th><th>Ollama</th><th>Outcome</th></tr></thead>
+          <tbody>{liveMoments.slice(0,10).map((m:any) => <tr key={m.id}>
+            <td className="time-cell">{formatDateTime(m.observedAt)}</td>
+            <td>{m.instrument}<br/><small>{Number(m.marketPrice || 0).toFixed(2)}</small></td>
+            <td><span className={`side ${m.action}`}>{m.action}</span></td>
+            <td>{Number(m.signalScore || 0).toFixed(2)}</td>
+            <td><small>{m.strategy || '—'}</small></td>
+            <td><small>{m.context?.key || '—'}<br/>{Array.isArray(m.patterns) ? m.patterns.join(', ') : (m.patterns?.name || '')}</small></td>
+            <td><small>{m.ollama?.status || (ollama.configured ? 'waiting' : 'not configured')}<br/>{m.ollama?.bias || '—'} {m.ollama?.confidence != null ? `${Math.round(Number(m.ollama.confidence)*100)}%` : ''}</small></td>
+            <td><span className={`trade-status ${m.outcome}`}>{m.outcome || 'PENDING'}</span>{m.tradeId ? <small> #T{m.tradeId}</small> : null}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+      <p className="panel-note">Primary learning evidence is raw candle/SMC data. Ollama is an auxiliary reviewer; screenshots are not used as a substitute for OHLCV data.</p>
     </section>
 
     <section className="panel positions-panel">
