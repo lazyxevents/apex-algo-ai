@@ -9,6 +9,7 @@ from .core import settings
 from .llm_research import ollama_research
 from .dataset_model import dataset_model_service
 from .market_research import build_market_research
+from .neural_model import neural_model_service
 from .research_engine import research_engine
 from .strategy import adaptive_learner
 
@@ -40,6 +41,11 @@ class LearningState:
     knowledgeCount: int = 0
     latestPlan: dict | None = None
     sectorsTracked: int = 0
+    neuralVersion: str | None = None
+    neuralRole: str = "WAITING"
+    neuralTrainedSamples: int = 0
+    neuralOosAuc: float | None = None
+    neuralOosBrier: float | None = None
 
 
 class ContinuousLearningWorker:
@@ -60,6 +66,16 @@ class ContinuousLearningWorker:
         data["knowledgeCount"] = int(intelligence.get("knowledgeCount") or 0)
         data["latestPlan"] = intelligence.get("latestPlan") or {}
         data["sectorsTracked"] = len(intelligence.get("latestSectors") or [])
+        neural = neural_model_service.snapshot()
+        production = neural.get("production") or {}
+        latest_neural = neural.get("latest") or {}
+        data["neural"] = neural
+        data["neuralVersion"] = production.get("version") or latest_neural.get("version")
+        data["neuralRole"] = production.get("role") or latest_neural.get("role") or "WAITING"
+        data["neuralTrainedSamples"] = int(production.get("trainedSamples") or latest_neural.get("trainedSamples") or 0)
+        metrics = (production.get("metrics") or latest_neural.get("metrics") or {}).get("outOfSample") or {}
+        data["neuralOosAuc"] = metrics.get("auc")
+        data["neuralOosBrier"] = metrics.get("brier")
         data.update({
             "intervalMinutes": settings.learning_worker_interval_minutes,
             "dailyHourBudget": settings.learning_worker_daily_hours,
@@ -166,10 +182,24 @@ class ContinuousLearningWorker:
             ]
             self.state.candidateScore = round(max(scores), 4) if scores else None
 
-            self._heartbeat("candidate_evaluation", "Evaluating candidate probability baseline on chronological holdout data")
-            candidate = dataset_model_service.evaluate_candidate()
-            self.state.candidateVersion = candidate.get("version")
-            self.state.candidateMetrics = candidate
+            neural_phase = phase in {"POSTMARKET", "PREMARKET", "WEEKEND_RESEARCH"}
+            if neural_phase:
+                self._heartbeat("neural_training", "Training real MLP on labeled SMC scalp/swing setups with chronological validation/OOS")
+                candidate = neural_model_service.train_candidate()
+                self.state.candidateVersion = candidate.get("version")
+                self.state.candidateMetrics = candidate
+                self.state.neuralVersion = candidate.get("version")
+                self.state.neuralRole = candidate.get("role") or candidate.get("status") or "WAITING"
+                self.state.neuralTrainedSamples = int(candidate.get("eligibleSamples") or 0)
+                oos = candidate.get("outOfSample") or {}
+                self.state.neuralOosAuc = oos.get("auc")
+                self.state.neuralOosBrier = oos.get("brier")
+            else:
+                self._heartbeat("candidate_evaluation", "Live session: neural weights frozen; using last promoted model for inference only")
+                neural = neural_model_service.snapshot()
+                candidate = neural.get("production") or neural.get("latest") or {"status": "waiting"}
+                self.state.candidateVersion = candidate.get("version")
+                self.state.candidateMetrics = candidate.get("metrics") or candidate
 
             elapsed_hours = max((datetime.now(IST) - started).total_seconds() / 3600, 0.01)
             self.state.researchHoursToday = round(min(settings.learning_worker_daily_hours, self.state.researchHoursToday + elapsed_hours), 3)
