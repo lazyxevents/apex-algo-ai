@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     auto_scan_interval_seconds: int = 30
     position_monitor_interval_seconds: float = 2.0
     timezone: str = "Asia/Kolkata"
+    market_open_time: str = "09:15"
+    market_close_time: str = "15:30"
     trade_start_time: str = "09:20"
     stop_new_trade_time: str = "15:00"
     force_exit_time: str = "15:10"
@@ -116,6 +118,9 @@ class Settings(BaseSettings):
     learning_worker_interval_minutes: int = 60
     learning_worker_daily_hours: int = 15
     learning_worker_max_sources: int = 120
+    research_web_enabled: bool = True
+    research_max_articles_per_cycle: int = 16
+    research_source_timeout_seconds: float = 8.0
 
     upstox_access_token: str = ""
     upstox_sandbox_token: str = ""
@@ -184,7 +189,7 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from .models import AuditLog, LearningSample, LiveMarketObservation, ModelEvaluation, ResearchRun, StrategyState, Trade  # noqa: F401
+    from .models import AuditLog, LearningSample, LiveMarketObservation, ModelEvaluation, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
