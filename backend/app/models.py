@@ -146,3 +146,34 @@ class DailyMarketPlan(Base):
     sectors_json: Mapped[str] = mapped_column(Text, default="{}")
     research_json: Mapped[str] = mapped_column(Text, default="{}")
     plan_json: Mapped[str] = mapped_column(Text, default="{}")
+
+
+class NeuralModelArtifact(Base):
+    __tablename__ = "neural_model_artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    role: Mapped[str] = mapped_column(String(24), default="CANDIDATE", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="TRAINED", index=True)
+    architecture: Mapped[str] = mapped_column(String(128), default="MLP")
+    trained_samples: Mapped[int] = mapped_column(Integer, default=0)
+    feature_spec_json: Mapped[str] = mapped_column(Text, default="{}")
+    weights_json: Mapped[str] = mapped_column(Text, default="{}")
+    metrics_json: Mapped[str] = mapped_column(Text, default="{}")
+    trained_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class LearningRewardEvent(Base):
+    __tablename__ = "learning_reward_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trade_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
+    strategy: Mapped[str] = mapped_column(String(64), index=True)
+    context_key: Mapped[str] = mapped_column(String(128), default="UNKNOWN", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="")
+    pnl: Mapped[float] = mapped_column(Float, default=0.0)
+    initial_risk: Mapped[float] = mapped_column(Float, default=0.0)
+    raw_reward: Mapped[float] = mapped_column(Float, default=0.0)
+    shaped_reward: Mapped[float] = mapped_column(Float, default=0.0)
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
