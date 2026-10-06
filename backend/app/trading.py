@@ -91,6 +91,12 @@ class TradingEngine:
     def _open_rows(self, db) -> list[Trade]:
         return list(db.execute(select(Trade).where(Trade.status == "OPEN").order_by(Trade.id.asc())).scalars().all())
 
+    def _invalid_rows(self, db) -> list[Trade]:
+        return list(db.execute(
+            select(Trade).where(Trade.status == "INVALID_CONTRACT").order_by(Trade.id.asc())
+        ).scalars().all())
+
+
     def _today_count(self, db) -> int:
         today = datetime.now(IST).date()
         rows = db.execute(select(Trade).where(Trade.status != "INVALID_CONTRACT")).scalars().all()
@@ -120,6 +126,37 @@ class TradingEngine:
 
     def _all_realized_pnl(self, db) -> float:
         return float(sum(t.pnl for t in self._closed_rows(db)))
+
+    def _excluded_period_pnl(self, db, period: str) -> float:
+        now = datetime.now(IST)
+        values: list[float] = []
+        for trade in self._invalid_rows(db):
+            closed = self._as_ist(trade.closed_at)
+            if not closed:
+                continue
+            if period == "day" and closed.date() == now.date():
+                values.append(float(trade.pnl))
+            elif period == "week" and closed.isocalendar()[:2] == now.isocalendar()[:2]:
+                values.append(float(trade.pnl))
+            elif period == "month" and (closed.year, closed.month) == (now.year, now.month):
+                values.append(float(trade.pnl))
+        return float(sum(values))
+
+    def _excluded_count(self, db, period: str) -> int:
+        now = datetime.now(IST)
+        count = 0
+        for trade in self._invalid_rows(db):
+            closed = self._as_ist(trade.closed_at)
+            if not closed:
+                continue
+            if period == "day" and closed.date() == now.date():
+                count += 1
+            elif period == "week" and closed.isocalendar()[:2] == now.isocalendar()[:2]:
+                count += 1
+            elif period == "month" and (closed.year, closed.month) == (now.year, now.month):
+                count += 1
+        return count
+
 
     def _apply_cap_ceiling(self, capital: float) -> float:
         if settings.max_deployable_capital > 0:
@@ -228,6 +265,10 @@ class TradingEngine:
             week_pnl = self._period_pnl(db, "week")
             month_pnl = self._period_pnl(db, "month")
             target = self._monthly_target(db)
+            excluded_day_pnl = self._excluded_period_pnl(db, "day")
+            excluded_month_pnl = self._excluded_period_pnl(db, "month")
+            excluded_day_count = self._excluded_count(db, "day")
+            excluded_month_count = self._excluded_count(db, "month")
             return {
                 "configuredCapital": settings.capital,
                 "effectiveCapital": round(capital, 2),
@@ -247,6 +288,10 @@ class TradingEngine:
                 "dailyPnl": round(day_pnl, 2),
                 "weeklyPnl": round(week_pnl, 2),
                 "monthlyPnl": round(month_pnl, 2),
+                "excludedInvalidTodayPnl": round(excluded_day_pnl, 2),
+                "excludedInvalidTodayCount": excluded_day_count,
+                "excludedInvalidMonthPnl": round(excluded_month_pnl, 2),
+                "excludedInvalidMonthCount": excluded_month_count,
                 "dailyLocked": day_pnl <= -limits["daily"],
                 "weeklyLocked": week_pnl <= -limits["weekly"],
                 "monthlyLossLocked": month_pnl <= -limits["monthly"],
