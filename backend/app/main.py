@@ -11,6 +11,7 @@ from .core import db_health, init_db, settings
 from .dataset_model import dataset_model_service
 from .kite import kite_service
 from .learning_worker import learning_worker
+from .live_learning import live_learning_service
 from .strategy import adaptive_learner
 from .trading import trading_engine
 from .upstox import upstox_service
@@ -175,6 +176,11 @@ def learning_status():
 @app.post("/api/learning/run-once")
 def learning_run_once():
     return learning_worker.run_cycle(market_service, force=True)
+
+
+@app.get("/api/learning/live")
+def live_learning_status(limit: int = 20):
+    return live_learning_service.snapshot(limit=min(max(limit, 1), 50))
 
 
 @app.get("/api/learning/dataset")
