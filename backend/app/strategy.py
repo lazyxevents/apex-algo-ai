@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from .core import SessionLocal, settings
 from .models import ResearchRun, StrategyState, Trade
+from .market_research import analyze_structure
 
 IST = ZoneInfo(settings.timezone)
 
@@ -176,7 +177,29 @@ def evaluate_signal(candles: list[dict], arm: StrategyArm) -> dict:
     volume_base = sum(volumes[-11:-1]) / max(1, len(volumes[-11:-1]))
     volume_ratio = volumes[-1] / volume_base if volume_base > 0 else 1.0
     patterns = detect_candlestick_patterns(candles)
+    smc = analyze_structure(candles)
     volatility_ok = 0.04 <= atr_pct <= 2.5
+
+    bull_smc = {
+        "BOS": smc.get("bos") == "BULL",
+        "CHOCH": smc.get("choch") == "BULL",
+        "LIQUIDITY_SWEEP": smc.get("liquiditySweep") == "BULL",
+    }
+    bear_smc = {
+        "BOS": smc.get("bos") == "BEAR",
+        "CHOCH": smc.get("choch") == "BEAR",
+        "LIQUIDITY_SWEEP": smc.get("liquiditySweep") == "BEAR",
+    }
+    strong_bull_smc = (
+        bull_smc["CHOCH"]
+        or bull_smc["LIQUIDITY_SWEEP"]
+        or (bull_smc["BOS"] and patterns["bullishScore"] > 0)
+    )
+    strong_bear_smc = (
+        bear_smc["CHOCH"]
+        or bear_smc["LIQUIDITY_SWEEP"]
+        or (bear_smc["BOS"] and patterns["bearishScore"] > 0)
+    )
 
     bull = 0.0
     bull += 0.25 if fast > slow else 0
@@ -195,13 +218,31 @@ def evaluate_signal(candles: list[dict], arm: StrategyArm) -> dict:
     bear += 0.10 if volatility_ok else 0
 
     action, score = "NO_TRADE", max(bull, bear)
+    entry_reason = "NO_TRADE"
+    entry_threshold = arm.min_score
+    smc_override = False
+
     if score >= arm.min_score:
         if bull > bear:
             if not settings.candle_confirmation_required or patterns["bullishScore"] > 0:
                 action, score = "CE", bull
+                entry_reason = "STANDARD_SIGNAL"
         elif bear > bull:
             if not settings.candle_confirmation_required or patterns["bearishScore"] > 0:
                 action, score = "PE", bear
+                entry_reason = "STANDARD_SIGNAL"
+
+    if action == "NO_TRADE" and score >= settings.smc_override_min_score:
+        if bull > bear and strong_bull_smc:
+            action, score = "CE", bull
+            entry_reason = "SMC_OVERRIDE"
+            entry_threshold = settings.smc_override_min_score
+            smc_override = True
+        elif bear > bull and strong_bear_smc:
+            action, score = "PE", bear
+            entry_reason = "SMC_OVERRIDE"
+            entry_threshold = settings.smc_override_min_score
+            smc_override = True
 
     return {
         "action": action,
@@ -220,6 +261,10 @@ def evaluate_signal(candles: list[dict], arm: StrategyArm) -> dict:
         "previousClose": closes[-2],
         "strategy": arm.name,
         "patterns": patterns,
+        "smc": smc,
+        "smcOverride": smc_override,
+        "entryReason": entry_reason,
+        "entryThreshold": round(entry_threshold, 4),
         "context": market_context(candles),
     }
 
@@ -402,7 +447,11 @@ class AdaptiveLearner:
             state = self._get_state(db)
             q_values = json.loads(state.q_values_json or "{}")
             counts = json.loads(state.counts_json or "{}")
-            rows = db.execute(select(Trade).where(Trade.status != "OPEN", Trade.id > state.last_processed_trade_id).order_by(Trade.id.asc())).scalars().all()
+            rows = db.execute(select(Trade).where(
+                Trade.status != "OPEN",
+                Trade.status != "INVALID_CONTRACT",
+                Trade.id > state.last_processed_trade_id,
+            ).order_by(Trade.id.asc())).scalars().all()
             processed = 0
             for trade in rows:
                 state.last_processed_trade_id = max(state.last_processed_trade_id, trade.id)
