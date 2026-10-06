@@ -219,6 +219,7 @@ export default function App() {
   const activeNeural = Object.keys(neuralProduction).length ? neuralProduction : neuralLatest
   const neuralMetrics = activeNeural.metrics || {}
   const neuralOos = neuralMetrics.outOfSample || {}
+  const trainingReadiness = neuralModel.trainingReadiness || {}
   const rewardEvents = Array.isArray(learning.recentRewards) ? learning.recentRewards : []
   const nextPlan = intelligence.latestPlan || {}
   const researchSources = Array.isArray(intelligence.sources) ? intelligence.sources : []
@@ -415,6 +416,8 @@ export default function App() {
         <SystemItem label="Hypotheses" value={worker.hypothesesTested ?? 0} />
         <SystemItem label="Backtests" value={worker.backtestsRun ?? 0} />
         <SystemItem label="Dataset" value={worker.datasetSize ?? 0} />
+        <SystemItem label="Labeled progress" value={trainingReadiness.minimumSamples ? `${trainingReadiness.eligibleSamples ?? 0} / ${trainingReadiness.minimumSamples}` : String(trainingReadiness.eligibleSamples ?? 0)} good={Boolean(trainingReadiness.sampleThresholdReady)} />
+        <SystemItem label="Training state" value={trainingReadiness.status || 'COLLECTING_LABELS'} good={Boolean(trainingReadiness.productionModelReady)} />
         <SystemItem label="Candidate" value={worker.candidateVersion || 'not ready'} />
         <SystemItem label="Candidate score" value={worker.candidateScore != null ? Number(worker.candidateScore).toFixed(2) : '—'} />
         <SystemItem label="LLM provider" value={ollama.configured ? (ollama.provider || 'Connected') : 'Not configured'} good={ollama.configured} />
@@ -429,9 +432,14 @@ export default function App() {
           </div>
           <div className="core-stat-grid">
             <span><small>Architecture</small><b>{activeNeural.architecture || '14 → 24 → 1 MLP'}</b></span>
-            <span><small>Training samples</small><b>{activeNeural.trainedSamples ?? worker.neuralTrainedSamples ?? 0}</b></span>
+            <span><small>Labeled samples</small><b>{trainingReadiness.eligibleSamples ?? activeNeural.trainedSamples ?? worker.neuralTrainedSamples ?? 0}</b></span>
             <span><small>OOS AUC</small><b>{neuralOos.auc != null ? Number(neuralOos.auc).toFixed(3) : '—'}</b></span>
             <span><small>OOS Brier</small><b>{neuralOos.brier != null ? Number(neuralOos.brier).toFixed(3) : '—'}</b></span>
+          </div>
+          <div className="training-readiness">
+            <div><span>Training readiness</span><b>{Number(trainingReadiness.sampleProgressPct ?? 0).toFixed(0)}%</b></div>
+            <div className="training-readiness-track"><i style={{width:`${Math.max(0, Math.min(100, Number(trainingReadiness.sampleProgressPct ?? 0)))}%`}} /></div>
+            <small>{trainingReadiness.positiveSamples ?? 0} target-first • {trainingReadiness.negativeSamples ?? 0} stop-first • {trainingReadiness.classBalanceReady ? 'class balance ready' : 'collecting both classes'}</small>
           </div>
           <div className="learning-flow-line">
             <span>SMC V2 labels</span><i>→</i><span>postmarket train</span><i>→</i><span>validation/OOS</span><i>→</i><span>promote or shadow</span>

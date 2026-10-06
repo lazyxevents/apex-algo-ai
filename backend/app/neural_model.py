@@ -380,6 +380,28 @@ class NeuralModelService:
             ).order_by(NeuralModelArtifact.id.desc()).limit(1))
             latest = db.scalar(select(NeuralModelArtifact).order_by(NeuralModelArtifact.id.desc()).limit(1))
             total = int(db.scalar(select(func.count()).select_from(NeuralModelArtifact)) or 0)
+            eligible_filter = (
+                LearningSample.strategy.in_(["SMC_SCALP_V2", "SMC_SWING_V2"]),
+                LearningSample.outcome.in_(["TARGET", "STOP", "AMBIGUOUS_STOP_FIRST"]),
+            )
+            eligible = int(db.scalar(
+                select(func.count()).select_from(LearningSample).where(*eligible_filter)
+            ) or 0)
+            positive = int(db.scalar(
+                select(func.count()).select_from(LearningSample).where(
+                    *eligible_filter,
+                    LearningSample.label == 1,
+                )
+            ) or 0)
+            negative = int(db.scalar(
+                select(func.count()).select_from(LearningSample).where(
+                    *eligible_filter,
+                    LearningSample.label == 0,
+                )
+            ) or 0)
+
+        minimum = max(200, int(settings.neural_min_labeled_samples))
+        progress_pct = round(min(100.0, eligible / max(1, minimum) * 100.0), 1)
 
         def view(row: NeuralModelArtifact | None):
             if row is None:
@@ -406,6 +428,27 @@ class NeuralModelService:
             "minimumLabeledSamples": settings.neural_min_labeled_samples,
             "inferenceWeight": settings.neural_inference_weight,
             "modelsTrained": total,
+            "trainingReadiness": {
+                "eligibleSamples": eligible,
+                "minimumSamples": minimum,
+                "sampleProgressPct": progress_pct,
+                "positiveSamples": positive,
+                "negativeSamples": negative,
+                "classBalanceReady": positive >= 25 and negative >= 25,
+                "sampleThresholdReady": eligible >= minimum,
+                "productionModelReady": production is not None,
+                "promotionGates": {
+                    "minimumAuc": settings.neural_promotion_min_auc,
+                    "maximumBrier": settings.neural_promotion_max_brier,
+                },
+                "status": (
+                    "PRODUCTION_READY"
+                    if production is not None
+                    else "READY_TO_TRAIN"
+                    if eligible >= minimum and positive >= 25 and negative >= 25
+                    else "COLLECTING_LABELS"
+                ),
+            },
             "production": view(production),
             "latest": view(latest),
         }
