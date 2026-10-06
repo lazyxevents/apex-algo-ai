@@ -212,6 +212,11 @@ export default function App() {
   const ollama = status.ollama || {}
   const liveLearning = status.liveLearning || {}
   const liveMoments = Array.isArray(liveLearning.latest) ? liveLearning.latest : []
+  const intelligence = status.researchIntelligence || {}
+  const nextPlan = intelligence.latestPlan || {}
+  const researchSources = Array.isArray(intelligence.sources) ? intelligence.sources : []
+  const hypotheses = Array.isArray(intelligence.hypotheses) ? intelligence.hypotheses : []
+  const sectors = Array.isArray(intelligence.latestSectors) ? intelligence.latestSectors : []
   const providerReady = market.marketDataConfigured !== false
   const killed = Boolean(status.killSwitch || r.killSwitch)
   const phase = automation.lastDecision?.phase || {}
@@ -267,13 +272,99 @@ export default function App() {
       <Metric title="Max Drawdown" value={money(p.maxDrawdown)} sub={`Monthly cap ${money(r.maxMonthlyDrawdown)}`} tone={Number(p.maxDrawdown) > 0 ? 'negative' : 'neutral'} />
     </section>
 
+    <section className="panel intelligence-panel">
+      <div className="section-head intelligence-head">
+        <div>
+          <div className="eyebrow">APEX INTELLIGENCE GRAPH</div>
+          <h2>Research Memory • Market Structure • Strategy Network</h2>
+          <p>Obsidian-style map of the evidence pipeline. Live trade search stops at <b>15:15 IST</b>; after that APEX switches to research, sector study, hypothesis review and next-session planning.</p>
+        </div>
+        <div className="phase-stack">
+          <span className={`phase-chip ${String(worker.researchPhase || '').toLowerCase()}`}>{worker.researchPhase || phase.reason || 'IDLE'}</span>
+          <span className="phase-sub">{intelligence.knowledgeCount || 0} persisted sources</span>
+        </div>
+      </div>
+
+      <div className="intelligence-layout">
+        <KnowledgeGraph research={intelligence} worker={worker} marketResearch={marketResearch} />
+        <div className="next-plan-card">
+          <div className="plan-glow" />
+          <small>NEXT SESSION PLAN</small>
+          <h3>{nextPlan.planDate || 'Waiting for postmarket research'}</h3>
+          <div className="plan-bias">{nextPlan.marketBias || 'UNKNOWN'}</div>
+          <div className="plan-levels">
+            <span>Support <b>{nextPlan.support ?? '—'}</b></span>
+            <span>Resistance <b>{nextPlan.resistance ?? '—'}</b></span>
+          </div>
+          <div className="playbook">
+            <b>SCALP</b>
+            <span>{nextPlan.scalpPlaybook?.requires?.slice(0,2).join(' • ') || '1m/5m SMC confirmation'}</span>
+          </div>
+          <div className="playbook swing">
+            <b>SWING</b>
+            <span>{nextPlan.swingPlaybook?.requires?.slice(0,2).join(' • ') || '15m trend + 5m pullback'}</span>
+          </div>
+          <p>{nextPlan.note || 'Postmarket plan will be generated from market structure, sectors, research sources and validated strategy evidence.'}</p>
+        </div>
+      </div>
+
+      <div className="research-grid">
+        <div className="research-box">
+          <div className="research-box-head"><b>Source Stream</b><span>{intelligence.knowledgeCount || 0} MEMORY NODES</span></div>
+          <div className="source-stream">
+            {researchSources.length === 0 ? <div className="empty-mini">Run a deep learning cycle after market hours to collect public research/news.</div> :
+              researchSources.slice(0,8).map((s:any, i:number) => <a key={`${s.url}-${i}`} href={s.url} target="_blank" rel="noreferrer" className="source-node">
+                <span className="source-dot" />
+                <div><b>{s.title || 'Research source'}</b><small>{s.type || 'SOURCE'} • {s.category || 'RESEARCH'}</small></div>
+                <span className="source-arrow">↗</span>
+              </a>)}
+          </div>
+        </div>
+
+        <div className="research-box">
+          <div className="research-box-head"><b>Strategy Hypotheses</b><span>BACKTEST BEFORE TRUST</span></div>
+          <div className="hypothesis-stack">
+            {hypotheses.slice(0,6).map((h:any) => <div className="hypothesis-node" key={h.name}>
+              <div><span className={`family ${String(h.family || '').toLowerCase()}`}>{h.family}</span><b>{h.name}</b></div>
+              <p>{h.description}</p>
+              <small>{h.status} • score {Number(h.score || 0).toFixed(2)}</small>
+            </div>)}
+          </div>
+        </div>
+
+        <div className="research-box">
+          <div className="research-box-head"><b>Sector Radar</b><span>{sectors.length} TRACKED</span></div>
+          <div className="sector-stack">
+            {sectors.length === 0 ? <div className="empty-mini">Sector snapshot is generated during deep research.</div> :
+              sectors.slice(0,10).map((s:any) => {
+                const pct = Number(s.changePct || 0)
+                const width = Math.min(100, Math.max(8, Math.abs(pct) * 28))
+                return <div className="sector-row" key={s.sector}>
+                  <span>{s.sector}</span>
+                  <div className="sector-track"><i className={pct >= 0 ? 'up' : 'down'} style={{width:`${width}%`}} /></div>
+                  <b className={pnlClass(pct)}>{pct >= 0 ? '+' : ''}{pct.toFixed(2)}%</b>
+                </div>
+              })}
+          </div>
+        </div>
+      </div>
+
+      <div className="session-rail">
+        <div><b>08:00</b><span>Premarket refresh</span></div>
+        <i />
+        <div className="active"><b>09:20–15:15</b><span>Scan • Paper trade • Live learning</span></div>
+        <i />
+        <div><b>15:15+</b><span>Research • Sectors • Backtests • Tomorrow plan</span></div>
+      </div>
+    </section>
+
 
     <section className="panel">
       <div className="section-head compact">
         <div>
           <div className="eyebrow">MARKET RESEARCH</div>
           <h2>1m / 5m / 15m Structure Snapshot</h2>
-          <p>Research-only analytics: trend, support/resistance, BOS/CHOCH proxy, liquidity sweep, FVG and fake-breakout labels. Scheduled from <b>{automation.premarketResearchTime || '08:00'} IST</b>.</p>
+          <p>Multi-timeframe market intelligence: trend, support/resistance, BOS/CHOCH, liquidity sweep, FVG, fake breakout, pin bar, hammer, engulfing, harami, inside bar, doji and star patterns.</p>
         </div>
         <span className="badge subtle">{marketResearch.status || 'waiting'}</span>
       </div>
@@ -295,13 +386,13 @@ export default function App() {
           </div>
         })}
       </div>
-      {marketResearch.llm?.summary && <p className="panel-note"><b>Ollama summary:</b> {marketResearch.llm.summary}</p>}
+      {marketResearch.llm?.summary && <p className="panel-note"><b>LLM summary:</b> {marketResearch.llm.summary}</p>}
       <p className="panel-note">News/LLM research stays optional and does not place orders or override hard risk controls.</p>
     </section>
 
     <section className="panel learning-panel">
       <div className="section-head compact">
-        <div><div className="eyebrow">APEX LEARNING ENGINE</div><h2>Research → Patterns → Backtest → Candidate Model</h2><p>Live worker visibility. Research cannot bypass hard risk controls or place orders directly.</p></div>
+        <div><div className="eyebrow">APEX LEARNING ENGINE</div><h2>Sources → Patterns → Hypotheses → Backtest → Candidate</h2><p>During market hours it learns from structure/outcomes. After 15:15 it crawls bounded public research/news, studies sectors and builds the next-session plan.</p></div>
         <span className={`badge subtle ${worker.running ? 'worker-live' : ''}`}>{worker.running ? 'LEARNING NOW' : (worker.stage || 'WAITING')}</span>
       </div>
       <div className="learning-grid">
@@ -310,6 +401,9 @@ export default function App() {
         <SystemItem label="Cycles today" value={worker.cyclesToday ?? 0} />
         <SystemItem label="Runtime today" value={`${worker.researchHoursToday ?? 0}h / ${worker.dailyHourBudget ?? 15}h`} />
         <SystemItem label="Sources reviewed" value={worker.sourcesReviewed ?? 0} />
+        <SystemItem label="Knowledge memory" value={worker.knowledgeCount ?? intelligence.knowledgeCount ?? 0} />
+        <SystemItem label="Research phase" value={worker.researchPhase || 'IDLE'} />
+        <SystemItem label="Sectors tracked" value={worker.sectorsTracked ?? sectors.length} />
         <SystemItem label="Patterns found" value={worker.patternsDetected ?? 0} />
         <SystemItem label="Hypotheses" value={worker.hypothesesTested ?? 0} />
         <SystemItem label="Backtests" value={worker.backtestsRun ?? 0} />
@@ -328,7 +422,7 @@ export default function App() {
 
     <section className="panel live-learning-panel">
       <div className="section-head compact">
-        <div><div className="eyebrow">LIVE MARKET LEARNING</div><h2>SENSEX 1m Moment Memory</h2><p>Every scan stores the current SMC/price-action context before the outcome is known. Paper trades are linked back and labelled after exit.</p></div>
+        <div><div className="eyebrow">LIVE MARKET LEARNING</div><h2>SENSEX 1m Moment Memory</h2><p>09:20–15:15 only. Valid-price SMC/price-action moments are stored before outcomes are known; after cutoff the worker switches to deep research instead of creating after-hours noise.</p></div>
         <span className="badge subtle">{liveLearning.totalObservations ?? 0} OBSERVATIONS</span>
       </div>
       <div className="learning-grid">
@@ -553,6 +647,42 @@ export default function App() {
       <span>NO TRADE is valid • Monthly target is a lock, not a guaranteed return • Real broker orders disabled</span>
     </footer>
   </main>
+}
+
+function KnowledgeGraph({research, worker, marketResearch}:{research:any, worker:any, marketResearch:any}) {
+  const nodes = [
+    {id:'market', x:90, y:85, label:'MARKET', sub:marketResearch?.analytics?.markets?.SENSEX?.state || 'SENSEX'},
+    {id:'smc', x:275, y:55, label:'SMC', sub:'BOS • CHOCH • FVG'},
+    {id:'candle', x:465, y:80, label:'PATTERNS', sub:`${worker.patternsDetected || 0} decoded`},
+    {id:'scalp', x:690, y:55, label:'SCALP', sub:'1m • 5m'},
+    {id:'swing', x:800, y:180, label:'SWING', sub:'15m • 5m • 1m'},
+    {id:'sector', x:625, y:285, label:'SECTORS', sub:`${(research.latestSectors || []).length} tracked`},
+    {id:'sources', x:390, y:300, label:'SOURCES', sub:`${research.knowledgeCount || 0} memory`},
+    {id:'llm', x:160, y:275, label:'LLM', sub:'evidence review'},
+    {id:'core', x:445, y:180, label:'APEX', sub:'decision graph'},
+  ]
+  const byId:any = Object.fromEntries(nodes.map(n=>[n.id,n]))
+  const edges = [
+    ['market','smc'],['market','core'],['smc','candle'],['smc','core'],['candle','scalp'],['candle','core'],
+    ['core','scalp'],['core','swing'],['sector','swing'],['sector','core'],['sources','llm'],['sources','core'],
+    ['llm','core'],['core','sector'],['scalp','swing'],
+  ]
+  return <div className="knowledge-graph">
+    <div className="graph-grid" />
+    <svg viewBox="0 0 900 360" role="img" aria-label="APEX research knowledge graph">
+      <defs>
+        <filter id="nodeGlow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      {edges.map(([a,b],i)=><line key={`${a}-${b}`} className={`graph-edge e${i%3}`} x1={byId[a].x} y1={byId[a].y} x2={byId[b].x} y2={byId[b].y}/>)}
+      {nodes.map(n=><g key={n.id} className={`kg-node ${n.id==='core'?'core':''}`} transform={`translate(${n.x},${n.y})`}>
+        <circle r={n.id==='core'?44:34}/>
+        <circle className="node-ring" r={n.id==='core'?54:43}/>
+        <text className="node-label" textAnchor="middle" y="-2">{n.label}</text>
+        <text className="node-sub" textAnchor="middle" y="14">{n.sub}</text>
+      </g>)}
+    </svg>
+    <div className="graph-caption"><span className="pulse"/> Evidence flows into APEX; hard risk controls remain outside the graph.</div>
+  </div>
 }
 
 function Metric({title, value, sub, tone = 'neutral'}:{title:string, value:ReactNode, sub?:ReactNode, tone?:string}) {
