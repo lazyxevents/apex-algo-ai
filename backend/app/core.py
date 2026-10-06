@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     stop_new_trade_time: str = "15:00"
     force_exit_time: str = "15:10"
 
-    capital: float = 20000
+    capital: float = 40000
     min_trading_capital: float = 5000
-    capital_usage_pct: float = 85.0
+    capital_usage_pct: float = 80.0
     auto_compound_profits: bool = True
     max_deployable_capital: float = 0.0
     dynamic_risk_limits: bool = True
@@ -37,13 +37,21 @@ class Settings(BaseSettings):
     max_daily_loss: float = 400
     max_weekly_loss: float = 800
     max_monthly_drawdown: float = 2000
-    max_trades_per_day: int = 2
+    max_trades_per_day: int = 5
     max_concurrent_positions: int = 1
     allow_live_orders: bool = False
 
-    candle_interval_minutes: int = 5
+    candle_interval_minutes: int = 1
     signal_min_score: float = 0.65
     reward_risk_ratio: float = 1.8
+    active_indices_raw: str = "SENSEX"
+    sensex_lot_size: int = 20
+    scalp_target_points: float = 4.0
+    scalp_entry_pullback_points: float = 10.0
+    scalp_max_stop_points: float = 40.0
+    swing_first_target_points: float = 55.0
+    swing_runner_target_points: float = 150.0
+    swing_partial_pct: float = 50.0
     option_stop_pct: float = 18.0
     max_option_spread_pct: float = 2.5
     min_option_volume: int = 1000
@@ -127,19 +135,26 @@ class Settings(BaseSettings):
         return [x.strip() for x in self.cors_origins_raw.split(",") if x.strip()]
 
     @property
+    def active_indices(self) -> set[str]:
+        return {x.strip().upper() for x in self.active_indices_raw.split(",") if x.strip()}
+
+    @property
     def underlying_keys(self) -> dict[str, str]:
         provider = self.market_data_provider.strip().lower()
         if provider in {"yfinance", "yahoo"}:
-            return {
+            keys = {
                 "NIFTY": self.yfinance_nifty_symbol,
                 "BANKNIFTY": self.yfinance_banknifty_symbol,
                 "SENSEX": self.yfinance_sensex_symbol,
             }
-        return {
-            "NIFTY": self.upstox_nifty_key,
-            "BANKNIFTY": self.upstox_banknifty_key,
-            "SENSEX": self.upstox_sensex_key,
-        }
+        else:
+            keys = {
+                "NIFTY": self.upstox_nifty_key,
+                "BANKNIFTY": self.upstox_banknifty_key,
+                "SENSEX": self.upstox_sensex_key,
+            }
+        active = self.active_indices
+        return {name: key for name, key in keys.items() if name in active}
 
 
 @lru_cache
