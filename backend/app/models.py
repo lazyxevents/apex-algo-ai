@@ -133,3 +133,16 @@ class StrategyHypothesis(Base):
     status: Mapped[str] = mapped_column(String(32), default="UNVERIFIED", index=True)
     score: Mapped[float] = mapped_column(Float, default=0.0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class DailyMarketPlan(Base):
+    __tablename__ = "daily_market_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_date: Mapped[str] = mapped_column(String(16), index=True)
+    session: Mapped[str] = mapped_column(String(24), index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    market_json: Mapped[str] = mapped_column(Text, default="{}")
+    sectors_json: Mapped[str] = mapped_column(Text, default="{}")
+    research_json: Mapped[str] = mapped_column(Text, default="{}")
+    plan_json: Mapped[str] = mapped_column(Text, default="{}")
