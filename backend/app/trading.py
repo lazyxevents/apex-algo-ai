@@ -18,6 +18,7 @@ from .live_learning import live_learning_service
 from .market_research import build_market_research
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
+from .research_engine import research_engine
 from .strategy import adaptive_learner, evaluate_signal, market_context, select_option
 
 IST = ZoneInfo(settings.timezone)
@@ -973,6 +974,7 @@ class TradingEngine:
             "learning": adaptive_learner.snapshot(),
             "learningWorker": learning_worker.snapshot(),
             "liveLearning": live_learning_service.snapshot(),
+            "researchIntelligence": research_engine.snapshot(),
             "ollama": {
                 "enabled": ollama_advisor.configured,
                 "configured": ollama_advisor.configured,
