@@ -12,6 +12,7 @@ from .dataset_model import dataset_model_service
 from .kite import kite_service
 from .learning_worker import learning_worker
 from .live_learning import live_learning_service
+from .neural_model import neural_model_service
 from .research_engine import research_engine
 from .strategy import adaptive_learner
 from .trading import trading_engine
@@ -197,6 +198,16 @@ def learning_dataset():
 @app.post("/api/learning/evaluate-candidate")
 def learning_evaluate_candidate():
     return dataset_model_service.evaluate_candidate()
+
+
+@app.get("/api/learning/neural")
+def neural_learning_status():
+    return neural_model_service.snapshot()
+
+
+@app.post("/api/learning/neural/train")
+def neural_learning_train():
+    return neural_model_service.train_candidate()
 
 
 @app.get("/api/research/intelligence")
