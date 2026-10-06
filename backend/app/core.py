@@ -105,6 +105,9 @@ class Settings(BaseSettings):
     ollama_api_key: str = ""
     ollama_timeout_seconds: float = 12.0
     ollama_web_search_enabled: bool = False
+    openrouter_api_key: str = ""
+    openrouter_model: str = "openrouter/free"
+    openrouter_timeout_seconds: float = 15.0
     news_query_limit: int = 6
     news_results_per_query: int = 5
 
