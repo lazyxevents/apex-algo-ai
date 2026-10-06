@@ -16,6 +16,7 @@ from .llm_advisor import ollama_advisor
 from .learning_worker import learning_worker
 from .live_learning import live_learning_service
 from .market_research import build_market_research
+from .neural_model import neural_model_service
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
 from .research_engine import research_engine
@@ -606,8 +607,18 @@ class TradingEngine:
         context = market_context(candles)
         arm = adaptive_learner.choose_arm(context, capital)
         signal = evaluate_signal(candles, arm)
+        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name})
+        neural = neural_model_service.predict_signal(signal)
+        signal["neural"] = neural
+        if neural.get("status") == "production" and neural.get("probability") is not None and signal.get("action") in {"CE", "PE"}:
+            base_score = float(signal.get("score") or 0.0)
+            weight = max(0.0, min(0.30, float(settings.neural_inference_weight)))
+            probability = float(neural["probability"])
+            signal["rawSignalScore"] = round(base_score, 4)
+            signal["score"] = round(base_score * (1.0 - weight) + probability * weight, 4)
+            signal["neuralBlendWeight"] = weight
         latest_candle_time = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date") if candles else None
-        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name, "candleTime": latest_candle_time})
+        signal["candleTime"] = latest_candle_time
         return signal
 
     def _scan_and_observe(self, provider, capital: float) -> tuple[list[dict], list[dict]]:
@@ -722,7 +733,7 @@ class TradingEngine:
 
             ranked: list[dict] = []
             live_observations: list[dict] = []
-            if provider.market_ready and now_ist.weekday() < 5 and phase["tradable"]:
+            if provider.market_ready and now_ist.weekday() < 5 and phase.get("liveScan", False):
                 with SessionLocal() as db:
                     observation_capital = self._effective_capital(db)
                 ranked, live_observations = self._scan_and_observe(provider, observation_capital)
@@ -859,6 +870,9 @@ class TradingEngine:
                 "chartUrl": chart_url,
                 "ollamaReview": llm_review,
                 "signalScore": best["score"],
+                "rawSignalScore": best.get("rawSignalScore", best["score"]),
+                "neural": best.get("neural") or {},
+                "neuralBlendWeight": best.get("neuralBlendWeight", 0.0),
                 "entryReason": best.get("entryReason", "STANDARD_SIGNAL"),
                 "entryThreshold": best.get("entryThreshold", settings.signal_min_score),
                 "smcOverride": bool(best.get("smcOverride")),
@@ -996,6 +1010,7 @@ class TradingEngine:
             "learningWorker": learning_worker.snapshot(),
             "liveLearning": live_learning_service.snapshot(),
             "researchIntelligence": research_engine.snapshot(),
+            "neuralModel": neural_model_service.snapshot(),
             "ollama": {
                 "enabled": ollama_advisor.configured,
                 "configured": ollama_advisor.configured,
