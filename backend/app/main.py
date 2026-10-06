@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -207,6 +208,10 @@ def neural_learning_status():
 
 @app.post("/api/learning/neural/train")
 def neural_learning_train():
+    now = datetime.now(ZoneInfo(settings.timezone))
+    hm = now.strftime("%H:%M")
+    if now.weekday() < 5 and settings.trade_start_time <= hm < settings.stop_new_trade_time:
+        raise HTTPException(status_code=409, detail="Neural weights are frozen during the live trade window; train postmarket/premarket.")
     return neural_model_service.train_candidate()
 
 
