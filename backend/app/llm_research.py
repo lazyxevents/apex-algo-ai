@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 import httpx
@@ -11,7 +12,29 @@ from .core import settings
 class OllamaResearchAssistant:
     @property
     def configured(self) -> bool:
-        return bool(settings.ollama_enabled and settings.ollama_base_url and settings.ollama_model)
+        return bool(
+            (settings.ollama_enabled and settings.ollama_base_url and settings.ollama_model)
+            or settings.openrouter_api_key
+        )
+
+    @property
+    def provider(self) -> str:
+        if settings.ollama_enabled and settings.ollama_base_url and settings.ollama_model:
+            return "ollama"
+        if settings.openrouter_api_key:
+            return "openrouter"
+        return "none"
+
+    @staticmethod
+    def _parse_json(text: str) -> dict[str, Any]:
+        raw = (text or "").strip()
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            match = re.search(r"\{.*\}", raw, re.S)
+            if not match:
+                raise
+            return json.loads(match.group(0))
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -24,7 +47,7 @@ class OllamaResearchAssistant:
             return {
                 "enabled": False,
                 "status": "not_configured",
-                "summary": "Ollama research layer is not configured.",
+                "summary": "LLM research layer is not configured.",
                 "marketState": "UNKNOWN",
                 "riskState": "UNKNOWN",
                 "observations": [],
@@ -61,24 +84,50 @@ class OllamaResearchAssistant:
             ],
         }
         try:
-            with httpx.Client(timeout=max(2.0, settings.ollama_timeout_seconds)) as client:
-                response = client.post(
-                    settings.ollama_base_url.rstrip("/") + "/api/chat",
-                    headers=self._headers(),
-                    json=payload,
-                )
-                response.raise_for_status()
-                data = response.json()
-                parsed = json.loads(((data.get("message") or {}).get("content") or "{}").strip())
-                parsed["enabled"] = True
-                parsed["status"] = "ok"
-                parsed["sources"] = [row.get("url") for row in (news or {}).get("results", []) if row.get("url")]
-                return parsed
+            if self.provider == "openrouter":
+                openrouter_payload = {
+                    "model": settings.openrouter_model,
+                    "temperature": 0,
+                    "messages": [
+                        {"role": "system", "content": "You are a conservative market-research summarizer. Return JSON only with marketState, riskState, summary, observations."},
+                        {"role": "user", "content": json.dumps(prompt, default=str)},
+                    ],
+                }
+                with httpx.Client(timeout=max(3.0, settings.openrouter_timeout_seconds)) as client:
+                    response = client.post(
+                        "https://openrouter.ai/api/v1/chat/completions",
+                        headers={
+                            "Authorization": f"Bearer {settings.openrouter_api_key}",
+                            "Content-Type": "application/json",
+                            "X-Title": "APEX Algo AI",
+                        },
+                        json=openrouter_payload,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "{}")
+                parsed = self._parse_json(content)
+                parsed["model"] = data.get("model")
+            else:
+                with httpx.Client(timeout=max(2.0, settings.ollama_timeout_seconds)) as client:
+                    response = client.post(
+                        settings.ollama_base_url.rstrip("/") + "/api/chat",
+                        headers=self._headers(),
+                        json=payload,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                parsed = self._parse_json(((data.get("message") or {}).get("content") or "{}").strip())
+            parsed["enabled"] = True
+            parsed["status"] = "ok"
+            parsed["provider"] = self.provider
+            parsed["sources"] = [row.get("url") for row in (news or {}).get("results", []) if row.get("url")]
+            return parsed
         except Exception as exc:
             return {
                 "enabled": True,
                 "status": "error",
-                "summary": "Ollama research summary failed; deterministic analytics remain available.",
+                "summary": "LLM research summary failed; deterministic analytics remain available.",
                 "marketState": "UNKNOWN",
                 "riskState": "UNKNOWN",
                 "observations": [str(exc)[:180]],
