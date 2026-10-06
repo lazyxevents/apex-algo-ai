@@ -182,6 +182,28 @@ class NeuralModelService:
                 "minimum": minimum,
                 "note": "TIMEOUT/censored rows are excluded from neural labels.",
             }
+        source_max_sample_id = max((int(row.id) for row in rows), default=0)
+        with SessionLocal() as db:
+            latest_existing = db.scalar(select(NeuralModelArtifact).order_by(NeuralModelArtifact.id.desc()).limit(1))
+        if latest_existing:
+            try:
+                latest_metrics = json.loads(latest_existing.metrics_json or "{}")
+            except json.JSONDecodeError:
+                latest_metrics = {}
+            if (
+                int(latest_existing.trained_samples or 0) == int(len(y))
+                and int(latest_metrics.get("sourceMaxSampleId") or 0) == source_max_sample_id
+            ):
+                return {
+                    "status": "up_to_date",
+                    "kind": "neural_mlp",
+                    "version": latest_existing.version,
+                    "role": latest_existing.role,
+                    "eligibleSamples": int(len(y)),
+                    "sourceMaxSampleId": source_max_sample_id,
+                    "note": "No new labeled V2 outcomes since the last neural training run.",
+                }
+
         if int(y.sum()) < 25 or int((1 - y).sum()) < 25:
             return {
                 "status": "insufficient_class_balance",
@@ -262,6 +284,7 @@ class NeuralModelService:
             "validation": _metrics(y_valid, valid_p),
             "outOfSample": _metrics(y_test, test_p),
             "featureNames": FEATURE_NAMES,
+            "sourceMaxSampleId": source_max_sample_id,
         }
 
         valid_ok = (
