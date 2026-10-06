@@ -150,11 +150,20 @@ class ContinuousLearningWorker:
             dataset = dataset_model_service.ingest(provider)
             self.state.datasetSize = int(dataset.get("datasetSize", 0))
 
-            self._heartbeat("backtest", "Running approved strategy walk-forward research")
-            backtest = adaptive_learner.daily_research(provider)
-            arms = backtest.get("arms") or {}
-            self.state.backtestsRun += len(arms)
-            scores = [float(v.get("score", 0) or 0) for v in arms.values() if isinstance(v, dict)]
+            if phase in {"POSTMARKET", "WEEKEND_RESEARCH"}:
+                self._heartbeat("backtest", "Postmarket: running approved strategy walk-forward research")
+                backtest = adaptive_learner.daily_research(provider)
+                arms = backtest.get("arms") or {}
+                self.state.backtestsRun += len(arms)
+            else:
+                self._heartbeat("backtest", f"{phase}: reusing last completed walk-forward research; full daily backtest waits for postmarket")
+                latest = adaptive_learner.snapshot().get("latestResearch") or {}
+                backtest = latest
+                arms = latest.get("arms") or {}
+            scores = [
+                float((v or {}).get("score") or (v or {}).get("expectancyR") or 0)
+                for v in arms.values() if isinstance(v, dict)
+            ]
             self.state.candidateScore = round(max(scores), 4) if scores else None
 
             self._heartbeat("candidate_evaluation", "Evaluating candidate probability baseline on chronological holdout data")
