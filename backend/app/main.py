@@ -93,6 +93,11 @@ class ModeRequest(BaseModel):
     mode: Literal["OFF", "PAPER", "SAFE", "KILLED"]
 
 
+class TradePlanRequest(BaseModel):
+    stop: float = Field(gt=0)
+    target: float = Field(gt=0)
+
+
 class PaperOrderRequest(BaseModel):
     symbol: str = Field(min_length=2, max_length=128)
     direction: Literal["CE", "PE"]
@@ -223,6 +228,22 @@ def list_trades(limit: int = 100):
 def paper_order(body: PaperOrderRequest):
     try:
         return trading_engine.open_paper_trade(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.patch("/api/paper/trades/{trade_id}/plan")
+def update_trade_plan(trade_id: int, body: TradePlanRequest):
+    try:
+        return trading_engine.update_trade_plan(trade_id, body.stop, body.target)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/paper/trades/{trade_id}/exit")
+def manual_exit_trade(trade_id: int):
+    try:
+        return trading_engine.manual_exit_trade(market_service, trade_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
