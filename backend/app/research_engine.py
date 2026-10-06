@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from math import isfinite
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import quote_plus
@@ -80,6 +81,16 @@ HYPOTHESES = [
         "rules": {"requires": ["engulfing", "structure_event"]},
     },
 ]
+
+
+def _json_safe(value):
+    if isinstance(value, float):
+        return value if isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _clean_text(raw: str, limit: int = 1600) -> str:
@@ -211,7 +222,11 @@ class ResearchIntelligenceEngine:
                     continue
                 prev = float(frame["Close"].iloc[-2])
                 last = float(frame["Close"].iloc[-1])
-                pct = ((last - prev) / prev * 100) if prev else 0.0
+                if not (isfinite(prev) and isfinite(last)) or prev <= 0:
+                    continue
+                pct = (last - prev) / prev * 100
+                if not isfinite(pct):
+                    continue
                 rows.append({"sector": name, "symbol": symbol, "last": round(last, 2), "changePct": round(pct, 3)})
             except Exception:
                 continue
@@ -327,7 +342,7 @@ class ResearchIntelligenceEngine:
                 return json.loads(raw or "")
             except Exception:
                 return fallback
-        return {
+        return _json_safe({
             "knowledgeCount": int(total_sources),
             "sources": [{
                 "category": r.category,
@@ -349,7 +364,7 @@ class ResearchIntelligenceEngine:
             } for r in hypothesis_rows],
             "latestPlan": parse(plan_row.plan_json, {}) if plan_row else {},
             "latestSectors": parse(plan_row.sectors_json, []) if plan_row else [],
-        }
+        })
 
 
 research_engine = ResearchIntelligenceEngine()
