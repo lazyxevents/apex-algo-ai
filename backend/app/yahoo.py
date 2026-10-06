@@ -137,7 +137,11 @@ class YahooFinanceService:
         premium = max(5.0, spot * settings.yfinance_synthetic_premium_pct / 100)
         step = 50 if index_name == "NIFTY" else 100
         strike = round(spot / step) * step
-        lot_size = max(1, int(settings.yfinance_synthetic_lot_size))
+        lot_size = (
+            max(1, int(settings.sensex_lot_size))
+            if index_name.upper() == "SENSEX"
+            else max(1, int(settings.yfinance_synthetic_lot_size))
+        )
         symbol = f"SIM|{index_name}|{direction}|{int(strike)}"
         return {
             "instrumentKey": symbol,
