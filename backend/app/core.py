@@ -122,6 +122,17 @@ class Settings(BaseSettings):
     research_max_articles_per_cycle: int = 16
     research_source_timeout_seconds: float = 8.0
 
+    neural_training_enabled: bool = True
+    neural_min_labeled_samples: int = 500
+    neural_hidden_units: int = 24
+    neural_epochs: int = 45
+    neural_batch_size: int = 256
+    neural_learning_rate: float = 0.015
+    neural_l2: float = 0.0005
+    neural_promotion_min_auc: float = 0.54
+    neural_promotion_max_brier: float = 0.25
+    neural_inference_weight: float = 0.15
+
     upstox_access_token: str = ""
     upstox_sandbox_token: str = ""
     upstox_sandbox_product: str = "I"
@@ -189,7 +200,7 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from .models import AuditLog, DailyMarketPlan, LearningSample, LiveMarketObservation, ModelEvaluation, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
+    from .models import AuditLog, DailyMarketPlan, LearningRewardEvent, LearningSample, LiveMarketObservation, ModelEvaluation, NeuralModelArtifact, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
