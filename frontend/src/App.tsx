@@ -246,7 +246,7 @@ export default function App() {
         <span className="badge subtle">{marketResearch.status || 'waiting'}</span>
       </div>
       <div className="system-strip">
-        {['NIFTY','BANKNIFTY','SENSEX'].map(name => {
+        {['SENSEX'].map(name => {
           const m = researchMarkets[name] || {}
           const f1 = m.frames?.['1m'] || {}
           const f5 = m.frames?.['5m'] || {}
