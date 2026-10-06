@@ -592,9 +592,24 @@ class TradingEngine:
                     return decision
 
             entry = float(option["ltp"])
-            stop_distance = max(entry * settings.option_stop_pct / 100, 0.05)
+            strategy_name = str(best.get("chosenStrategy") or best.get("strategy") or "")
+            is_scalp = "SCALP" in strategy_name.upper()
+            delta = max(0.05, abs(float(option.get("delta") or settings.yfinance_synthetic_delta)))
+            previous_low = float(best.get("previousLow") or best["underlyingPrice"])
+            previous_high = float(best.get("previousHigh") or best["underlyingPrice"])
+            spot = float(best["underlyingPrice"])
+            if best["action"] == "CE":
+                structure_distance = max(0.0, spot - previous_low) * delta
+            else:
+                structure_distance = max(0.0, previous_high - spot) * delta
+            fallback_stop = max(entry * settings.option_stop_pct / 100, 0.05)
+            stop_distance = structure_distance if structure_distance > 0.05 else fallback_stop
+            stop_distance = min(stop_distance, settings.scalp_max_stop_points) if is_scalp else stop_distance
             stop = round(max(0.05, entry - stop_distance), 2)
-            target = round(entry + stop_distance * settings.reward_risk_ratio, 2)
+            if is_scalp:
+                target = round(entry + settings.scalp_target_points, 2)
+            else:
+                target = round(entry + settings.swing_runner_target_points, 2)
             with SessionLocal() as db:
                 qty = self._quantity_for_risk(entry, stop, lot_size, db)
                 risk_limit = self._limits(db)["perTrade"]
@@ -606,7 +621,16 @@ class TradingEngine:
             initial_risk = round((entry - stop) * qty, 2)
             context = best.get("context") or {}
             meta = {
-                "strategy": best.get("chosenStrategy") or best.get("strategy"),
+                "strategy": strategy_name,
+                "tradeStyle": "SCALP" if is_scalp else "SWING",
+                "stopModel": "previous-candle structure mapped to option premium via delta; fallback percentage stop",
+                "previousCandleLow": previous_low,
+                "previousCandleHigh": previous_high,
+                "structureStopDistance": round(stop_distance, 2),
+                "firstTarget": round(entry + (settings.scalp_target_points if is_scalp else settings.swing_first_target_points), 2),
+                "runnerTarget": target,
+                "partialBookPct": 0.0 if is_scalp else settings.swing_partial_pct,
+                "pullbackEntryPoints": settings.scalp_entry_pullback_points if is_scalp else 0.0,
                 "signalScore": best["score"],
                 "index": best["index"],
                 "underlyingKey": best["underlyingKey"],
