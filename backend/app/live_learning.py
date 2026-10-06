@@ -17,17 +17,6 @@ class LiveLearningService:
     def observe(self, signal: dict[str, Any], *, candle_time: datetime | None = None) -> dict[str, Any]:
         context = signal.get("context") or {}
         patterns = signal.get("patterns") or {}
-        llm = ollama_advisor.analyze_trade({
-            "phase": "LIVE_OBSERVATION",
-            "instrument": signal.get("index"),
-            "marketPrice": signal.get("underlyingPrice"),
-            "action": signal.get("action", "NO_TRADE"),
-            "signalScore": signal.get("score", 0),
-            "strategy": signal.get("chosenStrategy") or signal.get("strategy"),
-            "context": context,
-            "patterns": patterns,
-            "instruction": "Review the current market moment only. Do not override hard risk or place orders.",
-        })
         now = datetime.now(timezone.utc)
         with SessionLocal() as db:
             if candle_time is not None:
@@ -39,6 +28,34 @@ class LiveLearningService:
                 ).order_by(LiveMarketObservation.id.desc()).limit(1))
                 if existing:
                     return self._dict(existing)
+
+            minute = candle_time.minute if candle_time else now.minute
+            high_value = str(signal.get("action") or "NO_TRADE") in {"CE", "PE"} or float(signal.get("score") or 0) >= 0.65
+            scheduled_review = minute % 15 == 0
+            if ollama_advisor.configured and (high_value or scheduled_review):
+                llm = ollama_advisor.analyze_trade({
+                    "phase": "LIVE_OBSERVATION",
+                    "instrument": signal.get("index"),
+                    "marketPrice": signal.get("underlyingPrice"),
+                    "action": signal.get("action", "NO_TRADE"),
+                    "signalScore": signal.get("score", 0),
+                    "strategy": signal.get("chosenStrategy") or signal.get("strategy"),
+                    "context": context,
+                    "patterns": patterns,
+                    "instruction": "Review the current market moment only. Do not override hard risk or place orders.",
+                })
+            else:
+                llm = {
+                    "enabled": bool(ollama_advisor.configured),
+                    "status": "quota_saver" if ollama_advisor.configured else "not_configured",
+                    "provider": ollama_advisor.provider,
+                    "model": ollama_advisor.model,
+                    "bias": "NEUTRAL",
+                    "confidence": 0.0,
+                    "risk": "UNKNOWN",
+                    "reasons": [],
+                    "warnings": [],
+                }
             row = LiveMarketObservation(
                 observed_at=now,
                 instrument=str(signal.get("index") or "UNKNOWN"),
