@@ -560,6 +560,15 @@ class TradingEngine:
             )
             decision["exits"] = exits
 
+            ranked: list[dict] = []
+            live_observations: list[dict] = []
+            if provider.market_ready and now_ist.weekday() < 5 and phase["tradable"]:
+                with SessionLocal() as db:
+                    observation_capital = self._effective_capital(db)
+                ranked, live_observations = self._scan_and_observe(provider, observation_capital)
+                decision["liveObservations"] = live_observations
+                decision["signals"] = ranked
+
             risk = self.risk_snapshot()
             if risk["monthlyTargetLocked"]:
                 if risk["openPositions"]:
@@ -590,38 +599,10 @@ class TradingEngine:
                 capital = self._effective_capital(db)
                 deployable = capital * settings.capital_usage_pct / 100
 
-            ranked = []
-            keys = settings.underlying_keys
-            with ThreadPoolExecutor(max_workers=len(keys)) as pool:
-                futures = {
-                    pool.submit(self._scan_one, provider, name, key, capital): name
-                    for name, key in keys.items()
-                }
-                for future in as_completed(futures):
-                    try:
-                        ranked.append(future.result())
-                    except Exception as exc:
-                        ranked.append({
-                            "action": "NO_TRADE",
-                            "score": 0.0,
-                            "reason": f"scan failure: {exc}",
-                            "index": futures[future],
-                        })
-            ranked.sort(key=lambda x: x.get("score", 0), reverse=True)
-            live_observations = []
-            for signal in ranked:
-                try:
-                    candle_time = signal.get("candleTime")
-                    if isinstance(candle_time, str):
-                        try:
-                            candle_time = datetime.fromisoformat(candle_time.replace("Z", "+00:00"))
-                        except ValueError:
-                            candle_time = None
-                    live_observations.append(live_learning_service.observe(signal, candle_time=candle_time if isinstance(candle_time, datetime) else None))
-                except Exception as exc:
-                    self._audit("learning.live_observation_error", {"index": signal.get("index"), "error": str(exc)})
-            decision["liveObservations"] = live_observations
-            decision["signals"] = ranked
+            if not ranked:
+                ranked, live_observations = self._scan_and_observe(provider, capital)
+                decision["liveObservations"] = live_observations
+                decision["signals"] = ranked
             best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
             if best.get("action") not in {"CE", "PE"}:
                 decision["reason"] = "no strategy setup passed score + candlestick confirmation"
