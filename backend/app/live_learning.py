@@ -111,10 +111,15 @@ class LiveLearningService:
 
     def snapshot(self, limit: int = 12) -> dict[str, Any]:
         with SessionLocal() as db:
-            total = db.scalar(select(func.count()).select_from(LiveMarketObservation)) or 0
-            pending = db.scalar(select(func.count()).select_from(LiveMarketObservation).where(LiveMarketObservation.outcome == "PENDING")) or 0
+            valid_filter = LiveMarketObservation.market_price > 0
+            total = db.scalar(select(func.count()).select_from(LiveMarketObservation).where(valid_filter)) or 0
+            pending = db.scalar(select(func.count()).select_from(LiveMarketObservation).where(
+                valid_filter,
+                LiveMarketObservation.outcome == "PENDING",
+                LiveMarketObservation.action.in_(["CE", "PE"]),
+            )) or 0
             rows = list(db.execute(
-                select(LiveMarketObservation).order_by(LiveMarketObservation.id.desc()).limit(max(1, min(limit, 50)))
+                select(LiveMarketObservation).where(valid_filter).order_by(LiveMarketObservation.id.desc()).limit(max(1, min(limit, 50)))
             ).scalars().all())
             return {
                 "enabled": True,
