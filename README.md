@@ -171,8 +171,8 @@ Default trading window:
 
 ```env
 TRADE_START_TIME=09:20
-STOP_NEW_TRADE_TIME=15:00
-FORCE_EXIT_TIME=15:10
+STOP_NEW_TRADE_TIME=15:15
+FORCE_EXIT_TIME=15:20
 ```
 
 Dynamic locks include per-trade risk, daily loss, weekly loss, monthly drawdown, maximum trades/day and maximum concurrent positions.
@@ -188,6 +188,8 @@ GET  /api/learning/status
 GET  /api/learning/dataset
 POST /api/learning/run-once
 POST /api/learning/evaluate-candidate
+GET  /api/learning/neural
+POST /api/learning/neural/train
 GET  /api/trades
 POST /api/automation/run-once
 POST /api/research/run-once
@@ -207,7 +209,9 @@ pytest -q
 
 The continuous worker now records structured 1-minute directional setup samples with EMA/RSI/ATR/volume, candlestick patterns and SMC context (BOS, CHOCH, liquidity sweep, FVG and fake breakout), plus target-before-stop labels, MAE/MFE and R-multiple outcome. Candidate evaluation uses chronological train/validation/out-of-sample splits.
 
-The current candidate scorer is deliberately labelled a deterministic baseline, **not a trained neural network**. A neural model should only be promoted after the historical dataset is large enough, leakage checks pass, calibration is acceptable and walk-forward/OOS performance is stable.
+APEX now also trains a real small MLP neural model on event-driven `SMC_SCALP_V2` / `SMC_SWING_V2` labeled samples. TIMEOUT/censored rows are excluded from neural labels. Training uses chronological train/validation/out-of-sample splits, persists weights in Postgres, and keeps weights frozen during the live trade window.
+
+A candidate is promoted to paper-production only when validation and OOS AUC/Brier gates pass. Promoted neural probability is blended conservatively into the existing deterministic paper signal score; hard risk controls remain authoritative. Closed valid paper trades separately update the contextual epsilon-greedy bandit using shaped net-R rewards. Invalid contracts are excluded from both learning layers.
 
 Research/LLM output cannot place orders or override deterministic risk locks.
 
