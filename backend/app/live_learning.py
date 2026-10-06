@@ -30,6 +30,15 @@ class LiveLearningService:
         })
         now = datetime.now(timezone.utc)
         with SessionLocal() as db:
+            if candle_time is not None:
+                existing = db.scalar(select(LiveMarketObservation).where(
+                    LiveMarketObservation.instrument == str(signal.get("index") or "UNKNOWN"),
+                    LiveMarketObservation.timeframe == "1m",
+                    LiveMarketObservation.candle_time == candle_time,
+                    LiveMarketObservation.strategy == str(signal.get("chosenStrategy") or signal.get("strategy") or ""),
+                ).order_by(LiveMarketObservation.id.desc()).limit(1))
+                if existing:
+                    return self._dict(existing)
             row = LiveMarketObservation(
                 observed_at=now,
                 instrument=str(signal.get("index") or "UNKNOWN"),
