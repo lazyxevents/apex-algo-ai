@@ -527,6 +527,11 @@ class TradingEngine:
         if not contract:
             return None, 0, expiry
         lot_size = int(contract.get("lot_size") or contract.get("minimum_lot") or 0)
+        option["displayName"] = contract.get("trading_symbol") or contract.get("name") or option["instrumentKey"]
+        option["expiry"] = expiry
+        option["lotSize"] = lot_size
+        option["priceSource"] = "exchange_option_chain"
+        option["quoteTime"] = datetime.now(IST).isoformat()
         return option, lot_size, expiry
 
     def automation_cycle(self, provider) -> dict:
@@ -619,6 +624,7 @@ class TradingEngine:
                     best["underlyingPrice"],
                 )
                 lot_size = int(option.get("lotSize") or 1)
+                expiry = option.get("expiry")
             else:
                 option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
                 if not option:
