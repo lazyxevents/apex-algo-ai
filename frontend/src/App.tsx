@@ -19,6 +19,11 @@ type Trade = {
   closedAt?: string | null
   chartUrl?: string | null
   chartSymbol?: string | null
+  displayName?: string | null
+  expiry?: string | null
+  strike?: number | null
+  priceSource?: string | null
+  quoteTime?: string | null
 }
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -101,6 +106,8 @@ export default function App() {
   const [notice, setNotice] = useState<{kind:'ok'|'error', text:string} | null>(null)
   const [lastSync, setLastSync] = useState<Date | null>(null)
   const [clock, setClock] = useState(new Date())
+  const [editingTradeId, setEditingTradeId] = useState<number | null>(null)
+  const [planDraft, setPlanDraft] = useState({ stop: '', target: '' })
 
   const loadStatus = useCallback(async (silent = false) => {
     try {
@@ -152,6 +159,26 @@ export default function App() {
     } finally {
       setBusy('')
     }
+  }
+
+  function beginPlanEdit(t: Trade) {
+    setEditingTradeId(t.id)
+    setPlanDraft({ stop: String(t.stop), target: String(t.target) })
+  }
+
+  async function savePlan(t: Trade) {
+    await runAction(`plan-${t.id}`, 'SL / Target updated.', () => fetchJson(`/api/paper/trades/${t.id}/plan`, {
+      method: 'PATCH',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ stop: Number(planDraft.stop), target: Number(planDraft.target) }),
+    }))
+    setEditingTradeId(null)
+  }
+
+  async function exitTrade(t: Trade) {
+    if (!window.confirm(`Exit paper trade #${t.id} now?`)) return
+    await runAction(`exit-${t.id}`, 'Paper trade exited manually.', () => fetchJson(`/api/paper/trades/${t.id}/exit`, {method:'POST'}))
+    setEditingTradeId(null)
   }
 
   const openTrades = useMemo(() => trades.filter(t => t.status === 'OPEN'), [trades])
@@ -286,7 +313,7 @@ export default function App() {
         <SystemItem label="Dataset" value={worker.datasetSize ?? 0} />
         <SystemItem label="Candidate" value={worker.candidateVersion || 'not ready'} />
         <SystemItem label="Candidate score" value={worker.candidateScore != null ? Number(worker.candidateScore).toFixed(2) : '—'} />
-        <SystemItem label="Ollama" value={ollama.configured ? 'Connected' : (ollama.enabled ? 'Needs endpoint' : 'Disabled')} good={ollama.configured} />
+        <SystemItem label="LLM provider" value={ollama.configured ? (ollama.provider || 'Connected') : 'Not configured'} good={ollama.configured} />
         <SystemItem label="LLM model" value={ollama.model || '—'} />
       </div>
       <div className="worker-status"><b>{worker.currentTask || 'Waiting for next research cycle'}</b><span>Heartbeat {formatDateTime(worker.lastHeartbeatAt)}</span></div>
@@ -305,7 +332,7 @@ export default function App() {
         <SystemItem label="Mode" value={liveLearning.mode || 'waiting'} good={Boolean(liveLearning.enabled)} />
         <SystemItem label="Moments stored" value={liveLearning.totalObservations ?? 0} />
         <SystemItem label="Pending outcomes" value={liveLearning.pendingOutcomes ?? 0} />
-        <SystemItem label="Ollama live review" value={ollama.configured ? 'Active' : 'Waiting for endpoint'} good={ollama.configured} />
+        <SystemItem label="LLM live review" value={ollama.configured ? `Active • ${ollama.provider || 'LLM'}` : 'Not configured'} good={ollama.configured} />
       </div>
       {liveMoments.length === 0 ? <div className="empty-line">Waiting for the next live SENSEX scan.</div> :
       <div className="table-scroll">
@@ -347,26 +374,33 @@ export default function App() {
       <div className="table-scroll">
         <table className="trade-table open-table">
           <thead><tr>
-            <th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>LTP</th><th>Stop</th><th>Target</th><th>Plan</th><th>Gross</th><th>Est. costs</th><th>Net P&L</th><th>P&L %</th><th>Chart</th><th>Opened</th>
+            <th>Contract</th><th>Side</th><th>Qty / Lot</th><th>Entry</th><th>LTP</th><th>SL</th><th>Target</th><th>Price source</th><th>Plan</th><th>Net P&L</th><th>Chart</th><th>Opened</th><th>Manual</th>
           </tr></thead>
           <tbody>{openTrades.map(t => <tr key={t.id}>
             <td>
-              <div className="instrument">{instrumentName(t.symbol)}</div>
-              <small>{t.meta?.strategy || 'APEX'} • #{t.id}</small>
+              <div className="instrument">{t.displayName || instrumentName(t.symbol)}</div>
+              <small>{t.expiry ? `Exp ${t.expiry}` : 'Expiry —'} • Strike {t.strike ?? '—'} • #{t.id}</small>
             </td>
             <td><span className={`side ${t.direction}`}>{t.direction}</span></td>
-            <td>{t.quantity}</td>
+            <td><b>{t.quantity}</b><br/><small>lot {t.lotSize}</small></td>
             <td>{money(t.entry)}</td>
             <td className="ltp">{money(t.currentPrice)}</td>
-            <td>{money(t.stop)}</td>
-            <td>{money(t.target)}</td>
-            <td><small>{t.meta?.tradeStyle || '—'} • T1 {t.meta?.firstTarget ? money(t.meta.firstTarget) : '—'}<br/>{t.meta?.stopModel ? 'Structure SL' : '—'}</small></td>
-            <td>{money((t as any).grossPnl ?? t.pnl)}</td>
-            <td>{money((t as any).estimatedCharges ?? 0)}</td>
-            <td className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl) > 0 ? '+' : ''}{money(t.pnl)}</td>
-            <td className={`pnl ${pnlClass(tradePnlPct(t))}`}>{tradePnlPct(t) > 0 ? '+' : ''}{percent(tradePnlPct(t))}</td>
-            <td>{t.chartUrl ? <a className="chart-link" href={t.chartUrl} target="_blank" rel="noreferrer">Open Chart ↗</a> : '—'}</td>
+            <td>{editingTradeId === t.id ? <input className="trade-edit-input" type="number" step="0.05" value={planDraft.stop} onChange={e=>setPlanDraft(v=>({...v,stop:e.target.value}))}/> : money(t.stop)}</td>
+            <td>{editingTradeId === t.id ? <input className="trade-edit-input" type="number" step="0.05" value={planDraft.target} onChange={e=>setPlanDraft(v=>({...v,target:e.target.value}))}/> : money(t.target)}</td>
+            <td><small className={t.priceSource === 'synthetic_estimate' ? 'negative' : 'positive'}>{t.priceSource === 'synthetic_estimate' ? 'SIMULATED PREMIUM' : (t.priceSource || '—')}</small><br/><small>{formatDateTime(t.quoteTime)}</small></td>
+            <td><small>{t.meta?.tradeStyle || '—'} • {t.meta?.strategy || 'APEX'}<br/>T1 {t.meta?.firstTarget ? money(t.meta.firstTarget) : '—'}</small></td>
+            <td className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl) > 0 ? '+' : ''}{money(t.pnl)}<br/><small>{tradePnlPct(t) > 0 ? '+' : ''}{percent(tradePnlPct(t))}</small></td>
+            <td>{t.chartUrl ? <a className="chart-link" href={t.chartUrl} target="_blank" rel="noreferrer">Open SENSEX Chart ↗</a> : <span>Unavailable</span>}</td>
             <td className="time-cell">{formatDateTime(t.openedAt)}</td>
+            <td>
+              <div className="trade-actions">
+                {editingTradeId === t.id ? <>
+                  <button type="button" onClick={()=>void savePlan(t)} disabled={Boolean(busy)}>Save</button>
+                  <button type="button" onClick={()=>setEditingTradeId(null)} disabled={Boolean(busy)}>Cancel</button>
+                </> : <button type="button" onClick={()=>beginPlanEdit(t)} disabled={Boolean(busy)}>Edit SL/TG</button>}
+                <button type="button" className="danger-mini" onClick={()=>void exitTrade(t)} disabled={Boolean(busy)}>Exit</button>
+              </div>
+            </td>
           </tr>)}</tbody>
         </table>
       </div>}
