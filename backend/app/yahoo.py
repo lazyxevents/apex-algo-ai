@@ -127,6 +127,13 @@ class YahooFinanceService:
             raise RuntimeError(f"No Yahoo quote returned for {instrument_key}")
         return float(candles[-1]["close"])
 
+    @staticmethod
+    def _next_sensex_expiry(now: datetime | None = None) -> date:
+        current = (now or datetime.now(IST)).date()
+        # Current SENSEX weekly contracts expire on Thursday; real providers override this with exchange contract data.
+        days = (3 - current.weekday()) % 7
+        return current + timedelta(days=days)
+
     def synthetic_option_candidate(
         self,
         index_name: str,
@@ -142,9 +149,15 @@ class YahooFinanceService:
             if index_name.upper() == "SENSEX"
             else max(1, int(settings.yfinance_synthetic_lot_size))
         )
-        symbol = f"SIM|{index_name}|{direction}|{int(strike)}"
+        expiry = self._next_sensex_expiry() if index_name.upper() == "SENSEX" else None
+        expiry_code = expiry.strftime("%d%b%y").upper() if expiry else "NA"
+        symbol = f"SIM|{index_name}|{expiry_code}|{int(strike)}|{direction}"
+        display_name = f"{index_name} {expiry_code} {int(strike)} {direction}"
+        quote_time = datetime.now(IST).isoformat()
         return {
             "instrumentKey": symbol,
+            "displayName": display_name,
+            "expiry": expiry.isoformat() if expiry else None,
             "strike": float(strike),
             "ltp": round(premium, 2),
             "bid": round(premium, 2),
@@ -160,6 +173,8 @@ class YahooFinanceService:
             "selectionScore": 1.0,
             "lotSize": lot_size,
             "syntheticDemo": True,
+            "priceSource": "synthetic_estimate",
+            "quoteTime": quote_time,
             "underlyingKey": underlying_key,
             "underlyingEntry": float(spot),
         }
