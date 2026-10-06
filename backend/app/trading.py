@@ -474,6 +474,46 @@ class TradingEngine:
         signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name, "candleTime": latest_candle_time})
         return signal
 
+    def _scan_and_observe(self, provider, capital: float) -> tuple[list[dict], list[dict]]:
+        ranked: list[dict] = []
+        keys = settings.underlying_keys
+        if not keys:
+            return ranked, []
+        with ThreadPoolExecutor(max_workers=max(1, len(keys))) as pool:
+            futures = {
+                pool.submit(self._scan_one, provider, name, key, capital): name
+                for name, key in keys.items()
+            }
+            for future in as_completed(futures):
+                try:
+                    ranked.append(future.result())
+                except Exception as exc:
+                    ranked.append({
+                        "action": "NO_TRADE",
+                        "score": 0.0,
+                        "reason": f"scan failure: {exc}",
+                        "index": futures[future],
+                    })
+        ranked.sort(key=lambda x: x.get("score", 0), reverse=True)
+        observations: list[dict] = []
+        for signal in ranked:
+            try:
+                candle_time = signal.get("candleTime")
+                if isinstance(candle_time, str):
+                    try:
+                        candle_time = datetime.fromisoformat(candle_time.replace("Z", "+00:00"))
+                    except ValueError:
+                        candle_time = None
+                observations.append(
+                    live_learning_service.observe(
+                        signal,
+                        candle_time=candle_time if isinstance(candle_time, datetime) else None,
+                    )
+                )
+            except Exception as exc:
+                self._audit("learning.live_observation_error", {"index": signal.get("index"), "error": str(exc)})
+        return ranked, observations
+
     def _real_option_candidate(self, provider, best: dict, deployable: float) -> tuple[dict | None, int, str | None]:
         expiry = provider.nearest_expiry(best["underlyingKey"])
         if not expiry:
