@@ -642,48 +642,141 @@ export default function App() {
       </details>
     </section>
 
-    <footer>
+    <footer className="apex-footer">
       <span>APEX Algo AI • Testing dashboard</span>
+      <span className="tarun-credit"><i /> Developed by <b>Tarun</b></span>
       <span>NO TRADE is valid • Monthly target is a lock, not a guaranteed return • Real broker orders disabled</span>
     </footer>
   </main>
 }
 
 function KnowledgeGraph({research, worker, marketResearch}:{research:any, worker:any, marketResearch:any}) {
-  const nodes = [
-    {id:'market', x:90, y:85, label:'MARKET', sub:marketResearch?.analytics?.markets?.SENSEX?.state || 'SENSEX'},
-    {id:'smc', x:275, y:55, label:'SMC', sub:'BOS • CHOCH • FVG'},
-    {id:'candle', x:465, y:80, label:'PATTERNS', sub:`${worker.patternsDetected || 0} decoded`},
-    {id:'scalp', x:690, y:55, label:'SCALP', sub:'1m • 5m'},
-    {id:'swing', x:800, y:180, label:'SWING', sub:'15m • 5m • 1m'},
-    {id:'sector', x:625, y:285, label:'SECTORS', sub:`${(research.latestSectors || []).length} tracked`},
-    {id:'sources', x:390, y:300, label:'SOURCES', sub:`${research.knowledgeCount || 0} memory`},
-    {id:'llm', x:160, y:275, label:'LLM', sub:'evidence review'},
-    {id:'core', x:445, y:180, label:'APEX', sub:'decision graph'},
+  const sensex = marketResearch?.analytics?.markets?.SENSEX || {}
+  const knowledge = Number(research?.knowledgeCount || 0)
+  const patternCount = Number(worker?.patternsDetected || 0)
+  const sectorCount = Array.isArray(research?.latestSectors) ? research.latestSectors.length : 0
+
+  const inputs = [
+    {id:'market', label:'SENSEX', sub:sensex?.state || 'MARKET'},
+    {id:'smc', label:'SMC', sub:'BOS / CHOCH'},
+    {id:'liq', label:'LIQUIDITY', sub:'SWEEP / FVG'},
+    {id:'price', label:'PRICE ACTION', sub:'1m / 5m / 15m'},
+    {id:'patterns', label:'PATTERNS', sub:`${patternCount} decoded`},
+    {id:'sectors', label:'SECTORS', sub:`${sectorCount} tracked`},
+    {id:'news', label:'NEWS', sub:'MACRO / INDIA'},
+    {id:'memory', label:'MEMORY', sub:`${knowledge} sources`},
   ]
-  const byId:any = Object.fromEntries(nodes.map(n=>[n.id,n]))
+
+  const hiddenA = [
+    {id:'regime', label:'REGIME', sub:'trend / range'},
+    {id:'structure', label:'STRUCTURE', sub:'HTF alignment'},
+    {id:'momentum', label:'MOMENTUM', sub:'EMA / RSI'},
+    {id:'volatility', label:'VOLATILITY', sub:'ATR / range'},
+    {id:'patternctx', label:'PATTERN CTX', sub:'location + candle'},
+    {id:'research', label:'RESEARCH', sub:'evidence layer'},
+  ]
+
+  const hiddenB = [
+    {id:'quality', label:'SETUP QUALITY', sub:'score + filters'},
+    {id:'timing', label:'TIMING', sub:'entry window'},
+    {id:'risk', label:'RISK', sub:'SL / size / lock'},
+    {id:'memoryfit', label:'MEMORY FIT', sub:'historical analog'},
+  ]
+
+  const outputs = [
+    {id:'scalp', label:'SCALP', sub:'1m / 5m'},
+    {id:'swing', label:'SWING', sub:'15m / 5m / 1m'},
+    {id:'wait', label:'NO TRADE', sub:'quality gate'},
+    {id:'plan', label:'NEXT PLAN', sub:'postmarket'},
+  ]
+
+  const layers = [
+    {x:92, nodes:inputs},
+    {x:340, nodes:hiddenA},
+    {x:590, nodes:hiddenB},
+    {x:830, nodes:outputs},
+  ]
+
+  const placed:any[] = []
+  layers.forEach((layer, layerIndex) => {
+    const usableTop = 44
+    const usableBottom = 430
+    const count = layer.nodes.length
+    layer.nodes.forEach((node:any, index:number) => {
+      const y = count === 1 ? 235 : usableTop + ((usableBottom - usableTop) * index / (count - 1))
+      placed.push({...node, x:layer.x, y, layerIndex})
+    })
+  })
+  const byId:any = Object.fromEntries(placed.map(n => [n.id, n]))
+
+  const connect = (from:string[], to:string[], salt=0) => {
+    const rows:any[] = []
+    from.forEach((a, ai) => to.forEach((b, bi) => {
+      const weight = ((ai * 7 + bi * 11 + salt) % 9) + 1
+      const polarity = (ai + bi + salt) % 4 === 0 ? 'negative' : (ai + bi + salt) % 3 === 0 ? 'hot' : 'positive'
+      rows.push({a,b,weight,polarity})
+    }))
+    return rows
+  }
+
   const edges = [
-    ['market','smc'],['market','core'],['smc','candle'],['smc','core'],['candle','scalp'],['candle','core'],
-    ['core','scalp'],['core','swing'],['sector','swing'],['sector','core'],['sources','llm'],['sources','core'],
-    ['llm','core'],['core','sector'],['scalp','swing'],
+    ...connect(inputs.map(n=>n.id), hiddenA.map(n=>n.id), 1),
+    ...connect(hiddenA.map(n=>n.id), hiddenB.map(n=>n.id), 4),
+    ...connect(hiddenB.map(n=>n.id), outputs.map(n=>n.id), 7),
   ]
-  return <div className="knowledge-graph">
+
+  return <div className="knowledge-graph neural-graph">
     <div className="graph-grid" />
-    <svg viewBox="0 0 900 360" role="img" aria-label="APEX research knowledge graph">
+    <div className="neural-layer-labels">
+      <span>MARKET INPUTS</span><span>FEATURE ENGINE</span><span>DECISION LAYERS</span><span>OUTPUTS</span>
+    </div>
+    <svg viewBox="0 0 920 480" role="img" aria-label="APEX neural-style trading intelligence graph">
       <defs>
-        <filter id="nodeGlow"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+        <filter id="nodeGlowV2" x="-100%" y="-100%" width="300%" height="300%">
+          <feGaussianBlur stdDeviation="4" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+        <linearGradient id="coreNode" x1="0" x2="1">
+          <stop offset="0%" stopColor="#09272c"/><stop offset="100%" stopColor="#0a1c2d"/>
+        </linearGradient>
       </defs>
-      {edges.map(([a,b],i)=><line key={`${a}-${b}`} className={`graph-edge e${i%3}`} x1={byId[a].x} y1={byId[a].y} x2={byId[b].x} y2={byId[b].y}/>)}
-      {nodes.map(n=><g key={n.id} className={`kg-node ${n.id==='core'?'core':''}`} transform={`translate(${n.x},${n.y})`}>
-        <circle r={n.id==='core'?44:34}/>
-        <circle className="node-ring" r={n.id==='core'?54:43}/>
-        <text className="node-label" textAnchor="middle" y="-2">{n.label}</text>
-        <text className="node-sub" textAnchor="middle" y="14">{n.sub}</text>
+
+      {edges.map((edge:any, i:number) => {
+        const a=byId[edge.a], b=byId[edge.b]
+        return <line
+          key={`${edge.a}-${edge.b}`}
+          className={`nn-edge ${edge.polarity} w${Math.min(4, Math.ceil(edge.weight/2.5))}`}
+          x1={a.x} y1={a.y} x2={b.x} y2={b.y}
+          style={{animationDelay:`${(i%12)*-0.22}s`}}
+        />
+      })}
+
+      {placed.map((n:any) => <g key={n.id} className={`nn-node layer-${n.layerIndex} ${n.id}`} transform={`translate(${n.x},${n.y})`}>
+        <circle className="nn-orbit orbit-a" r={n.layerIndex===2?29:25}/>
+        <circle className="nn-orbit orbit-b" r={n.layerIndex===2?23:20}/>
+        <circle className="nn-core" r={n.layerIndex===2?16:14} fill={n.layerIndex===2?'url(#coreNode)':undefined}/>
+        <circle className="nn-shine" r="5" cx="-4" cy="-5"/>
+        <text className="nn-label" textAnchor="middle" x={n.layerIndex===0 ? 34 : n.layerIndex===3 ? -34 : 0} y="-3">{n.label}</text>
+        <text className="nn-sub" textAnchor="middle" x={n.layerIndex===0 ? 34 : n.layerIndex===3 ? -34 : 0} y="10">{n.sub}</text>
       </g>)}
+
+      <g className="apex-brain" transform="translate(590,235)">
+        <circle r="38" className="brain-halo"/>
+        <circle r="25" className="brain-core"/>
+        <text textAnchor="middle" y="-2" className="brain-title">APEX</text>
+        <text textAnchor="middle" y="11" className="brain-sub">AI CORE</text>
+      </g>
     </svg>
-    <div className="graph-caption"><span className="pulse"/> Evidence flows into APEX; hard risk controls remain outside the graph.</div>
+
+    <div className="neural-legend">
+      <span><i className="legend-line cyan"/> positive evidence</span>
+      <span><i className="legend-line red"/> conflicting evidence</span>
+      <span><i className="legend-dot"/> live research memory</span>
+    </div>
+    <div className="graph-caption"><span className="pulse"/> Neural-style evidence map • visualization only, not a claim of trained neural weights.</div>
   </div>
 }
+
 
 function Metric({title, value, sub, tone = 'neutral'}:{title:string, value:ReactNode, sub?:ReactNode, tone?:string}) {
   return <div className="metric">
