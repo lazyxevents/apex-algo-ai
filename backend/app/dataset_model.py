@@ -51,18 +51,46 @@ def _feature_row(candles: list[dict], i: int) -> dict:
 
 def build_samples(instrument: str, timeframe: str, candles: list[dict], horizon: int = 6, rr: float = 1.5) -> list[dict]:
     rows: list[dict] = []
-    if len(candles) < 80:
+    if len(candles) < 100:
         return rows
-    for i in range(30, len(candles) - horizon):
+    for i in range(40, len(candles) - 20):
         f = _feature_row(candles, i)
         atr = float(f["atr"])
         if atr <= 0:
             continue
-        for direction in ("CE", "PE"):
+
+        bull_event = (
+            bool(f.get("bullPatterns"))
+            or f.get("bos") == "BULL"
+            or f.get("choch") == "BULL"
+            or f.get("liquiditySweep") == "BULL"
+            or f.get("fairValueGap") == "BULL"
+        )
+        bear_event = (
+            bool(f.get("bearPatterns"))
+            or f.get("bos") == "BEAR"
+            or f.get("choch") == "BEAR"
+            or f.get("liquiditySweep") == "BEAR"
+            or f.get("fairValueGap") == "BEAR"
+        )
+        directions: list[str] = []
+        if bull_event:
+            directions.append("CE")
+        if bear_event:
+            directions.append("PE")
+        if not directions:
+            continue
+
+        scalp_event = f.get("choch") in {"BULL", "BEAR"} or f.get("liquiditySweep") in {"BULL", "BEAR"}
+        style = "SCALP" if scalp_event else "SWING"
+        local_horizon = 6 if style == "SCALP" else 18
+        local_rr = 1.25 if style == "SCALP" else 1.8
+
+        for direction in directions:
             entry = float(f["close"])
             stop = entry - atr if direction == "CE" else entry + atr
-            target = entry + atr * rr if direction == "CE" else entry - atr * rr
-            future = candles[i + 1:i + 1 + horizon]
+            target = entry + atr * local_rr if direction == "CE" else entry - atr * local_rr
+            future = candles[i + 1:i + 1 + local_horizon]
             outcome = "TIMEOUT"
             label = 0
             mae = mfe = 0.0
@@ -83,10 +111,17 @@ def build_samples(instrument: str, timeframe: str, candles: list[dict], horizon:
                     outcome, label = "TARGET", 1
                     break
             rows.append({
-                "instrument": instrument, "timeframe": timeframe, "setup_time": candles[i]["timestamp"],
-                "direction": direction, "strategy": "SMC_CONTEXT_BASELINE", "features": f,
-                "label": label, "outcome": outcome, "mae_r": round(mae, 4), "mfe_r": round(mfe, 4),
-                "net_r": rr if label else -1.0 if outcome.startswith("STOP") or outcome.startswith("AMBIGUOUS") else 0.0,
+                "instrument": instrument,
+                "timeframe": timeframe,
+                "setup_time": candles[i]["timestamp"],
+                "direction": direction,
+                "strategy": f"SMC_{style}_V2",
+                "features": {**f, "setupStyle": style, "horizonBars": local_horizon, "rr": local_rr},
+                "label": label,
+                "outcome": outcome,
+                "mae_r": round(mae, 4),
+                "mfe_r": round(mfe, 4),
+                "net_r": local_rr if label else -1.0 if outcome.startswith("STOP") or outcome.startswith("AMBIGUOUS") else 0.0,
             })
     return rows
 
