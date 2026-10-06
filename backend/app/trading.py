@@ -14,6 +14,7 @@ from .core import SessionLocal, settings
 from .llm_research import ollama_research
 from .llm_advisor import ollama_advisor
 from .learning_worker import learning_worker
+from .live_learning import live_learning_service
 from .market_research import build_market_research
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
@@ -351,6 +352,7 @@ class TradingEngine:
             db.commit()
             db.refresh(trade)
             if trade.status != "OPEN":
+                live_learning_service.label_trade(trade.id, trade.status, trade.pnl)
                 self._audit("trade.closed", {"tradeId": trade.id, "status": trade.status, "pnl": trade.pnl})
             return self._trade_dict(trade)
 
@@ -565,6 +567,13 @@ class TradingEngine:
                             "index": futures[future],
                         })
             ranked.sort(key=lambda x: x.get("score", 0), reverse=True)
+            live_observations = []
+            for signal in ranked:
+                try:
+                    live_observations.append(live_learning_service.observe(signal))
+                except Exception as exc:
+                    self._audit("learning.live_observation_error", {"index": signal.get("index"), "error": str(exc)})
+            decision["liveObservations"] = live_observations
             decision["signals"] = ranked
             best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
             if best.get("action") not in {"CE", "PE"}:
@@ -697,6 +706,10 @@ class TradingEngine:
                 "quantity": qty,
                 "reason": json.dumps(meta),
             })
+            if live_observations:
+                matched = next((x for x in live_observations if x.get("instrument") == best.get("index") and x.get("action") == best.get("action")), live_observations[0])
+                live_learning_service.attach_trade(int(matched["id"]), int(trade["id"]))
+                meta["liveObservationId"] = matched["id"]
             decision.update({
                 "action": best["action"],
                 "trade": trade,
@@ -773,6 +786,7 @@ class TradingEngine:
             "performance": self.performance_snapshot(),
             "learning": adaptive_learner.snapshot(),
             "learningWorker": learning_worker.snapshot(),
+            "liveLearning": live_learning_service.snapshot(),
             "ollama": {
                 "enabled": settings.ollama_enabled,
                 "configured": ollama_advisor.configured,
