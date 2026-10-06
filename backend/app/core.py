@@ -43,6 +43,7 @@ class Settings(BaseSettings):
 
     candle_interval_minutes: int = 1
     signal_min_score: float = 0.65
+    smc_override_min_score: float = 0.55
     reward_risk_ratio: float = 1.8
     active_indices_raw: str = "SENSEX"
     sensex_lot_size: int = 20
