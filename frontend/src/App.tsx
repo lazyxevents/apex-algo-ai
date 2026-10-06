@@ -249,7 +249,7 @@ export default function App() {
         <b>Testing / Synthetic Paper Mode</b>
         <span>Yahoo supplies index data; option premium and execution are simulated. This is for forward testing, not proof of real broker fills.</span>
       </div>
-      <span className="badge">LIVE ORDERS OFF</span>
+      <span className="badge">LIVE MARKET ON • PAPER ORDERS</span>
     </section>}
 
     <section className="summary-grid">
@@ -333,6 +333,8 @@ export default function App() {
         <SystemItem label="Moments stored" value={liveLearning.totalObservations ?? 0} />
         <SystemItem label="Pending outcomes" value={liveLearning.pendingOutcomes ?? 0} />
         <SystemItem label="LLM live review" value={ollama.configured ? `Active • ${ollama.provider || 'LLM'}` : 'Not configured'} good={ollama.configured} />
+        <SystemItem label="Standard entry" value={automation.entryPolicy?.standardMinScore != null ? `≥ ${Number(automation.entryPolicy.standardMinScore).toFixed(2)}` : '—'} />
+        <SystemItem label="Strong SMC entry" value={automation.entryPolicy?.smcOverrideMinScore != null ? `≥ ${Number(automation.entryPolicy.smcOverrideMinScore).toFixed(2)}` : '—'} />
       </div>
       {liveMoments.length === 0 ? <div className="empty-line">Waiting for the next live SENSEX scan.</div> :
       <div className="table-scroll">
@@ -344,13 +346,18 @@ export default function App() {
             <td><span className={`side ${m.action}`}>{m.action}</span></td>
             <td>{Number(m.signalScore || 0).toFixed(2)}</td>
             <td><small>{m.strategy || '—'}</small></td>
-            <td><small>{m.context?.key || '—'}<br/>{Array.isArray(m.patterns) ? m.patterns.join(', ') : (m.patterns?.name || '')}</small></td>
+            <td><small>
+              {m.context?.key || '—'}<br/>
+              BOS {m.context?.smc?.bos || 'NONE'} • CHOCH {m.context?.smc?.choch || 'NONE'}<br/>
+              Sweep {m.context?.smc?.liquiditySweep || 'NONE'}
+              {m.context?.smcOverride ? <><br/><b>SMC OVERRIDE</b></> : null}
+            </small></td>
             <td><small>{m.ollama?.status || (ollama.configured ? 'waiting' : 'not configured')}<br/>{m.ollama?.bias || '—'} {m.ollama?.confidence != null ? `${Math.round(Number(m.ollama.confidence)*100)}%` : ''}</small></td>
             <td><span className={`trade-status ${m.outcome}`}>{m.outcome || 'PENDING'}</span>{m.tradeId ? <small> #T{m.tradeId}</small> : null}</td>
           </tr>)}</tbody>
         </table>
       </div>}
-      <p className="panel-note">Primary learning evidence is raw candle/SMC data. Ollama is an auxiliary reviewer; screenshots are not used as a substitute for OHLCV data.</p>
+      <p className="panel-note">Normal entries keep the standard score threshold. A lower score is allowed only when the live SMC engine confirms CHOCH/liquidity sweep, or BOS with directional candle confirmation. Primary evidence remains raw candle/SMC data.</p>
     </section>
 
     <section className="panel positions-panel">
