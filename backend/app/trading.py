@@ -404,6 +404,67 @@ class TradingEngine:
             rows = db.execute(select(Trade).order_by(Trade.id.desc()).limit(limit)).scalars().all()
             return [self._trade_dict(t) for t in rows]
 
+    def update_trade_plan(self, trade_id: int, stop: float, target: float) -> dict:
+        stop = round(float(stop), 2)
+        target = round(float(target), 2)
+        with SessionLocal() as db:
+            trade = db.get(Trade, trade_id)
+            if not trade or trade.status != "OPEN":
+                raise ValueError("Open trade not found")
+            current = float(trade.current_price or trade.entry)
+            if stop <= 0 or target <= 0:
+                raise ValueError("SL and target must be positive")
+            if stop >= current:
+                raise ValueError("For a long option position, SL must stay below current premium")
+            if target <= current:
+                raise ValueError("For a long option position, target must stay above current premium")
+            if stop >= target:
+                raise ValueError("SL must be below target")
+            old = {"stop": trade.stop, "target": trade.target}
+            trade.stop = stop
+            trade.target = target
+            meta = self._meta(trade)
+            meta["manualPlan"] = {
+                "updatedAt": datetime.now(IST).isoformat(),
+                "oldStop": old["stop"],
+                "oldTarget": old["target"],
+                "stop": stop,
+                "target": target,
+            }
+            trade.reason = json.dumps(meta, default=str)
+            db.commit()
+            db.refresh(trade)
+            result = self._trade_dict(trade)
+        self._audit("trade.plan_updated", {"tradeId": trade_id, **old, "newStop": stop, "newTarget": target})
+        return result
+
+    def manual_exit_trade(self, provider, trade_id: int) -> dict:
+        with SessionLocal() as db:
+            trade = db.get(Trade, trade_id)
+            if not trade or trade.status != "OPEN":
+                raise ValueError("Open trade not found")
+            price, fresh, quote_error = (
+                self._best_exit_price(provider, trade)
+                if provider.market_ready
+                else (float(trade.current_price or trade.entry), False, "market data unavailable")
+            )
+            quantity = trade.quantity
+            symbol = trade.symbol
+        closed = self.mark_trade(trade_id, price, force_status="MANUAL_EXIT")
+        sandbox = provider.sandbox_exit_with_retry(symbol, quantity, f"apex-manual-exit-{trade_id}")
+        result = {"trade": closed, "freshExitPrice": fresh, "quoteError": quote_error, "sandbox": sandbox}
+        self._audit("trade.manual_exit", {"tradeId": trade_id, "price": price, "fresh": fresh})
+        return result
+
+    def _invalidate_legacy_lot_if_needed(self, trade: Trade) -> dict | None:
+        meta = self._meta(trade)
+        if not meta.get("syntheticDemo") or str(meta.get("index") or "").upper() != "SENSEX":
+            return None
+        expected = max(1, int(settings.sensex_lot_size))
+        if int(trade.lot_size or 0) == expected and int(trade.quantity or 0) % expected == 0:
+            return None
+        return self.mark_trade(trade.id, float(trade.current_price or trade.entry), force_status="INVALID_CONTRACT")
+
     def _update_open_trades(self, provider, phase: dict) -> list[dict]:
         if self.state.killed:
             return self.force_flatten(provider, "kill switch")
@@ -414,6 +475,11 @@ class TradingEngine:
             open_rows = self._open_rows(db)
         for trade in open_rows:
             try:
+                invalid = self._invalidate_legacy_lot_if_needed(trade)
+                if invalid:
+                    actions.append({"exit": invalid, "reason": "legacy invalid SENSEX lot size"})
+                    self._audit("trade.invalid_contract_closed", {"tradeId": trade.id, "quantity": trade.quantity, "lotSize": trade.lot_size})
+                    continue
                 ltp = self._trade_ltp(provider, trade)
                 result = self.mark_trade(trade.id, ltp)
                 if result["status"] != "OPEN":
@@ -686,6 +752,11 @@ class TradingEngine:
             })
             meta = {
                 "strategy": strategy_name,
+                "displayName": option.get("displayName") or option["instrumentKey"],
+                "contractName": option.get("displayName") or option["instrumentKey"],
+                "priceSource": option.get("priceSource") or ("synthetic_estimate" if synthetic_demo else "exchange_option_chain"),
+                "quoteTime": option.get("quoteTime") or datetime.now(IST).isoformat(),
+                "entryTime": datetime.now(IST).isoformat(),
                 "tradeStyle": "SCALP" if is_scalp else "SWING",
                 "stopModel": "previous-candle structure mapped to option premium via delta; fallback percentage stop",
                 "previousCandleLow": previous_low,
@@ -787,8 +858,13 @@ class TradingEngine:
             "meta": meta,
             "openedAt": t.opened_at.isoformat() if t.opened_at else None,
             "closedAt": t.closed_at.isoformat() if t.closed_at else None,
-            "chartUrl": meta.get("chartUrl"),
-            "chartSymbol": meta.get("chartSymbol"),
+            "chartUrl": meta.get("chartUrl") or ("https://www.tradingview.com/chart/?symbol=BSE%3ASENSEX" if str(meta.get("index") or "").upper() == "SENSEX" else None),
+            "chartSymbol": meta.get("chartSymbol") or ("BSE:SENSEX" if str(meta.get("index") or "").upper() == "SENSEX" else None),
+            "displayName": meta.get("displayName") or meta.get("contractName") or t.symbol,
+            "expiry": meta.get("expiry"),
+            "strike": meta.get("strike"),
+            "priceSource": meta.get("priceSource"),
+            "quoteTime": meta.get("quoteTime"),
         }
 
     def status(self, broker: dict, market: dict | None = None) -> dict:
@@ -822,11 +898,18 @@ class TradingEngine:
             "learningWorker": learning_worker.snapshot(),
             "liveLearning": live_learning_service.snapshot(),
             "ollama": {
-                "enabled": settings.ollama_enabled,
+                "enabled": ollama_advisor.configured,
                 "configured": ollama_advisor.configured,
-                "model": settings.ollama_model,
+                "provider": ollama_advisor.provider,
+                "model": ollama_advisor.model,
                 "webSearchEnabled": settings.ollama_web_search_enabled,
                 "role": "advisory research/review only; hard risk remains deterministic",
+            },
+            "llm": {
+                "configured": ollama_advisor.configured,
+                "provider": ollama_advisor.provider,
+                "model": ollama_advisor.model,
+                "freeQuotaAware": ollama_advisor.provider == "openrouter",
             },
         }
 
