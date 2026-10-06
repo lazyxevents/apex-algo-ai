@@ -17,6 +17,8 @@ type Trade = {
   meta?: Record<string, any>
   openedAt?: string | null
   closedAt?: string | null
+  chartUrl?: string | null
+  chartSymbol?: string | null
 }
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -178,6 +180,7 @@ export default function App() {
   const researchMarkets = marketResearch.analytics?.markets || {}
   const positionMonitor = automation.positionMonitor || {}
   const worker = status.learningWorker || {}
+  const ollama = status.ollama || {}
   const providerReady = market.marketDataConfigured !== false
   const killed = Boolean(status.killSwitch || r.killSwitch)
   const phase = automation.lastDecision?.phase || {}
@@ -228,6 +231,7 @@ export default function App() {
       <Metric title="Today P&L" value={money(r.dailyPnl)} sub={`${r.tradesToday || 0} trade(s) today`} tone={pnlClass(r.dailyPnl)} />
       <Metric title="Win Rate" value={percent(p.winRate)} sub={`${p.wins || 0}W / ${p.losses || 0}L`} />
       <Metric title="Risk / Trade" value={money(r.riskPerTrade)} sub={`${r.dynamicLimits ? 'Dynamic' : 'Fixed'} risk limit`} />
+      <Metric title="Deployable Cap" value={money(Number(r.effectiveCapital || 0) * Number(r.capitalUsagePct || 0) / 100)} sub={`${r.capitalUsagePct || 0}% maximum usage`} />
       <Metric title="Max Drawdown" value={money(p.maxDrawdown)} sub={`Monthly cap ${money(r.maxMonthlyDrawdown)}`} tone={Number(p.maxDrawdown) > 0 ? 'negative' : 'neutral'} />
     </section>
 
@@ -280,6 +284,8 @@ export default function App() {
         <SystemItem label="Dataset" value={worker.datasetSize ?? 0} />
         <SystemItem label="Candidate" value={worker.candidateVersion || 'not ready'} />
         <SystemItem label="Candidate score" value={worker.candidateScore != null ? Number(worker.candidateScore).toFixed(2) : '—'} />
+        <SystemItem label="Ollama" value={ollama.configured ? 'Connected' : (ollama.enabled ? 'Needs endpoint' : 'Disabled')} good={ollama.configured} />
+        <SystemItem label="LLM model" value={ollama.model || '—'} />
       </div>
       <div className="worker-status"><b>{worker.currentTask || 'Waiting for next research cycle'}</b><span>Heartbeat {formatDateTime(worker.lastHeartbeatAt)}</span></div>
       {worker.lastSummary && <p className="panel-note">{worker.lastSummary}</p>}
@@ -309,7 +315,7 @@ export default function App() {
       <div className="table-scroll">
         <table className="trade-table open-table">
           <thead><tr>
-            <th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>LTP</th><th>Stop</th><th>Target</th><th>Gross</th><th>Est. costs</th><th>Net P&L</th><th>P&L %</th><th>Opened</th>
+            <th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>LTP</th><th>Stop</th><th>Target</th><th>Plan</th><th>Gross</th><th>Est. costs</th><th>Net P&L</th><th>P&L %</th><th>Chart</th><th>Opened</th>
           </tr></thead>
           <tbody>{openTrades.map(t => <tr key={t.id}>
             <td>
@@ -322,10 +328,12 @@ export default function App() {
             <td className="ltp">{money(t.currentPrice)}</td>
             <td>{money(t.stop)}</td>
             <td>{money(t.target)}</td>
+            <td><small>{t.meta?.tradeStyle || '—'} • T1 {t.meta?.firstTarget ? money(t.meta.firstTarget) : '—'}<br/>{t.meta?.stopModel ? 'Structure SL' : '—'}</small></td>
             <td>{money((t as any).grossPnl ?? t.pnl)}</td>
             <td>{money((t as any).estimatedCharges ?? 0)}</td>
             <td className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl) > 0 ? '+' : ''}{money(t.pnl)}</td>
             <td className={`pnl ${pnlClass(tradePnlPct(t))}`}>{tradePnlPct(t) > 0 ? '+' : ''}{percent(tradePnlPct(t))}</td>
+            <td>{t.chartUrl ? <a className="chart-link" href={t.chartUrl} target="_blank" rel="noreferrer">Open Chart ↗</a> : '—'}</td>
             <td className="time-cell">{formatDateTime(t.openedAt)}</td>
           </tr>)}</tbody>
         </table>
