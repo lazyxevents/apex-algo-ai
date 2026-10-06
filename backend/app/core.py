@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     market_open_time: str = "09:15"
     market_close_time: str = "15:30"
     trade_start_time: str = "09:20"
-    stop_new_trade_time: str = "15:00"
-    force_exit_time: str = "15:10"
+    stop_new_trade_time: str = "15:15"
+    force_exit_time: str = "15:20"
 
     capital: float = 40000
     min_trading_capital: float = 5000
@@ -189,7 +189,7 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from .models import AuditLog, LearningSample, LiveMarketObservation, ModelEvaluation, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
+    from .models import AuditLog, DailyMarketPlan, LearningSample, LiveMarketObservation, ModelEvaluation, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
