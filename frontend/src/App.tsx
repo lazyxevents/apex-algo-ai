@@ -183,6 +183,8 @@ export default function App() {
 
   const openTrades = useMemo(() => trades.filter(t => t.status === 'OPEN'), [trades])
   const closedTrades = useMemo(() => trades.filter(t => t.status !== 'OPEN'), [trades])
+  const invalidClosedTrades = useMemo(() => closedTrades.filter(t => t.status === 'INVALID_CONTRACT'), [closedTrades])
+  const validatedClosedTrades = useMemo(() => closedTrades.filter(t => t.status !== 'INVALID_CONTRACT'), [closedTrades])
   const runningPnl = useMemo(() => openTrades.reduce((sum, t) => sum + Number(t.pnl || 0), 0), [openTrades])
   const runningDeployed = useMemo(
     () => openTrades.reduce((sum, t) => sum + Math.abs(Number(t.entry || 0) * Number(t.quantity || 0)), 0),
@@ -254,10 +256,11 @@ export default function App() {
 
     <section className="summary-grid">
       <Metric title="Running P&L" value={money(runningPnl)} sub={openTrades.length ? `${runningPnlPct >= 0 ? '+' : ''}${percent(runningPnlPct)} on open positions` : 'No open position'} tone={pnlClass(runningPnl)} />
-      <Metric title="Realized Net P&L" value={money(p.netPnl)} sub={`${p.trades || 0} closed trades`} tone={pnlClass(p.netPnl)} />
+      <Metric title="Validated Realized P&L" value={money(p.netPnl)} sub={`${p.trades || 0} validated closed trades`} tone={pnlClass(p.netPnl)} />
       <Metric title="Effective Capital" value={money(r.effectiveCapital)} sub={`Base ${money(r.configuredCapital)}`} />
       <Metric title="Open Positions" value={String(openTrades.length)} sub={`Max ${r.maxConcurrentPositions ?? 0}`} />
-      <Metric title="Today P&L" value={money(r.dailyPnl)} sub={`${r.tradesToday || 0} trade(s) today`} tone={pnlClass(r.dailyPnl)} />
+      <Metric title="Validated Today P&L" value={money(r.dailyPnl)} sub={`${r.tradesToday || 0} valid trade(s) today`} tone={pnlClass(r.dailyPnl)} />
+      <Metric title="Excluded / Invalid P&L" value={money(r.excludedInvalidTodayPnl)} sub={`${r.excludedInvalidTodayCount || 0} invalid trade(s) excluded today`} tone={pnlClass(r.excludedInvalidTodayPnl)} />
       <Metric title="Win Rate" value={percent(p.winRate)} sub={`${p.wins || 0}W / ${p.losses || 0}L`} />
       <Metric title="Risk / Trade" value={money(r.riskPerTrade)} sub={`${r.dynamicLimits ? 'Dynamic' : 'Fixed'} risk limit`} />
       <Metric title="Deployable Cap" value={money(Number(r.effectiveCapital || 0) * Number(r.capitalUsagePct || 0) / 100)} sub={`${r.capitalUsagePct || 0}% maximum usage`} />
@@ -501,8 +504,8 @@ export default function App() {
 
     <section className="panel">
       <div className="section-head compact">
-        <div><div className="eyebrow">JOURNAL</div><h2>Trade History</h2><p>Closed paper trades with final P&L and timestamps.</p></div>
-        <span className="badge subtle">{closedTrades.length} CLOSED</span>
+        <div><div className="eyebrow">JOURNAL</div><h2>Trade History</h2><p>Closed paper trades with final P&L and timestamps. Invalid contracts stay visible for audit but are excluded from performance, risk and learning.</p></div>
+        <span className="badge subtle">{validatedClosedTrades.length} VALIDATED • {invalidClosedTrades.length} EXCLUDED</span>
       </div>
       {closedTrades.length === 0 ? <div className="empty-line">No closed paper trades yet.</div> :
       <div className="table-scroll">
@@ -514,10 +517,13 @@ export default function App() {
             <td>{t.quantity}</td>
             <td>{money(t.entry)}</td>
             <td>{money(t.currentPrice)}</td>
-            <td><span className={`trade-status ${t.status}`}>{t.status}</span></td>
+            <td>
+              <span className={`trade-status ${t.status}`}>{t.status}</span>
+              {t.status === 'INVALID_CONTRACT' ? <><br/><small className="negative">Excluded from stats / learning</small></> : null}
+            </td>
             <td>{money((t as any).grossPnl ?? t.pnl)}</td>
             <td>{money((t as any).estimatedCharges ?? 0)}</td>
-            <td className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl) > 0 ? '+' : ''}{money(t.pnl)}</td>
+            <td className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl) > 0 ? '+' : ''}{money(t.pnl)}{t.status === 'INVALID_CONTRACT' ? <><br/><small>Audit only</small></> : null}</td>
             <td className="time-cell">{formatDateTime(t.openedAt)}</td>
             <td className="time-cell">{formatDateTime(t.closedAt)}</td>
           </tr>)}</tbody>
