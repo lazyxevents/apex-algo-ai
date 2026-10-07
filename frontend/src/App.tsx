@@ -177,6 +177,7 @@ export default function App() {
   const [pushError, setPushError] = useState('')
   const [chartIntel, setChartIntel] = useState<any>(null)
   const [chartView, setChartView] = useState<'tradingview' | 'apex'>('tradingview')
+  const [chartAutoFollow, setChartAutoFollow] = useState(true)
   const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
 
   const loadStatus = useCallback(async (silent = false) => {
@@ -436,6 +437,21 @@ export default function App() {
     previousOpenTradeIdsRef.current = currentIds
   }, [openTrades, pushPermission, pushSubscribed])
 
+  useEffect(() => {
+    if (!chartAutoFollow) return
+    const decision = status?.automation?.lastDecision || {}
+    const signal = Array.isArray(decision?.signals) ? decision.signals[0] : null
+    const direction = String(decision?.action || signal?.action || signal?.candidateAction || '').toUpperCase()
+    const score = Number(signal?.score ?? decision?.score ?? 0)
+    const meaningfulSetup = ['CE', 'PE'].includes(direction) && score >= 0.5
+
+    if (openTrades.length > 0 || meaningfulSetup) {
+      setChartView('apex')
+    } else {
+      setChartView('tradingview')
+    }
+  }, [chartAutoFollow, openTrades.length, status?.automation?.lastDecision])
+
   const closedTrades = useMemo(() => trades.filter(t => t.status !== 'OPEN'), [trades])
   const invalidClosedTrades = useMemo(() => closedTrades.filter(t => t.status === 'INVALID_CONTRACT'), [closedTrades])
   const validatedClosedTrades = useMemo(() => closedTrades.filter(t => t.status !== 'INVALID_CONTRACT'), [closedTrades])
@@ -597,18 +613,27 @@ export default function App() {
         </div>
       </div>
 
-      <div className="chart-view-tabs">
-        <button type="button" className={chartView === 'tradingview' ? 'active' : ''} onClick={() => setChartView('tradingview')}>
-          TradingView 1m Futures
-        </button>
-        <button type="button" className={chartView === 'apex' ? 'active' : ''} onClick={() => setChartView('apex')}>
-          APEX Markup
+      <div className="chart-toolbar-row">
+        <div className="chart-view-tabs">
+          <button type="button" className={chartView === 'tradingview' ? 'active' : ''} onClick={() => { setChartAutoFollow(false); setChartView('tradingview') }}>
+            TradingView 1m Futures
+          </button>
+          <button type="button" className={chartView === 'apex' ? 'active' : ''} onClick={() => { setChartAutoFollow(false); setChartView('apex') }}>
+            APEX Live Markup
+          </button>
+        </div>
+        <button type="button" className={`chart-auto-follow ${chartAutoFollow ? 'active' : ''}`} onClick={() => setChartAutoFollow(v => !v)}>
+          <i /> AUTO FOLLOW {chartAutoFollow ? 'ON' : 'OFF'}
         </button>
       </div>
 
+      <BotChartActivity decision={automation.lastDecision} openTrades={openTrades} />
+
       {chartView === 'tradingview'
         ? <TradingViewAdvancedChart symbol="BSE:BSX1!" />
-        : <MarketIntelligenceChart data={chartIntel} />}
+        : <MarketIntelligenceChart data={chartIntel} decision={automation.lastDecision} openTrades={openTrades} />}
+
+      <OptionTradeLadder trades={openTrades} />
 
       <div className="chart-intel-stats">
         <SystemItem label="1m trend" value={chartIntel?.trends?.['1m']?.trend || '—'} />
@@ -621,7 +646,7 @@ export default function App() {
         <SystemItem label="Plan bias" value={chartIntel?.plan?.marketBias || nextPlan.marketBias || '—'} />
       </div>
       <p className="panel-note">
-        TradingView 1m uses the SENSEX continuous futures contract (BSX1!) because the public embedded spot index blocks intraday intervals. Futures can trade at a basis versus spot. APEX automated scoring/training still uses the backend SENSEX provider feed and hard freshness gates.
+        AUTO FOLLOW switches to APEX Live Markup whenever a meaningful setup or open trade exists, then returns to TradingView when the active setup clears. Option Entry/SL/TG are shown on a separate premium ladder because those prices must not be drawn on the SENSEX underlying scale.
       </p>
     </section>
 
@@ -1185,6 +1210,53 @@ export default function App() {
   </main>
 }
 
+function BotChartActivity({decision, openTrades}:{decision:any, openTrades:Trade[]}) {
+  const signal = Array.isArray(decision?.signals) ? decision.signals[0] : null
+  const direction = String(decision?.action || signal?.action || signal?.candidateAction || 'NO_TRADE').toUpperCase()
+  const score = Number(signal?.score ?? decision?.score ?? 0)
+  const reason = signal?.entryReason || signal?.reason || decision?.reason || 'Waiting for next verified setup'
+  const open = openTrades[0]
+  const mode = open ? 'TRADE OPEN' : ['CE','PE'].includes(direction) && score >= 0.5 ? 'SETUP ACTIVE' : 'ANALYZING'
+
+  return <div className={`bot-chart-activity ${mode.toLowerCase().replace(/ /g,'-')}`}>
+    <span className="bot-activity-pulse" />
+    <div>
+      <small>BOT CHART ACTIVITY</small>
+      <b>{mode}{open ? ` • #${open.id} ${open.direction}` : direction !== 'NO_TRADE' ? ` • ${direction}` : ''}</b>
+    </div>
+    <span>Score <strong>{score ? score.toFixed(2) : '—'}</strong></span>
+    <span>Reason <strong>{String(reason).replace(/_/g,' ').slice(0,60)}</strong></span>
+  </div>
+}
+
+function OptionTradeLadder({trades}:{trades:Trade[]}) {
+  if (!trades.length) return null
+  return <div className="option-ladder-stack">
+    {trades.map(t => {
+      const entry=Number(t.entry||0), stop=Number(t.stop||0), target=Number(t.target||0), current=Number(t.currentPrice||entry)
+      const lo=Math.min(stop,entry,target,current)
+      const hi=Math.max(stop,entry,target,current)
+      const span=Math.max(.01,hi-lo)
+      const pos=(v:number)=>Math.max(0,Math.min(100,(v-lo)/span*100))
+      return <div className="option-trade-ladder" key={t.id}>
+        <div className="option-ladder-head">
+          <div><small>LIVE OPTION PREMIUM MAP</small><b>#{t.id} {t.displayName || instrumentName(t.symbol)} • {t.direction}</b></div>
+          <span className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl)>=0?'+':''}{money(t.pnl)}</span>
+        </div>
+        <div className="ladder-track">
+          <span className="ladder-zone risk" style={{left:`${pos(stop)}%`,width:`${Math.max(0,pos(entry)-pos(stop))}%`}}/>
+          <span className="ladder-zone reward" style={{left:`${pos(entry)}%`,width:`${Math.max(0,pos(target)-pos(entry))}%`}}/>
+          <i className="ladder-line stop" style={{left:`${pos(stop)}%`}}><em>SL {stop.toFixed(2)}</em></i>
+          <i className="ladder-line entry" style={{left:`${pos(entry)}%`}}><em>ENTRY {entry.toFixed(2)}</em></i>
+          <i className="ladder-line target" style={{left:`${pos(target)}%`}}><em>TG {target.toFixed(2)}</em></i>
+          <i className="ladder-current" style={{left:`${pos(current)}%`}}><em>NOW {current.toFixed(2)}</em></i>
+        </div>
+        <small className="ladder-note">Updates automatically from the position monitor. This ladder uses option-premium prices; the SENSEX candle chart remains on underlying-index scale.</small>
+      </div>
+    })}
+  </div>
+}
+
 function TradingViewAdvancedChart({symbol}:{symbol:string}) {
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -1195,7 +1267,8 @@ function TradingViewAdvancedChart({symbol}:{symbol:string}) {
     container.innerHTML = ''
     const widget = document.createElement('div')
     widget.className = 'tradingview-widget-container__widget'
-    widget.style.height = 'calc(100% - 28px)'
+    widget.style.height = '560px'
+    widget.style.minHeight = '560px'
     widget.style.width = '100%'
 
     const copyright = document.createElement('div')
@@ -1207,7 +1280,9 @@ function TradingViewAdvancedChart({symbol}:{symbol:string}) {
     script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js'
     script.async = true
     script.innerHTML = JSON.stringify({
-      autosize: true,
+      autosize: false,
+      width: '100%',
+      height: 560,
       symbol,
       interval: '1',
       timezone: 'Asia/Kolkata',
@@ -1245,7 +1320,7 @@ function TradingViewAdvancedChart({symbol}:{symbol:string}) {
   </div>
 }
 
-function MarketIntelligenceChart({data}:{data:any}) {
+function MarketIntelligenceChart({data, decision, openTrades}:{data:any, decision:any, openTrades:Trade[]}) {
   const all = Array.isArray(data?.candles) ? data.candles : []
   if (all.length < 2) return <div className="chart-empty">Waiting for SENSEX candle intelligence…</div>
 
@@ -1261,6 +1336,13 @@ function MarketIntelligenceChart({data}:{data:any}) {
     data?.levels?.support,data?.levels?.resistance,data?.levels?.dayHigh,data?.levels?.dayLow,
     data?.levels?.previousDayHigh,data?.levels?.previousDayLow,
     data?.fibonacci?.fib382,data?.fibonacci?.fib500,data?.fibonacci?.fib618,
+    ...(Array.isArray(decision?.signals) ? [
+      decision.signals[0]?.previousHigh,
+      decision.signals[0]?.previousLow,
+      decision.signals[0]?.breakoutHigh,
+      decision.signals[0]?.breakoutLow,
+    ] : []),
+    ...openTrades.flatMap(t => [t.meta?.underlyingEntry, t.meta?.mtfContinuation?.underlyingPrice]),
   ].map(Number).filter(Number.isFinite)
   const lows = rows.map((x:any)=>Number(x.low))
   const highs = rows.map((x:any)=>Number(x.high))
@@ -1273,6 +1355,16 @@ function MarketIntelligenceChart({data}:{data:any}) {
   const y = (p:number)=>pad.top + (maxP-p)/range*plotH
   const candleW = Math.max(2,Math.min(7,plotW/rows.length*0.58))
   const points = (key:string)=>rows.map((r:any,i:number)=>`${x(i).toFixed(1)},${y(Number(r[key])).toFixed(1)}`).join(' ')
+  const signal = Array.isArray(decision?.signals) ? decision.signals[0] : null
+  const setupDirection = String(decision?.action || signal?.action || signal?.candidateAction || '').toUpperCase()
+  const openTrade = openTrades[0]
+  const underlyingEntry = Number(openTrade?.meta?.underlyingEntry ?? openTrade?.meta?.mtfContinuation?.underlyingPrice ?? NaN)
+  const triggerPrice = setupDirection === 'CE'
+    ? Number(signal?.previousHigh ?? signal?.breakoutHigh ?? NaN)
+    : setupDirection === 'PE'
+      ? Number(signal?.previousLow ?? signal?.breakoutLow ?? NaN)
+      : NaN
+
   const levelDefs = [
     {key:'dayHigh',label:'DAY HIGH',value:data?.levels?.dayHigh,kind:'day-high'},
     {key:'dayLow',label:'DAY LOW',value:data?.levels?.dayLow,kind:'day-low'},
@@ -1283,10 +1375,14 @@ function MarketIntelligenceChart({data}:{data:any}) {
     {key:'fib382',label:'FIB 38.2',value:data?.fibonacci?.fib382,kind:'fib'},
     {key:'fib500',label:'FIB 50',value:data?.fibonacci?.fib500,kind:'fib'},
     {key:'fib618',label:'FIB 61.8',value:data?.fibonacci?.fib618,kind:'fib'},
+    {key:'setupTrigger',label:setupDirection ? `${setupDirection} TRIGGER` : 'TRIGGER',value:triggerPrice,kind:'trigger'},
+    {key:'tradeUnderlying',label:'UNDERLYING @ ENTRY',value:underlyingEntry,kind:'trade-entry'},
   ].filter((l:any)=>Number.isFinite(Number(l.value)))
+
+  const recentEventFloor = Math.max(offset, all.length - 24)
   const events = (Array.isArray(data?.events)?data.events:[])
-    .filter((e:any)=>Number(e.index)>=offset && Number(e.index)<all.length)
-    .map((e:any)=>({...e,index:Number(e.index)-offset}))
+    .filter((e:any)=>Number(e.index)>=recentEventFloor && Number(e.index)<all.length)
+    .map((e:any)=>({...e,index:Number(e.index)-offset,ageBars:all.length-1-Number(e.index)}))
   const ticks = Array.from({length:6},(_,i)=>maxP-(range*i/5))
 
   return <div className="market-intel-chart-wrap">
@@ -1322,7 +1418,8 @@ function MarketIntelligenceChart({data}:{data:any}) {
         const cy=y(Number(e.price))
         const above=String(e.direction).toUpperCase()==='BEAR'
         const labelY=above?cy-15:cy+24
-        return <g key={`${e.time}-${e.kind}-${i}`} className={`chart-event ${String(e.direction).toLowerCase()} ${String(e.kind).toLowerCase()}`}>
+        const opacity=Math.max(.22,1-Number(e.ageBars||0)/26)
+        return <g key={`${e.time}-${e.kind}-${i}`} style={{opacity}} className={`chart-event ${String(e.direction).toLowerCase()} ${String(e.kind).toLowerCase()}`}>
           <circle cx={cx} cy={cy} r="3.4"/>
           <line x1={cx} x2={cx} y1={cy} y2={above?labelY+4:labelY-10}/>
           <text x={cx} y={labelY} textAnchor="middle">{String(e.label).replace(/_/g,' ').slice(0,20)}</text>
