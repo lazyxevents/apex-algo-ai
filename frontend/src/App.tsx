@@ -657,11 +657,17 @@ export default function App() {
         <div className="research-box">
           <div className="research-box-head"><b>Strategy Hypotheses</b><span>BACKTEST BEFORE TRUST</span></div>
           <div className="hypothesis-stack">
-            {hypotheses.slice(0,6).map((h:any) => <div className="hypothesis-node" key={h.name}>
-              <div><span className={`family ${String(h.family || '').toLowerCase()}`}>{h.family}</span><b>{h.name}</b></div>
-              <p>{h.description}</p>
-              <small>{h.status} • score {Number(h.score || 0).toFixed(2)}</small>
-            </div>)}
+            {hypotheses.slice(0,8).map((h:any) => {
+              const m = h.evidence?.metrics || {}
+              return <div className="hypothesis-node" key={h.name}>
+                <div><span className={`family ${String(h.family || '').toLowerCase()}`}>{h.family}</span><b>{h.name}</b></div>
+                <p>{h.description}</p>
+                <small>
+                  {h.status} • score {Number(h.score || 0).toFixed(2)}
+                  {m.trades != null ? ` • ${m.trades} tests • ${Number(m.winRate || 0).toFixed(1)}% WR • ${Number(m.expectancyR || 0).toFixed(2)}R exp` : ''}
+                </small>
+              </div>
+            })}
           </div>
         </div>
 
