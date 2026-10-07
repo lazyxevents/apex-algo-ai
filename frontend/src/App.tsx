@@ -765,7 +765,7 @@ export default function App() {
         <div>
           <div className="eyebrow">MARKET RESEARCH</div>
           <h2>1m / 5m / 15m Structure Snapshot</h2>
-          <p>Multi-timeframe market intelligence: trend, support/resistance, BOS/CHOCH, liquidity sweep, FVG, fake breakout, pin bar, hammer, engulfing, harami, inside bar, doji and star patterns.</p>
+          <p>Multi-timeframe market intelligence: trend, HH/HL/LH/LL, support/resistance, BOS/CHOCH, liquidity sweep, FVG, fake breakout, pin bars, engulfing, harami, marubozu, tweezers, stars, soldiers/crows, inside/outside bars and doji/spinning-top context.</p>
         </div>
         <span className="badge subtle">{marketResearch.status || 'waiting'}</span>
       </div>
@@ -790,27 +790,31 @@ export default function App() {
         })}
       </div>
       {marketResearch.llm?.summary && <p className="panel-note"><b>LLM summary:</b> {marketResearch.llm.summary}</p>}
-      <p className="panel-note">News/LLM/Hugging Face research stays optional and does not place orders or override hard risk controls. Hugging Face is a shadow reviewer only.</p>
+      <p className="panel-note">News and LLM research are advisory only. Trade entries, position sizing and hard risk locks remain deterministic and fresh-data gated.</p>
     </section>
 
     <section className="panel learning-panel">
       <div className="section-head compact">
-        <div><div className="eyebrow">APEX LEARNING ENGINE</div><h2>Sources → Patterns → Hypotheses → Backtest → Candidate</h2><p>During market hours it learns from structure/outcomes. After 15:15 it crawls bounded public research/news, studies sectors and builds the next-session plan.</p></div>
+        <div><div className="eyebrow">APEX LEARNING ENGINE</div><h2>Observe → Label → Research → Backtest → Train → Validate</h2><p>Live session stores fresh candle/SMC moments. Postmarket reviews the day, then 17:00–08:00 runs the 15-hour research window. At 08:00 APEX refreshes news, previous-day levels, gap scenarios and the session plan.</p></div>
         <span className={`badge subtle ${worker.running ? 'worker-live' : ''}`}>{worker.running ? 'LEARNING NOW' : (worker.stage || 'WAITING')}</span>
       </div>
       <div className="learning-grid">
         <SystemItem label="Worker" value={worker.enabled ? 'Enabled' : 'Disabled'} good={worker.enabled} />
         <SystemItem label="Stage" value={worker.stage || 'idle'} />
         <SystemItem label="Cycles today" value={worker.cyclesToday ?? 0} />
-        <SystemItem label="Runtime today" value={`${worker.researchHoursToday ?? 0}h / ${worker.dailyHourBudget ?? 15}h`} />
+        <SystemItem label="Research coverage" value={`${worker.researchHoursToday ?? 0}h / ${worker.dailyHourBudget ?? 15}h`} />
+        <SystemItem label="Learning window" value={worker.learningWindow || '17:00-08:00'} good={Boolean(worker.learningWindowActive)} />
         <SystemItem label="Sources reviewed" value={worker.sourcesReviewed ?? 0} />
+        <SystemItem label="News reviewed" value={worker.newsReviewed ?? intelligence.todayNewsCount ?? 0} />
         <SystemItem label="Knowledge memory" value={worker.knowledgeCount ?? intelligence.knowledgeCount ?? 0} />
         <SystemItem label="Research phase" value={worker.researchPhase || 'IDLE'} />
         <SystemItem label="Sectors tracked" value={worker.sectorsTracked ?? sectors.length} />
         <SystemItem label="Patterns found" value={worker.patternsDetected ?? 0} />
         <SystemItem label="Hypotheses" value={worker.hypothesesTested ?? 0} />
         <SystemItem label="Backtests" value={worker.backtestsRun ?? 0} />
+        <SystemItem label="Strategy-lab setups" value={worker.strategyLabTests ?? 0} />
         <SystemItem label="Dataset" value={worker.datasetSize ?? 0} />
+        <SystemItem label="New labels last cycle" value={worker.datasetInsertedLastCycle ?? 0} />
         <SystemItem label="Labeled progress" value={trainingReadiness.minimumSamples ? `${trainingReadiness.eligibleSamples ?? 0} / ${trainingReadiness.minimumSamples}` : String(trainingReadiness.eligibleSamples ?? 0)} good={Boolean(trainingReadiness.sampleThresholdReady)} />
         <SystemItem label="Training state" value={trainingReadiness.status || 'COLLECTING_LABELS'} good={Boolean(trainingReadiness.productionModelReady)} />
         <SystemItem label="Candidate" value={worker.candidateVersion || 'not ready'} />
