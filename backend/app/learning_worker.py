@@ -235,10 +235,17 @@ class ContinuousLearningWorker:
             else:
                 self._heartbeat(
                     "live_session",
-                    "Live session: storing fresh candle moments and outcomes; web crawling/backtest/neural retraining paused",
+                    "Live session: fresh candle memory + lightweight hourly news; heavy research/backtest/neural retraining paused",
                 )
+                live_news = research_engine.collect_news()
+                self.state.newsReviewed += len(live_news)
+                research_bundle["news"] = live_news
+                research_bundle["newsHealth"] = research_engine.snapshot().get("newsHealth") or {}
                 summary = {
-                    "summary": f"Live market learning: {patterns} pattern/SMC/structure observations in current research snapshot.",
+                    "summary": (
+                        f"Live market learning: {patterns} pattern/SMC/structure observations; "
+                        f"{len(live_news)} current headlines refreshed without changing trade/risk gates."
+                    ),
                     "observations": [],
                 }
                 lab = self.state.lastStrategyLab or {}
