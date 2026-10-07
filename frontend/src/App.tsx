@@ -894,10 +894,10 @@ export default function App() {
               <span>Stop <b>-{manualDoTrade.stopPoints ?? 15} pts</b></span>
               <span>Capital request <b>{manualDoTrade.capitalUsagePct ?? 100}% max</b></span>
               <span>Cutoff <b>{manualDoTrade.cutoffTime ?? '15:20'} IST</b></span>
-              <span>Carry forward <b>{manualDoTrade.carryForward ? 'BUTTON TRADE ONLY' : 'OFF'}</b></span>
+              <span>Carry forward <b>{manualDoTrade.carryForward ? 'FUTURE-EXPIRY ONLY' : 'OFF'}</b></span>
               <span>Feed <b className={feedStale ? 'negative' : 'positive'}>{feedStale ? 'STALE — BLOCKED' : freshnessState}</b></span>
             </div>
-            <small className="do-trade-foot">PAPER ONLY. Quantity targets maximum affordable deployment but is reduced when needed to stay inside remaining daily / weekly / monthly hard loss-lock headroom. Kill + Flatten always overrides carry-forward.</small>
+            <small className="do-trade-foot">PAPER ONLY. Quantity targets maximum affordable deployment but is reduced when needed to stay inside remaining daily / weekly / monthly hard loss-lock headroom. Expiry-day contracts do not carry. Kill + Flatten always overrides carry-forward.</small>
           </div>
           <div className="do-trade-action">
             <button type="button" disabled={doTradeDisabled} onClick={() => void doTradeNow()}>
