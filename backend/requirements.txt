@@ -10,4 +10,4 @@ yfinance==1.7.0
 
 numpy==2.5.3
 
-pywebpush==2.1.2
+pywebpush==2.5.0
