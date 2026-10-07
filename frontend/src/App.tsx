@@ -475,8 +475,6 @@ export default function App() {
   const freshnessState = String(sensexFreshness.state || 'UNKNOWN').toUpperCase()
   const feedStale = ['STALE', 'MISSING', 'INVALID_TIMESTAMP'].includes(freshnessState)
   const feedDelayed = freshnessState === 'DELAYED'
-  const huggingFace = status.huggingFace || worker.huggingFace || {}
-  const huggingFaceReview = worker.huggingFaceLastReview || {}
   const lastMoment = liveMoments[0] || {}
   const lastVerifiedTrend = String(
     latestSignal?.context?.trend ||
@@ -484,7 +482,6 @@ export default function App() {
     researchMarkets?.SENSEX?.frames?.['1m']?.trend ||
     'UNKNOWN'
   ).toUpperCase()
-  const verifiedTrend = feedStale ? 'STALE' : lastVerifiedTrend
   const targetAmount = Number(mt.targetAmount || 0)
   const monthPnl = Number(mt.monthPnl || 0)
   const targetProgress = targetAmount > 0 ? Math.max(0, Math.min(100, monthPnl / targetAmount * 100)) : 0
@@ -696,8 +693,6 @@ export default function App() {
         <SystemItem label="Sources reviewed" value={worker.sourcesReviewed ?? 0} />
         <SystemItem label="Knowledge memory" value={worker.knowledgeCount ?? intelligence.knowledgeCount ?? 0} />
         <SystemItem label="Research phase" value={worker.researchPhase || 'IDLE'} />
-        <SystemItem label="Hugging Face" value={huggingFace.configured ? 'Shadow Ready' : 'Token needed'} good={Boolean(huggingFace.configured)} />
-        <SystemItem label="HF last review" value={huggingFaceReview.status ? String(huggingFaceReview.status).toUpperCase() : 'Not run'} good={huggingFaceReview.status === 'ok'} />
         <SystemItem label="Sectors tracked" value={worker.sectorsTracked ?? sectors.length} />
         <SystemItem label="Patterns found" value={worker.patternsDetected ?? 0} />
         <SystemItem label="Hypotheses" value={worker.hypothesesTested ?? 0} />
@@ -710,16 +705,6 @@ export default function App() {
         <SystemItem label="LLM provider" value={ollama.configured ? (ollama.provider || 'Connected') : 'Not configured'} good={ollama.configured} />
         <SystemItem label="LLM model" value={ollama.model || '—'} />
       </div>
-
-      <ReactiveHuggingFace
-        configured={Boolean(huggingFace.configured)}
-        review={huggingFaceReview}
-        worker={worker}
-        verifiedTrend={verifiedTrend}
-        lastVerifiedTrend={lastVerifiedTrend}
-        freshness={sensexFreshness}
-        feedStale={feedStale}
-      />
 
       <div className="auto-learning-core">
         <div className="learning-core-card neural-core-card">
@@ -1053,70 +1038,6 @@ export default function App() {
       <span>NO TRADE is valid • Monthly target is a lock, not a guaranteed return • Real broker orders disabled</span>
     </footer>
   </main>
-}
-
-function ReactiveHuggingFace({
-  configured, review, worker, verifiedTrend, lastVerifiedTrend, freshness, feedStale,
-}:{
-  configured:boolean,
-  review:any,
-  worker:any,
-  verifiedTrend:string,
-  lastVerifiedTrend:string,
-  freshness:any,
-  feedStale:boolean,
-}) {
-  const reviewState = String(review?.marketState || '').toUpperCase()
-  const riskState = String(review?.riskState || '').toUpperCase()
-  const researchPhase = String(worker?.researchPhase || '').toUpperCase()
-  let emoji = '🤗'
-  let mood = 'READY'
-  let title = 'Shadow reviewer ready'
-  let detail = 'Waiting for verified market evidence or the next deep-research review.'
-
-  if (!configured) {
-    emoji = '🔒'; mood = 'TOKEN NEEDED'; title = 'Hugging Face not connected'
-    detail = 'HF_TOKEN is required before the shadow reviewer can run.'
-  } else if (feedStale) {
-    emoji = '😴'; mood = 'STALE FEED'; title = 'Waiting for fresh SENSEX candles'
-    detail = `APEX will not fake a live trend. Last verified trend was ${lastVerifiedTrend}; candle age is ${freshness?.ageSeconds != null ? Math.round(Number(freshness.ageSeconds)) + 's' : 'unknown'}.`
-  } else if (worker?.running && researchPhase !== 'LIVE_SESSION') {
-    emoji = '🧐'; mood = 'RESEARCHING'; title = 'Reviewing post/premarket evidence'
-    detail = 'Hugging Face is running as a second research reviewer; hard risk and order logic remain deterministic.'
-  } else if (review?.status === 'error') {
-    emoji = '😵'; mood = 'REVIEW ERROR'; title = 'Shadow review failed safely'
-    detail = String(review?.warnings?.[0] || 'The deterministic engine continues without Hugging Face.')
-  } else if (reviewState === 'BEARISH' || verifiedTrend === 'DOWN') {
-    emoji = riskState === 'HIGH' ? '😬' : '😟'; mood = 'BEARISH'; title = 'Verified bearish pressure'
-    detail = 'Reaction follows verified market structure / latest shadow review. It does not create a PE entry by itself.'
-  } else if (reviewState === 'BULLISH' || verifiedTrend === 'UP') {
-    emoji = '🤗'; mood = 'BULLISH'; title = 'Verified bullish pressure'
-    detail = 'Reaction follows verified market structure / latest shadow review. It does not create a CE entry by itself.'
-  } else if (verifiedTrend === 'FLAT' || reviewState === 'NEUTRAL' || reviewState === 'MIXED') {
-    emoji = '🤔'; mood = 'NEUTRAL'; title = 'Range / mixed evidence'
-    detail = 'Waiting for cleaner structure before showing directional confidence.'
-  }
-
-  return <div className={`hf-reactive-card ${mood.toLowerCase().replace(/ /g,'-')}`}>
-    <div className="hf-face-wrap" aria-label={`Hugging Face reaction: ${mood}`}>
-      <div className="hf-face">{emoji}</div>
-      <span className="hf-pulse-ring" />
-    </div>
-    <div className="hf-reactive-copy">
-      <div className="hf-reactive-head">
-        <div><small>HUGGING FACE • SHADOW AI</small><h3>{title}</h3></div>
-        <b>{mood}</b>
-      </div>
-      <p>{detail}</p>
-      <div className="hf-reactive-meta">
-        <span>HF API <b>{configured ? 'CONNECTED' : 'OFF'}</b></span>
-        <span>Verified trend <b>{verifiedTrend}</b></span>
-        <span>HF review <b>{review?.status ? String(review.status).toUpperCase() : 'NOT RUN'}</b></span>
-        <span>Risk <b>{riskState || '—'}</b></span>
-      </div>
-      <small className="hf-reactive-note">Face reacts to verified data only. When Yahoo is stale it switches to waiting instead of pretending the current market is bullish/bearish.</small>
-    </div>
-  </div>
 }
 
 function LearningJar({readiness, model}:{readiness:any, model:any}) {
