@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 type Status = any
 
@@ -95,6 +95,61 @@ function urlBase64ToUint8Array(value: string) {
   return Uint8Array.from([...raw].map(char => char.charCodeAt(0)))
 }
 
+let apexAudioContext: AudioContext | null = null
+
+async function playApexTradeChime(soft = false) {
+  try {
+    apexAudioContext = apexAudioContext || new AudioContext()
+    if (apexAudioContext.state === 'suspended') await apexAudioContext.resume()
+
+    const ctx = apexAudioContext
+    const start = ctx.currentTime + 0.015
+    const master = ctx.createGain()
+    master.gain.setValueAtTime(soft ? 0.035 : 0.055, start)
+    master.connect(ctx.destination)
+
+    const strike = (frequency: number, at: number, duration: number, gainScale = 1) => {
+      const osc = ctx.createOscillator()
+      const harmonic = ctx.createOscillator()
+      const gain = ctx.createGain()
+      const harmonicGain = ctx.createGain()
+
+      osc.type = 'sine'
+      harmonic.type = 'triangle'
+      osc.frequency.setValueAtTime(frequency, at)
+      harmonic.frequency.setValueAtTime(frequency * 2.01, at)
+
+      gain.gain.setValueAtTime(0.0001, at)
+      gain.gain.exponentialRampToValueAtTime(0.72 * gainScale, at + 0.012)
+      gain.gain.exponentialRampToValueAtTime(0.0001, at + duration)
+
+      harmonicGain.gain.setValueAtTime(0.0001, at)
+      harmonicGain.gain.exponentialRampToValueAtTime(0.12 * gainScale, at + 0.008)
+      harmonicGain.gain.exponentialRampToValueAtTime(0.0001, at + duration * 0.72)
+
+      osc.connect(gain)
+      harmonic.connect(harmonicGain)
+      gain.connect(master)
+      harmonicGain.connect(master)
+
+      osc.start(at)
+      harmonic.start(at)
+      osc.stop(at + duration + 0.03)
+      harmonic.stop(at + duration + 0.03)
+    }
+
+    // Short two-note major interval: clean bell/chime, not an alarm.
+    strike(659.25, start, 0.34, 0.92)
+    strike(987.77, start + 0.19, 0.42, 0.78)
+
+    window.setTimeout(() => {
+      try { master.disconnect() } catch { /* no-op */ }
+    }, 900)
+  } catch {
+    // Audio is enhancement-only; never break notifications/trading.
+  }
+}
+
 async function fetchJson(path: string, options?: RequestInit) {
   const response = await fetch(`${API}${path}`, options)
   let data: any = null
@@ -120,6 +175,7 @@ export default function App() {
   const [pushSubscribed, setPushSubscribed] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
   const [pushError, setPushError] = useState('')
+  const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
 
   const loadStatus = useCallback(async (silent = false) => {
     try {
@@ -221,6 +277,7 @@ export default function App() {
       })
       setPushConfig({ ...saved, supported: true })
       setPushSubscribed(true)
+      await playApexTradeChime(true)
       await registration.showNotification('APEX Trade Alerts enabled', {
         body: 'You will be notified when APEX executes a new paper trade.',
         icon: '/favicon.ico',
@@ -264,6 +321,7 @@ export default function App() {
     try {
       if (Notification.permission !== 'granted') throw new Error('Enable notifications first.')
       const registration = await navigator.serviceWorker.register('/sw.js')
+      await playApexTradeChime(false)
       await registration.showNotification('APEX Test Trade Alert', {
         body: 'SENSEX CE • Qty 20 • Entry alert test\nBackground notifications are working on this device.',
         icon: '/favicon.ico',
@@ -312,6 +370,19 @@ export default function App() {
   }
 
   const openTrades = useMemo(() => trades.filter(t => t.status === 'OPEN'), [trades])
+
+  useEffect(() => {
+    const currentIds = new Set(openTrades.map(t => t.id))
+    const previousIds = previousOpenTradeIdsRef.current
+    if (previousIds) {
+      const newlyOpened = openTrades.filter(t => !previousIds.has(t.id))
+      if (newlyOpened.length > 0 && pushSubscribed && pushPermission === 'granted') {
+        void playApexTradeChime(false)
+      }
+    }
+    previousOpenTradeIdsRef.current = currentIds
+  }, [openTrades, pushPermission, pushSubscribed])
+
   const closedTrades = useMemo(() => trades.filter(t => t.status !== 'OPEN'), [trades])
   const invalidClosedTrades = useMemo(() => closedTrades.filter(t => t.status === 'INVALID_CONTRACT'), [closedTrades])
   const validatedClosedTrades = useMemo(() => closedTrades.filter(t => t.status !== 'INVALID_CONTRACT'), [closedTrades])
