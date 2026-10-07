@@ -189,8 +189,11 @@ class ResearchIntelligenceEngine:
                 cached = None
                 with SessionLocal() as db:
                     cached = db.scalar(select(ResearchKnowledge).where(ResearchKnowledge.url == src["url"]))
-                if cached and cached.last_checked_at and (now - cached.last_checked_at).total_seconds() < 20 * 3600:
-                    out.append({**src, "summary": cached.summary[:900], "status": "cached", "lastCheckedAt": cached.last_checked_at.isoformat()})
+                cached_checked = cached.last_checked_at if cached else None
+                if cached_checked and cached_checked.tzinfo is None:
+                    cached_checked = cached_checked.replace(tzinfo=timezone.utc)
+                if cached and cached_checked and (now - cached_checked).total_seconds() < 20 * 3600:
+                    out.append({**src, "summary": cached.summary[:900], "status": "cached", "lastCheckedAt": cached_checked.isoformat()})
                     continue
                 try:
                     res = client.get(src["url"])
