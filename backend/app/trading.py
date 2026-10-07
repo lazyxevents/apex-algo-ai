@@ -452,11 +452,27 @@ class TradingEngine:
                     sleep(max(0.0, settings.force_exit_retry_delay_seconds))
         return float(trade.current_price or trade.entry), False, last_error
 
-    def force_flatten(self, provider, reason: str = "manual emergency flatten") -> list[dict]:
+    def force_flatten(
+        self,
+        provider,
+        reason: str = "manual emergency flatten",
+        *,
+        preserve_manual_carry: bool = False,
+    ) -> list[dict]:
         with SessionLocal() as db:
             open_rows = self._open_rows(db)
         results = []
         for trade in open_rows:
+            meta = self._meta(trade)
+            if preserve_manual_carry and bool(meta.get("manualDoTrade")) and bool(meta.get("carryForward")):
+                item = {
+                    "tradeId": trade.id,
+                    "status": "PRESERVED_CARRY_FORWARD",
+                    "reason": "manual Do Trade position explicitly allowed to carry forward",
+                }
+                results.append(item)
+                self._audit("trade.carry_forward_preserved", item)
+                continue
             price, fresh, quote_error = (
                 self._best_exit_price(provider, trade)
                 if provider.market_ready
@@ -545,7 +561,11 @@ class TradingEngine:
         if self.state.killed:
             return self.force_flatten(provider, "kill switch")
         if phase["forceExit"]:
-            return self.force_flatten(provider, "scheduled force exit")
+            return self.force_flatten(
+                provider,
+                "scheduled force exit",
+                preserve_manual_carry=True,
+            )
         actions = []
         with SessionLocal() as db:
             open_rows = self._open_rows(db)
