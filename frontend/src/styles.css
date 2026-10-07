@@ -926,3 +926,46 @@ footer{font-size:11px}
   .chart-intel-stats{grid-template-columns:1fr 1fr}
   .market-intel-chart{min-height:260px}
 }
+
+
+/* Official TradingView market-reference chart */
+.chart-view-tabs{
+  display:flex;gap:7px;align-items:center;margin:0 0 10px;padding:4px;
+  width:max-content;max-width:100%;
+  border:1px solid #173847;border-radius:10px;background:#06131b
+}
+.chart-view-tabs button{
+  appearance:none;border:0;border-radius:7px;padding:8px 12px;
+  background:transparent;color:#78909d;font-size:10px;font-weight:900;
+  letter-spacing:.35px;cursor:pointer
+}
+.chart-view-tabs button:hover{color:#bfd2da;background:#0a1a24}
+.chart-view-tabs button.active{
+  color:#e8f0f4;background:#123240;box-shadow:inset 0 0 0 1px #285365
+}
+.tv-live-shell{
+  overflow:hidden;border:1px solid #173847;border-radius:14px;
+  background:#06131b;min-height:540px
+}
+.tv-live-head{
+  height:42px;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:0 12px;border-bottom:1px solid #14313f;background:#071720
+}
+.tv-live-head>div{display:flex;align-items:center;gap:8px;min-width:0}
+.tv-live-head small{color:#4fc8a5;font-size:8px;font-weight:900;letter-spacing:.8px}
+.tv-live-head b{color:#dce8ed;font-size:11px}
+.tv-live-head>span{color:#6f8794;font-size:9px}
+.tv-widget-host{height:498px;width:100%}
+.tradingview-widget-copyright{
+  height:26px;display:flex;justify-content:flex-end;align-items:center;gap:3px;
+  padding:0 9px;color:#5e7682;font-size:8px;background:#06131b
+}
+.tradingview-widget-copyright a{color:#7697a8;text-decoration:none}
+.tradingview-widget-copyright a:hover{color:#9fc1d1}
+@media(max-width:720px){
+  .chart-view-tabs{width:100%}
+  .chart-view-tabs button{flex:1}
+  .tv-live-shell{min-height:480px}
+  .tv-widget-host{height:438px}
+  .tv-live-head{align-items:flex-start;height:auto;padding:9px 10px;flex-direction:column}
+}

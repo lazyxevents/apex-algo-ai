@@ -176,6 +176,7 @@ export default function App() {
   const [pushBusy, setPushBusy] = useState(false)
   const [pushError, setPushError] = useState('')
   const [chartIntel, setChartIntel] = useState<any>(null)
+  const [chartView, setChartView] = useState<'tradingview' | 'apex'>('tradingview')
   const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
 
   const loadStatus = useCallback(async (silent = false) => {
@@ -584,16 +585,31 @@ export default function App() {
     <section className="panel chart-intelligence-panel">
       <div className="section-head intelligence-head">
         <div>
-          <div className="eyebrow">APEX ANNOTATED MARKET MAP</div>
-          <h2>SENSEX 1m • What the Bot Actually Sees</h2>
-          <p>Candles, EMA 9/21, day/previous-day levels, support-resistance, Fibonacci and SMC/pattern events come from the same backend evidence pipeline used for paper decision support.</p>
+          <div className="eyebrow">PRO MARKET CHART</div>
+          <h2>SENSEX • TradingView + APEX Analysis</h2>
+          <p>TradingView gives the professional market-reference chart and drawing/indicator UI. APEX Markup shows the exact candle/SMC evidence used by the bot.</p>
         </div>
         <div className="phase-stack">
-          <span className={`phase-chip ${marketResearchOnly ? 'historical' : String(chartIntel?.freshness?.state || 'unknown').toLowerCase()}`}>{marketResearchOnly ? 'HISTORICAL / RESEARCH' : (chartIntel?.freshness?.state || 'WAITING')}</span>
-          <span className="phase-sub">{chartIntel?.generatedAt ? `updated ${formatDateTime(chartIntel.generatedAt)}` : 'loading chart intelligence'}</span>
+          <span className={`phase-chip ${chartView === 'tradingview' ? 'live' : marketResearchOnly ? 'historical' : String(chartIntel?.freshness?.state || 'unknown').toLowerCase()}`}>
+            {chartView === 'tradingview' ? 'TRADINGVIEW' : marketResearchOnly ? 'HISTORICAL / RESEARCH' : (chartIntel?.freshness?.state || 'WAITING')}
+          </span>
+          <span className="phase-sub">{chartView === 'tradingview' ? 'BSE:SENSEX market reference' : chartIntel?.generatedAt ? `updated ${formatDateTime(chartIntel.generatedAt)}` : 'loading APEX chart intelligence'}</span>
         </div>
       </div>
-      <MarketIntelligenceChart data={chartIntel} />
+
+      <div className="chart-view-tabs">
+        <button type="button" className={chartView === 'tradingview' ? 'active' : ''} onClick={() => setChartView('tradingview')}>
+          TradingView Live
+        </button>
+        <button type="button" className={chartView === 'apex' ? 'active' : ''} onClick={() => setChartView('apex')}>
+          APEX Markup
+        </button>
+      </div>
+
+      {chartView === 'tradingview'
+        ? <TradingViewAdvancedChart symbol="BSE:SENSEX" />
+        : <MarketIntelligenceChart data={chartIntel} />}
+
       <div className="chart-intel-stats">
         <SystemItem label="1m trend" value={chartIntel?.trends?.['1m']?.trend || '—'} />
         <SystemItem label="5m trend" value={chartIntel?.trends?.['5m']?.trend || '—'} />
@@ -604,7 +620,9 @@ export default function App() {
         <SystemItem label="Gap" value={chartIntel?.sessionProfile?.gapPct != null ? `${Number(chartIntel.sessionProfile.gapPct) >= 0 ? '+' : ''}${Number(chartIntel.sessionProfile.gapPct).toFixed(2)}%` : '—'} />
         <SystemItem label="Plan bias" value={chartIntel?.plan?.marketBias || nextPlan.marketBias || '—'} />
       </div>
-      <p className="panel-note">Markers are analysis annotations, not automatic trade commands. If provider data is stale, the chart stays visible for audit but new entries remain blocked.</p>
+      <p className="panel-note">
+        TradingView Live is the visual market-reference view. APEX automated scoring/training still uses the backend provider feed and hard freshness gates; switching chart tabs does not change execution data.
+      </p>
     </section>
 
     <section className="panel intelligence-panel">
@@ -1165,6 +1183,66 @@ export default function App() {
       <span>NO TRADE is valid • Monthly target is a lock, not a guaranteed return • Real broker orders disabled</span>
     </footer>
   </main>
+}
+
+function TradingViewAdvancedChart({symbol}:{symbol:string}) {
+  const containerRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    container.innerHTML = ''
+    const widget = document.createElement('div')
+    widget.className = 'tradingview-widget-container__widget'
+    widget.style.height = 'calc(100% - 28px)'
+    widget.style.width = '100%'
+
+    const copyright = document.createElement('div')
+    copyright.className = 'tradingview-widget-copyright'
+    copyright.innerHTML = '<a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank"><span>Market chart</span></a><span> by TradingView</span>'
+
+    const script = document.createElement('script')
+    script.type = 'text/javascript'
+    script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js'
+    script.async = true
+    script.innerHTML = JSON.stringify({
+      autosize: true,
+      symbol,
+      interval: '1',
+      timezone: 'Asia/Kolkata',
+      theme: 'dark',
+      style: '1',
+      locale: 'en',
+      backgroundColor: 'rgba(6, 19, 27, 1)',
+      gridColor: 'rgba(30, 48, 58, 0.45)',
+      allow_symbol_change: false,
+      calendar: false,
+      details: true,
+      hide_side_toolbar: false,
+      hide_top_toolbar: false,
+      hide_legend: false,
+      save_image: false,
+      withdateranges: true,
+      support_host: 'https://www.tradingview.com',
+    })
+
+    container.appendChild(widget)
+    container.appendChild(copyright)
+    container.appendChild(script)
+
+    return () => {
+      container.innerHTML = ''
+    }
+  }, [symbol])
+
+  return <div className="tv-live-shell">
+    <div className="tv-live-head">
+      <div><small>TRADINGVIEW ADVANCED CHART</small><b>{symbol}</b></div>
+      <span>1m • Asia/Kolkata</span>
+    </div>
+    <div ref={containerRef} className="tradingview-widget-container tv-widget-host" />
+  </div>
 }
 
 function MarketIntelligenceChart({data}:{data:any}) {
