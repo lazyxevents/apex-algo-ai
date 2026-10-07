@@ -85,6 +85,7 @@ class LiveLearningService:
                     "entryThreshold": signal.get("entryThreshold"),
                     "smcOverride": bool(signal.get("smcOverride")),
                 }, default=str),
+                outcome="OBSERVED" if str(signal.get("action") or "NO_TRADE") == "NO_TRADE" else "PENDING",
             )
             db.add(row)
             db.commit()
