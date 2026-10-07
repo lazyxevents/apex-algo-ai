@@ -1153,6 +1153,109 @@ export default function App() {
   </main>
 }
 
+function MarketIntelligenceChart({data}:{data:any}) {
+  const all = Array.isArray(data?.candles) ? data.candles : []
+  if (all.length < 2) return <div className="chart-empty">Waiting for SENSEX candle intelligence…</div>
+
+  const maxBars = 90
+  const offset = Math.max(0, all.length - maxBars)
+  const rows = all.slice(offset)
+  const width = 1000
+  const height = 430
+  const pad = {left:58,right:94,top:25,bottom:42}
+  const plotW = width - pad.left - pad.right
+  const plotH = height - pad.top - pad.bottom
+  const levelValues = [
+    data?.levels?.support,data?.levels?.resistance,data?.levels?.dayHigh,data?.levels?.dayLow,
+    data?.levels?.previousDayHigh,data?.levels?.previousDayLow,
+    data?.fibonacci?.fib382,data?.fibonacci?.fib500,data?.fibonacci?.fib618,
+  ].map(Number).filter(Number.isFinite)
+  const lows = rows.map((x:any)=>Number(x.low))
+  const highs = rows.map((x:any)=>Number(x.high))
+  let minP = Math.min(...lows,...levelValues)
+  let maxP = Math.max(...highs,...levelValues)
+  const extra = Math.max(8,(maxP-minP)*0.06)
+  minP -= extra; maxP += extra
+  const range = Math.max(1,maxP-minP)
+  const x = (i:number)=>pad.left + (i/(Math.max(1,rows.length-1)))*plotW
+  const y = (p:number)=>pad.top + (maxP-p)/range*plotH
+  const candleW = Math.max(2,Math.min(7,plotW/rows.length*0.58))
+  const points = (key:string)=>rows.map((r:any,i:number)=>`${x(i).toFixed(1)},${y(Number(r[key])).toFixed(1)}`).join(' ')
+  const levelDefs = [
+    {key:'dayHigh',label:'DAY HIGH',value:data?.levels?.dayHigh,kind:'day-high'},
+    {key:'dayLow',label:'DAY LOW',value:data?.levels?.dayLow,kind:'day-low'},
+    {key:'previousDayHigh',label:'PDH',value:data?.levels?.previousDayHigh,kind:'prev'},
+    {key:'previousDayLow',label:'PDL',value:data?.levels?.previousDayLow,kind:'prev'},
+    {key:'support',label:'SUPPORT',value:data?.levels?.support,kind:'support'},
+    {key:'resistance',label:'RESIST',value:data?.levels?.resistance,kind:'resistance'},
+    {key:'fib382',label:'FIB 38.2',value:data?.fibonacci?.fib382,kind:'fib'},
+    {key:'fib500',label:'FIB 50',value:data?.fibonacci?.fib500,kind:'fib'},
+    {key:'fib618',label:'FIB 61.8',value:data?.fibonacci?.fib618,kind:'fib'},
+  ].filter((l:any)=>Number.isFinite(Number(l.value)))
+  const events = (Array.isArray(data?.events)?data.events:[])
+    .filter((e:any)=>Number(e.index)>=offset && Number(e.index)<all.length)
+    .map((e:any)=>({...e,index:Number(e.index)-offset}))
+  const ticks = Array.from({length:6},(_,i)=>maxP-(range*i/5))
+
+  return <div className="market-intel-chart-wrap">
+    <svg className="market-intel-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="SENSEX candlestick chart with APEX SMC and pattern annotations">
+      <rect x={pad.left} y={pad.top} width={plotW} height={plotH} className="chart-bg"/>
+      {ticks.map((p,i)=><g key={i}>
+        <line x1={pad.left} x2={width-pad.right} y1={y(p)} y2={y(p)} className="chart-grid-line"/>
+        <text x={pad.left-8} y={y(p)+4} textAnchor="end" className="chart-axis-label">{p.toFixed(0)}</text>
+      </g>)}
+
+      {levelDefs.map((l:any)=><g key={l.key} className={`chart-level ${l.kind}`}>
+        <line x1={pad.left} x2={width-pad.right} y1={y(Number(l.value))} y2={y(Number(l.value))}/>
+        <text x={width-pad.right+6} y={y(Number(l.value))+4}>{l.label} {Number(l.value).toFixed(0)}</text>
+      </g>)}
+
+      <polyline points={points('ema21')} className="ema-line ema21"/>
+      <polyline points={points('ema9')} className="ema-line ema9"/>
+
+      {rows.map((r:any,i:number)=>{
+        const o=Number(r.open), h=Number(r.high), l=Number(r.low), close=Number(r.close)
+        const bull=close>=o
+        const top=y(Math.max(o,close))
+        const bottom=y(Math.min(o,close))
+        const bodyH=Math.max(1.5,bottom-top)
+        return <g key={`${r.time}-${i}`} className={`candle ${bull?'bull':'bear'}`}>
+          <line x1={x(i)} x2={x(i)} y1={y(h)} y2={y(l)} className="wick"/>
+          <rect x={x(i)-candleW/2} y={top} width={candleW} height={bodyH} rx="0.8"/>
+        </g>
+      })}
+
+      {events.map((e:any,i:number)=>{
+        const cx=x(e.index)
+        const cy=y(Number(e.price))
+        const above=String(e.direction).toUpperCase()==='BEAR'
+        const labelY=above?cy-15:cy+24
+        return <g key={`${e.time}-${e.kind}-${i}`} className={`chart-event ${String(e.direction).toLowerCase()} ${String(e.kind).toLowerCase()}`}>
+          <circle cx={cx} cy={cy} r="3.4"/>
+          <line x1={cx} x2={cx} y1={cy} y2={above?labelY+4:labelY-10}/>
+          <text x={cx} y={labelY} textAnchor="middle">{String(e.label).replace(/_/g,' ').slice(0,20)}</text>
+        </g>
+      })}
+
+      {rows.filter((_:any,i:number)=>i%15===0 || i===rows.length-1).map((r:any,i:number)=>{
+        const index=rows.indexOf(r)
+        const d=new Date(r.time)
+        const label=Number.isNaN(d.getTime())?'':d.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'})
+        return <text key={`t-${index}`} x={x(index)} y={height-15} textAnchor="middle" className="chart-time-label">{label}</text>
+      })}
+    </svg>
+    <div className="chart-legend">
+      <span><i className="legend-chip ema9-chip"/>EMA 9</span>
+      <span><i className="legend-chip ema21-chip"/>EMA 21</span>
+      <span><i className="legend-chip smc-chip"/>SMC / Pattern marker</span>
+      <span><b>{data?.currentCandle?.smc?.bos || 'NONE'}</b> BOS</span>
+      <span><b>{data?.currentCandle?.smc?.choch || 'NONE'}</b> CHOCH</span>
+      <span><b>{data?.currentCandle?.smc?.liquiditySweep || 'NONE'}</b> SWEEP</span>
+      <span><b>{data?.currentCandle?.smc?.fairValueGap || 'NONE'}</b> FVG</span>
+    </div>
+  </div>
+}
+
 function LearningJar({readiness, model}:{readiness:any, model:any}) {
   const raw = Number(readiness?.jarLevelPct ?? readiness?.sampleProgressPct ?? 0)
   const level = Math.max(0, Math.min(100, Number.isFinite(raw) ? raw : 0))
