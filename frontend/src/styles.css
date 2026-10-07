@@ -736,3 +736,44 @@ footer{font-size:11px}
   .trade-alert-card{grid-template-columns:1fr}
   .trade-alert-icon{display:none}
 }
+
+
+/* Live market-data freshness guard */
+.freshness-banner{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  gap:12px;
+  align-items:center;
+  margin:0 0 14px;
+  padding:13px 15px;
+  border-radius:12px;
+  border:1px solid rgba(238,173,64,.30);
+  background:linear-gradient(135deg,rgba(121,76,9,.18),rgba(46,34,14,.22));
+}
+.freshness-banner.stale{
+  border-color:rgba(235,83,83,.34);
+  background:linear-gradient(135deg,rgba(112,28,28,.20),rgba(47,18,22,.25));
+}
+.freshness-icon{
+  width:34px;height:34px;display:grid;place-items:center;border-radius:50%;
+  background:rgba(240,182,69,.12);border:1px solid rgba(240,182,69,.25);
+  color:#f5c768;font-weight:900;font-size:17px;
+}
+.freshness-banner.stale .freshness-icon{
+  background:rgba(235,83,83,.12);border-color:rgba(235,83,83,.28);color:#ff8585;
+}
+.freshness-banner b{display:block;color:#e8eef2;font-size:14px}
+.freshness-banner span{display:block;margin-top:4px;color:#8fa0aa;font-size:12px;line-height:1.45}
+.freshness-banner strong{
+  padding:6px 9px;border-radius:999px;border:1px solid rgba(240,182,69,.24);
+  background:rgba(240,182,69,.08);color:#f0c469;font-size:10px;letter-spacing:.7px
+}
+.freshness-banner.stale strong{
+  border-color:rgba(235,83,83,.26);background:rgba(235,83,83,.08);color:#ff8585
+}
+.badge.freshness-bad{background:rgba(229,79,79,.14);border-color:rgba(229,79,79,.32);color:#ff8a8a}
+.badge.freshness-warn{background:rgba(240,182,69,.11);border-color:rgba(240,182,69,.28);color:#f3cd7a}
+@media(max-width:700px){
+  .freshness-banner{grid-template-columns:auto 1fr}
+  .freshness-banner strong{grid-column:1/-1;justify-self:start}
+}
