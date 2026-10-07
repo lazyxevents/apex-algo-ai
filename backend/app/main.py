@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -14,6 +14,7 @@ from .kite import kite_service
 from .learning_worker import learning_worker
 from .live_learning import live_learning_service
 from .neural_model import neural_model_service
+from .notifications import push_notification_service
 from .research_engine import research_engine
 from .strategy import adaptive_learner
 from .trading import trading_engine
@@ -112,6 +113,20 @@ class PaperOrderRequest(BaseModel):
     reason: str = Field(default="{}", max_length=8000)
 
 
+class PushKeysRequest(BaseModel):
+    p256dh: str = Field(min_length=10, max_length=512)
+    auth: str = Field(min_length=4, max_length=256)
+
+
+class PushSubscriptionRequest(BaseModel):
+    endpoint: str = Field(min_length=20, max_length=1400)
+    keys: PushKeysRequest
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str = Field(min_length=20, max_length=1400)
+
+
 @app.get("/api/health")
 def health():
     return {
@@ -127,6 +142,37 @@ def health():
 @app.get("/api/system/status")
 def system_status():
     return trading_engine.status(kite_service.connection_status(), market_service.status())
+
+
+@app.get("/api/notifications/config")
+def notification_config():
+    return push_notification_service.snapshot()
+
+
+@app.post("/api/notifications/subscribe")
+def notification_subscribe(body: PushSubscriptionRequest, request: Request):
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    allowed = {x.rstrip("/") for x in settings.cors_origins}
+    if origin and origin not in allowed:
+        raise HTTPException(status_code=403, detail="Origin is not allowed to register push notifications")
+    if not push_notification_service.configured:
+        raise HTTPException(status_code=503, detail="Push notifications are not configured on the server")
+    try:
+        return push_notification_service.subscribe(
+            body.model_dump(),
+            user_agent=request.headers.get("user-agent") or "",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/notifications/unsubscribe")
+def notification_unsubscribe(body: PushUnsubscribeRequest, request: Request):
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    allowed = {x.rstrip("/") for x in settings.cors_origins}
+    if origin and origin not in allowed:
+        raise HTTPException(status_code=403, detail="Origin is not allowed to change push notifications")
+    return push_notification_service.unsubscribe(body.endpoint)
 
 
 @app.post("/api/system/mode")
