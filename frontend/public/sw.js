@@ -14,6 +14,7 @@ self.addEventListener('push', event => {
     tag: data.tag || 'apex-trade-alert',
     renotify: data.renotify !== false,
     requireInteraction: data.requireInteraction !== false,
+    silent: false,
     timestamp: data.timestamp || Date.now(),
     data: {
       url: data.url || '/',
