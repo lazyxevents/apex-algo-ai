@@ -494,6 +494,8 @@ export default function App() {
   const freshnessState = String(sensexFreshness.state || 'UNKNOWN').toUpperCase()
   const feedStale = ['STALE', 'MISSING', 'INVALID_TIMESTAMP'].includes(freshnessState)
   const feedDelayed = freshnessState === 'DELAYED'
+  const marketResearchOnly = Boolean(phase?.researchPhase && !phase?.tradable && !phase?.liveScan)
+  const showFeedWarning = !marketResearchOnly && (feedStale || feedDelayed)
   const lastMoment = liveMoments[0] || {}
   const lastVerifiedTrend = String(
     latestSignal?.context?.trend ||
@@ -547,12 +549,12 @@ export default function App() {
         <b>Testing / Synthetic Paper Mode</b>
         <span>Yahoo supplies index data; option premium and execution are simulated. Live entries now require a fresh candle; stale Yahoo data is blocked from trading.</span>
       </div>
-      <span className={`badge ${feedStale ? 'freshness-bad' : feedDelayed ? 'freshness-warn' : ''}`}>
-        {feedStale ? 'STALE FEED • NO ENTRY' : feedDelayed ? 'DELAYED FEED • PAPER' : 'FRESHNESS GUARD ON • PAPER'}
+      <span className={`badge ${!marketResearchOnly && feedStale ? 'freshness-bad' : !marketResearchOnly && feedDelayed ? 'freshness-warn' : ''}`}>
+        {marketResearchOnly ? 'MARKET CLOSED • RESEARCH MODE' : feedStale ? 'STALE FEED • NO ENTRY' : feedDelayed ? 'DELAYED FEED • PAPER' : 'FRESHNESS GUARD ON • PAPER'}
       </span>
     </section>}
 
-    {(feedStale || feedDelayed) && <section className={`freshness-banner ${feedStale ? 'stale' : 'delayed'}`}>
+    {showFeedWarning && <section className={`freshness-banner ${feedStale ? 'stale' : 'delayed'}`}>
       <div className="freshness-icon">{feedStale ? '!' : '◷'}</div>
       <div>
         <b>{feedStale ? 'Market data too old for a new trade' : 'Market data is delayed but still inside the live-entry limit'}</b>
@@ -587,7 +589,7 @@ export default function App() {
           <p>Candles, EMA 9/21, day/previous-day levels, support-resistance, Fibonacci and SMC/pattern events come from the same backend evidence pipeline used for paper decision support.</p>
         </div>
         <div className="phase-stack">
-          <span className={`phase-chip ${String(chartIntel?.freshness?.state || 'unknown').toLowerCase()}`}>{chartIntel?.freshness?.state || 'WAITING'}</span>
+          <span className={`phase-chip ${marketResearchOnly ? 'historical' : String(chartIntel?.freshness?.state || 'unknown').toLowerCase()}`}>{marketResearchOnly ? 'HISTORICAL / RESEARCH' : (chartIntel?.freshness?.state || 'WAITING')}</span>
           <span className="phase-sub">{chartIntel?.generatedAt ? `updated ${formatDateTime(chartIntel.generatedAt)}` : 'loading chart intelligence'}</span>
         </div>
       </div>
@@ -783,11 +785,13 @@ export default function App() {
           const f15 = m.frames?.['15m'] || {}
           return <div className="system-item" key={name}>
             <small>{name}</small>
-            <b>{feedStale ? 'STALE / UNVERIFIED' : (m.state || 'WAITING')}</b>
+            <b>{marketResearchOnly ? 'HISTORICAL SNAPSHOT' : feedStale ? 'STALE / UNVERIFIED' : (m.state || 'WAITING')}</b>
             <span style={{display:'block',marginTop:6,fontSize:10,color:feedStale?'#ef8d8d':'#71849a'}}>
-              {feedStale
-                ? `Last verified 1m trend: ${lastVerifiedTrend} • live trend unavailable`
-                : `1m ${f1.trend || '—'} • 5m ${f5.trend || '—'} • 15m ${f15.trend || '—'}`}
+              {marketResearchOnly
+                ? `Last session: 1m ${f1.trend || '—'} • 5m ${f5.trend || '—'} • 15m ${f15.trend || '—'}`
+                : feedStale
+                  ? `Last verified 1m trend: ${lastVerifiedTrend} • live trend unavailable`
+                  : `1m ${f1.trend || '—'} • 5m ${f5.trend || '—'} • 15m ${f15.trend || '—'}`}
             </span>
             <span style={{display:'block',marginTop:4,fontSize:10,color:'#71849a'}}>
               S {f5.structure?.levels?.support ?? '—'} • R {f5.structure?.levels?.resistance ?? '—'}
@@ -886,12 +890,12 @@ export default function App() {
         <div><div className="eyebrow">LIVE MARKET LEARNING</div><h2>SENSEX 1m Moment Memory</h2><p>09:20–15:15 only. Valid-price SMC/price-action moments are stored before outcomes are known; after cutoff the worker switches to deep research instead of creating after-hours noise.</p></div>
         <span className="badge subtle">{liveLearning.totalObservations ?? 0} OBSERVATIONS</span>
       </div>
-      {feedStale && <div className="live-feed-freeze">
+      {feedStale && !marketResearchOnly && <div className="live-feed-freeze">
         <b>Live moment memory paused — feed is stale</b>
         <span>Last verified trend: <strong>{lastVerifiedTrend}</strong> • latest verified candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'} • no new market moment is stored until a fresh candle arrives.</span>
       </div>}
       <div className="learning-grid">
-        <SystemItem label="Mode" value={feedStale ? 'STALE_FEED_PAUSED' : (liveLearning.mode || 'waiting')} good={Boolean(liveLearning.enabled && !feedStale)} />
+        <SystemItem label="Mode" value={marketResearchOnly ? 'MARKET_CLOSED_RESEARCH' : feedStale ? 'STALE_FEED_PAUSED' : (liveLearning.mode || 'waiting')} good={Boolean(liveLearning.enabled && !feedStale)} />
         <SystemItem label="Moments stored" value={liveLearning.totalObservations ?? 0} />
         <SystemItem label="Pending outcomes" value={liveLearning.pendingOutcomes ?? 0} />
         <SystemItem label="LLM live review" value={ollama.configured ? `Active • ${ollama.provider || 'LLM'}` : 'Not configured'} good={ollama.configured} />
