@@ -683,11 +683,79 @@ export default function App() {
       </div>
 
       <div className="session-rail">
-        <div><b>08:00</b><span>Premarket refresh</span></div>
+        <div><b>08:00</b><span>News • Gap scenarios • Day plan</span></div>
         <i />
-        <div className="active"><b>09:20–15:15</b><span>Scan • Paper trade • Live learning</span></div>
+        <div className="active"><b>09:20–15:15</b><span>Fresh candles • Scalp search • Live memory</span></div>
         <i />
-        <div><b>15:15+</b><span>Research • Sectors • Backtests • Tomorrow plan</span></div>
+        <div><b>15:15–17:00</b><span>Session review • Backtests</span></div>
+        <i />
+        <div><b>17:00–08:00</b><span>15h research window • Learning cycles</span></div>
+      </div>
+    </section>
+
+    <section className="panel research-ops-panel">
+      <div className="section-head intelligence-head">
+        <div>
+          <div className="eyebrow">NIGHT LEARNING CONSOLE</div>
+          <h2>What APEX Read • Tested • Learned</h2>
+          <p>Persistent activity survives backend restarts. This is evidence collected from public education, news, labeled candle outcomes, strategy backtests and neural evaluation—not a claim of guaranteed profitability.</p>
+        </div>
+        <div className="phase-stack">
+          <span className={`phase-chip ${worker.learningWindowActive ? 'night_research' : String(worker.researchPhase || '').toLowerCase()}`}>{worker.learningWindowActive ? 'LEARNING WINDOW' : (worker.researchPhase || 'IDLE')}</span>
+          <span className="phase-sub">{Number(worker.researchHoursToday || 0).toFixed(1)} / {worker.dailyHourBudget ?? 15}h coverage</span>
+        </div>
+      </div>
+
+      <div className="research-ops-grid">
+        <div className="research-console-card">
+          <div className="research-console-head"><b>News Monitor</b><span className={String(newsHealth.status || '').toUpperCase()==='OK'?'positive':'negative'}>{newsHealth.status || 'NOT RUN'}</span></div>
+          <div className="console-mini-grid">
+            <span><small>Fresh today</small><b>{intelligence.todayNewsCount ?? worker.todayNewsCount ?? 0}</b></span>
+            <span><small>Last fetch</small><b>{formatDateTime(newsHealth.lastFetchAt)}</b></span>
+            <span><small>Fetched last cycle</small><b>{newsHealth.fetchedCount ?? 0}</b></span>
+            <span><small>Queries OK</small><b>{newsHealth.successfulQueries ?? 0}/{newsHealth.queryCount ?? 0}</b></span>
+          </div>
+          <div className="news-stream">
+            {latestNews.length===0 ? <div className="empty-mini">No cached headlines yet. Next deep research cycle will retry RSS and keep the exact error state here.</div> :
+              latestNews.slice(0,6).map((n:any,i:number)=><a key={`${n.url}-${i}`} href={n.url} target="_blank" rel="noreferrer">
+                <b>{n.title}</b><small>{formatDateTime(n.lastCheckedAt)}</small>
+              </a>)}
+          </div>
+          {Array.isArray(newsHealth.errors) && newsHealth.errors.length>0 && <details className="console-detail"><summary>News fetch errors</summary><pre>{JSON.stringify(newsHealth.errors,null,2)}</pre></details>}
+        </div>
+
+        <div className="research-console-card">
+          <div className="research-console-head"><b>Learning Activity</b><span>{intelligence.todayActivityCount ?? 0} TODAY</span></div>
+          <div className="activity-stream">
+            {researchActivities.length===0 ? <div className="empty-mini">No persisted learning activity yet.</div> :
+              researchActivities.slice(0,10).map((a:any,i:number)=><div className="activity-row" key={`${a.createdAt}-${i}`}>
+                <i/><div><b>{a.title}</b><small>{a.stage || a.kind} • {formatDateTime(a.createdAt)}</small></div>
+              </div>)}
+          </div>
+        </div>
+
+        <div className="research-console-card">
+          <div className="research-console-head"><b>Learned Pattern Stats</b><span>{datasetModel.datasetSize ?? 0} LABELS</span></div>
+          <div className="pattern-insight-stack">
+            {patternInsights.length===0 ? <div className="empty-mini">Pattern stats appear after labeled SMC V2 samples accumulate.</div> :
+              patternInsights.slice(0,10).map((x:any)=><div className="pattern-insight-row" key={x.pattern}>
+                <span>{String(x.pattern).replace(/_/g,' ')}</span>
+                <b>{Number(x.winRate||0).toFixed(1)}%</b>
+                <small>{x.samples} samples • {x.confidence}</small>
+              </div>)}
+          </div>
+          <p className="console-foot">Win rate here means target-first in the labeled historical setup, not guaranteed live performance.</p>
+        </div>
+
+        <div className="research-console-card">
+          <div className="research-console-head"><b>Public Reading Queue</b><span>{readingQueue.length} SOURCES</span></div>
+          <div className="reading-stack">
+            {readingQueue.slice(0,8).map((x:any,i:number)=><a href={x.url} target="_blank" rel="noreferrer" key={`${x.url}-${i}`}>
+              <span>{x.category}</span><b>{x.title}</b>
+            </a>)}
+          </div>
+          <p className="console-foot">APEX reads bounded public educational pages; it does not copy paid/copyrighted books.</p>
+        </div>
       </div>
     </section>
 
