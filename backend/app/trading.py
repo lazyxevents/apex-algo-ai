@@ -701,9 +701,9 @@ class TradingEngine:
                 "entryThreshold": 0.56,
                 "smcOverride": True,
                 "context": context,
-                "strategy": "APEX_MTF_SMC_CONTINUATION",
+                "strategy": "APEX_MTF_SMC_SCALP",
             })
-            chosen_strategy = "APEX_MTF_SMC_CONTINUATION"
+            chosen_strategy = "APEX_MTF_SMC_SCALP"
         else:
             chosen_strategy = arm.name
         signal.update({"index": name, "underlyingKey": key, "chosenStrategy": chosen_strategy})
