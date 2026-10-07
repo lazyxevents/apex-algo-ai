@@ -17,6 +17,7 @@ from .learning_worker import learning_worker
 from .live_learning import live_learning_service
 from .market_research import build_market_research
 from .neural_model import neural_model_service
+from .notifications import push_notification_service
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
 from .research_engine import research_engine
@@ -381,7 +382,9 @@ class TradingEngine:
             db.commit()
             db.refresh(trade)
             self._audit("trade.opened", {"tradeId": trade.id, "symbol": trade.symbol, "qty": qty})
-            return self._trade_dict(trade)
+            trade_data = self._trade_dict(trade)
+            push_notification_service.notify_trade_opened_async(trade_data)
+            return trade_data
 
     def mark_trade(self, trade_id: int, ltp: float, force_status: str | None = None) -> dict:
         with SessionLocal() as db:
