@@ -11,6 +11,7 @@ from urllib.parse import quote
 from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
+from .dataset_model import dataset_model_service
 from .llm_research import ollama_research
 from .llm_advisor import ollama_advisor
 from .learning_worker import learning_worker
@@ -1441,6 +1442,7 @@ class TradingEngine:
             "liveLearning": live_learning_service.snapshot(),
             "researchIntelligence": research_engine.snapshot(),
             "neuralModel": neural_model_service.snapshot(),
+            "datasetModel": dataset_model_service.snapshot(),
             "ollama": {
                 "enabled": ollama_advisor.configured,
                 "configured": ollama_advisor.configured,
