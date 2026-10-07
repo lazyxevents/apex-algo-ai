@@ -467,6 +467,12 @@ export default function App() {
   const liveMoments = Array.isArray(liveLearning.latest) ? liveLearning.latest : []
   const intelligence = status.researchIntelligence || {}
   const neuralModel = status.neuralModel || worker.neural || {}
+  const datasetModel = status.datasetModel || {}
+  const patternInsights = Array.isArray(datasetModel.patternInsights) ? datasetModel.patternInsights : []
+  const newsHealth = intelligence.newsHealth || worker.newsHealth || {}
+  const latestNews = Array.isArray(intelligence.latestNews) ? intelligence.latestNews : []
+  const researchActivities = Array.isArray(intelligence.activities) ? intelligence.activities : []
+  const readingQueue = Array.isArray(intelligence.readingQueue) ? intelligence.readingQueue : []
   const neuralProduction = neuralModel.production || {}
   const neuralLatest = neuralModel.latest || {}
   const activeNeural = Object.keys(neuralProduction).length ? neuralProduction : neuralLatest
