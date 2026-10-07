@@ -175,6 +175,7 @@ export default function App() {
   const [pushSubscribed, setPushSubscribed] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
   const [pushError, setPushError] = useState('')
+  const [chartIntel, setChartIntel] = useState<any>(null)
   const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
 
   const loadStatus = useCallback(async (silent = false) => {
@@ -198,21 +199,33 @@ export default function App() {
     }
   }, [])
 
+  const loadChartIntel = useCallback(async (silent = false) => {
+    try {
+      const data = await fetchJson('/api/market/chart-intelligence')
+      setChartIntel(data)
+      if (!silent) setError('')
+    } catch (e: any) {
+      if (!silent) setError(e?.message || 'Could not load chart intelligence')
+    }
+  }, [])
+
   const loadAll = useCallback(async () => {
-    await Promise.all([loadStatus(), loadTrades()])
-  }, [loadStatus, loadTrades])
+    await Promise.all([loadStatus(), loadTrades(), loadChartIntel()])
+  }, [loadStatus, loadTrades, loadChartIntel])
 
   useEffect(() => {
     void loadAll()
     const tradePoll = window.setInterval(() => void loadTrades(true), 1000)
     const statusPoll = window.setInterval(() => void loadStatus(true), 3000)
+    const chartPoll = window.setInterval(() => void loadChartIntel(true), 5000)
     const clockPoll = window.setInterval(() => setClock(new Date()), 1000)
     return () => {
       window.clearInterval(tradePoll)
       window.clearInterval(statusPoll)
+      window.clearInterval(chartPoll)
       window.clearInterval(clockPoll)
     }
-  }, [loadAll, loadStatus, loadTrades])
+  }, [loadAll, loadStatus, loadTrades, loadChartIntel])
 
   useEffect(() => {
     let cancelled = false
