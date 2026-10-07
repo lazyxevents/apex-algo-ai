@@ -579,6 +579,32 @@ export default function App() {
       <Metric title="Max Drawdown" value={money(p.maxDrawdown)} sub={`Monthly cap ${money(r.maxMonthlyDrawdown)}`} tone={Number(p.maxDrawdown) > 0 ? 'negative' : 'neutral'} />
     </section>
 
+    <section className="panel chart-intelligence-panel">
+      <div className="section-head intelligence-head">
+        <div>
+          <div className="eyebrow">APEX ANNOTATED MARKET MAP</div>
+          <h2>SENSEX 1m • What the Bot Actually Sees</h2>
+          <p>Candles, EMA 9/21, day/previous-day levels, support-resistance, Fibonacci and SMC/pattern events come from the same backend evidence pipeline used for paper decision support.</p>
+        </div>
+        <div className="phase-stack">
+          <span className={`phase-chip ${String(chartIntel?.freshness?.state || 'unknown').toLowerCase()}`}>{chartIntel?.freshness?.state || 'WAITING'}</span>
+          <span className="phase-sub">{chartIntel?.generatedAt ? `updated ${formatDateTime(chartIntel.generatedAt)}` : 'loading chart intelligence'}</span>
+        </div>
+      </div>
+      <MarketIntelligenceChart data={chartIntel} />
+      <div className="chart-intel-stats">
+        <SystemItem label="1m trend" value={chartIntel?.trends?.['1m']?.trend || '—'} />
+        <SystemItem label="5m trend" value={chartIntel?.trends?.['5m']?.trend || '—'} />
+        <SystemItem label="15m trend" value={chartIntel?.trends?.['15m']?.trend || '—'} />
+        <SystemItem label="Swing structure" value={chartIntel?.currentCandle?.smc?.swingStructure || '—'} />
+        <SystemItem label="Day H / L" value={chartIntel?.sessionProfile?.dayHigh ? `${chartIntel.sessionProfile.dayHigh} / ${chartIntel.sessionProfile.dayLow}` : '—'} />
+        <SystemItem label="Prev day H / L" value={chartIntel?.sessionProfile?.previousDayHigh ? `${chartIntel.sessionProfile.previousDayHigh} / ${chartIntel.sessionProfile.previousDayLow}` : '—'} />
+        <SystemItem label="Gap" value={chartIntel?.sessionProfile?.gapPct != null ? `${Number(chartIntel.sessionProfile.gapPct) >= 0 ? '+' : ''}${Number(chartIntel.sessionProfile.gapPct).toFixed(2)}%` : '—'} />
+        <SystemItem label="Plan bias" value={chartIntel?.plan?.marketBias || nextPlan.marketBias || '—'} />
+      </div>
+      <p className="panel-note">Markers are analysis annotations, not automatic trade commands. If provider data is stale, the chart stays visible for audit but new entries remain blocked.</p>
+    </section>
+
     <section className="panel intelligence-panel">
       <div className="section-head intelligence-head">
         <div>
