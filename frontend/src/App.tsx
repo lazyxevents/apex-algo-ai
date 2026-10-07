@@ -88,6 +88,13 @@ function pnlClass(value: unknown) {
   return n > 0 ? 'positive' : n < 0 ? 'negative' : 'neutral'
 }
 
+function urlBase64ToUint8Array(value: string) {
+  const padding = '='.repeat((4 - value.length % 4) % 4)
+  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = window.atob(base64)
+  return Uint8Array.from([...raw].map(char => char.charCodeAt(0)))
+}
+
 async function fetchJson(path: string, options?: RequestInit) {
   const response = await fetch(`${API}${path}`, options)
   let data: any = null
@@ -108,6 +115,11 @@ export default function App() {
   const [clock, setClock] = useState(new Date())
   const [editingTradeId, setEditingTradeId] = useState<number | null>(null)
   const [planDraft, setPlanDraft] = useState({ stop: '', target: '' })
+  const [pushConfig, setPushConfig] = useState<any>(null)
+  const [pushPermission, setPushPermission] = useState<NotificationPermission>('default')
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushError, setPushError] = useState('')
 
   const loadStatus = useCallback(async (silent = false) => {
     try {
@@ -145,6 +157,124 @@ export default function App() {
       window.clearInterval(clockPoll)
     }
   }, [loadAll, loadStatus, loadTrades])
+
+  useEffect(() => {
+    let cancelled = false
+    async function syncPushState() {
+      const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+      if (!supported) {
+        if (!cancelled) setPushConfig({ configured: false, supported: false, subscriberCount: 0 })
+        return
+      }
+      try {
+        const config = await fetchJson('/api/notifications/config')
+        const registration = await navigator.serviceWorker.register('/sw.js')
+        const subscription = await registration.pushManager.getSubscription()
+        if (!cancelled) {
+          setPushConfig({ ...config, supported: true })
+          setPushPermission(Notification.permission)
+          setPushSubscribed(Boolean(subscription))
+          setPushError('')
+        }
+      } catch (e: any) {
+        if (!cancelled) setPushError(e?.message || 'Could not initialize trade alerts')
+      }
+    }
+    void syncPushState()
+    return () => { cancelled = true }
+  }, [])
+
+  async function enableTradeAlerts() {
+    if (pushBusy) return
+    setPushBusy(true)
+    setPushError('')
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+        throw new Error('This browser does not support background web push notifications.')
+      }
+      const config = pushConfig?.publicKey ? pushConfig : await fetchJson('/api/notifications/config')
+      setPushConfig({ ...config, supported: true })
+      if (!config?.configured || !config?.publicKey) {
+        throw new Error('Trade alerts are not configured on the server yet.')
+      }
+
+      const permission = await Notification.requestPermission()
+      setPushPermission(permission)
+      if (permission !== 'granted') {
+        throw new Error('Notification permission was not granted.')
+      }
+
+      const registration = await navigator.serviceWorker.register('/sw.js')
+      await navigator.serviceWorker.ready
+      let subscription = await registration.pushManager.getSubscription()
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(config.publicKey),
+        })
+      }
+
+      const saved = await fetchJson('/api/notifications/subscribe', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(subscription.toJSON()),
+      })
+      setPushConfig({ ...saved, supported: true })
+      setPushSubscribed(true)
+      await registration.showNotification('APEX Trade Alerts enabled', {
+        body: 'You will be notified when APEX executes a new paper trade.',
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        tag: 'apex-alerts-enabled',
+      })
+    } catch (e: any) {
+      setPushError(e?.message || 'Could not enable trade alerts')
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  async function disableTradeAlerts() {
+    if (pushBusy) return
+    setPushBusy(true)
+    setPushError('')
+    try {
+      if (!('serviceWorker' in navigator)) return
+      const registration = await navigator.serviceWorker.register('/sw.js')
+      const subscription = await registration.pushManager.getSubscription()
+      if (subscription) {
+        const saved = await fetchJson('/api/notifications/unsubscribe', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        })
+        await subscription.unsubscribe()
+        setPushConfig({ ...saved, supported: true })
+      }
+      setPushSubscribed(false)
+    } catch (e: any) {
+      setPushError(e?.message || 'Could not disable trade alerts')
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  async function testTradeAlert() {
+    setPushError('')
+    try {
+      if (Notification.permission !== 'granted') throw new Error('Enable notifications first.')
+      const registration = await navigator.serviceWorker.register('/sw.js')
+      await registration.showNotification('APEX Test Trade Alert', {
+        body: 'SENSEX CE • Qty 20 • Entry alert test\nBackground notifications are working on this device.',
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        tag: 'apex-test-alert',
+        requireInteraction: true,
+      })
+    } catch (e: any) {
+      setPushError(e?.message || 'Could not show test alert')
+    }
+  }
 
   async function runAction(key: string, successText: string, action: () => Promise<any>) {
     if (busy) return
@@ -577,6 +707,27 @@ export default function App() {
           <SystemItem label="Provider" value={market.provider || 'unknown'} />
           <SystemItem label="Paper broker" value={market.paperBroker || 'internal'} />
           <SystemItem label="Phase" value={phase.reason || 'Waiting'} />
+        </div>
+
+        <div className="trade-alert-card">
+          <div className="trade-alert-icon">🔔</div>
+          <div className="trade-alert-copy">
+            <div><small>TRADE EXECUTION ALERTS</small><h3>Browser / Desktop Push</h3></div>
+            <p>Get an OS-level notification immediately after APEX commits a new paper trade. Background tabs are supported; delivery with the tab closed depends on the browser/OS keeping Web Push enabled.</p>
+            <div className="trade-alert-meta">
+              <span>Server <b className={pushConfig?.configured ? 'positive' : 'negative'}>{pushConfig?.configured ? 'READY' : 'NOT CONFIGURED'}</b></span>
+              <span>Permission <b>{pushPermission.toUpperCase()}</b></span>
+              <span>This device <b className={pushSubscribed ? 'positive' : ''}>{pushSubscribed ? 'SUBSCRIBED' : 'OFF'}</b></span>
+              <span>Devices <b>{pushConfig?.subscriberCount ?? 0}</b></span>
+            </div>
+            {pushError && <div className="trade-alert-error">{pushError}</div>}
+          </div>
+          <div className="trade-alert-actions">
+            {pushSubscribed
+              ? <button type="button" className="action-btn danger-mini" disabled={pushBusy} onClick={() => void disableTradeAlerts()}>{pushBusy ? 'Working…' : 'Disable Alerts'}</button>
+              : <button type="button" className="action-btn primary" disabled={pushBusy || pushConfig?.supported === false} onClick={() => void enableTradeAlerts()}>{pushBusy ? 'Enabling…' : 'Enable Trade Alerts'}</button>}
+            <button type="button" className="action-btn" disabled={!pushSubscribed || pushPermission !== 'granted'} onClick={() => void testTradeAlert()}>Test Alert</button>
+          </div>
         </div>
 
         <div className="actions">
