@@ -22,7 +22,7 @@ from .notifications import push_notification_service
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
 from .research_engine import research_engine
-from .strategy import adaptive_learner, evaluate_signal, market_context, select_option
+from .strategy import adaptive_learner, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
 
 IST = ZoneInfo(settings.timezone)
 
@@ -41,6 +41,7 @@ class RuntimeState:
     market_research: dict | None = None
     last_decision: dict | None = None
     market_freshness: dict | None = None
+    last_manual_do_trade: dict | None = None
     last_error: str | None = None
 
 
@@ -452,11 +453,27 @@ class TradingEngine:
                     sleep(max(0.0, settings.force_exit_retry_delay_seconds))
         return float(trade.current_price or trade.entry), False, last_error
 
-    def force_flatten(self, provider, reason: str = "manual emergency flatten") -> list[dict]:
+    def force_flatten(
+        self,
+        provider,
+        reason: str = "manual emergency flatten",
+        *,
+        preserve_manual_carry: bool = False,
+    ) -> list[dict]:
         with SessionLocal() as db:
             open_rows = self._open_rows(db)
         results = []
         for trade in open_rows:
+            meta = self._meta(trade)
+            if preserve_manual_carry and bool(meta.get("manualDoTrade")) and bool(meta.get("carryForward")):
+                item = {
+                    "tradeId": trade.id,
+                    "status": "PRESERVED_CARRY_FORWARD",
+                    "reason": "manual Do Trade position explicitly allowed to carry forward",
+                }
+                results.append(item)
+                self._audit("trade.carry_forward_preserved", item)
+                continue
             price, fresh, quote_error = (
                 self._best_exit_price(provider, trade)
                 if provider.market_ready
@@ -545,7 +562,11 @@ class TradingEngine:
         if self.state.killed:
             return self.force_flatten(provider, "kill switch")
         if phase["forceExit"]:
-            return self.force_flatten(provider, "scheduled force exit")
+            return self.force_flatten(
+                provider,
+                "scheduled force exit",
+                preserve_manual_carry=True,
+            )
         actions = []
         with SessionLocal() as db:
             open_rows = self._open_rows(db)
@@ -662,7 +683,35 @@ class TradingEngine:
         context = market_context(candles)
         arm = adaptive_learner.choose_arm(context, capital)
         signal = evaluate_signal(candles, arm)
-        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name})
+        continuation = evaluate_mtf_continuation(candles)
+        signal["mtfContinuation"] = continuation
+        if signal.get("action") == "NO_TRADE" and continuation.get("qualified"):
+            signal.update({
+                "action": continuation["action"],
+                "score": continuation["score"],
+                "underlyingPrice": continuation["underlyingPrice"],
+                "emaFast": continuation["emaFast"],
+                "emaSlow": continuation["emaSlow"],
+                "rsi": continuation["rsi"],
+                "previousHigh": continuation["previousHigh"],
+                "previousLow": continuation["previousLow"],
+                "patterns": continuation["patterns"],
+                "smc": continuation["smc"],
+                "entryReason": "MTF_SMC_CONTINUATION",
+                "entryThreshold": 0.56,
+                "smcOverride": True,
+                "context": context,
+                "strategy": "APEX_MTF_SMC_SCALP",
+            })
+            chosen_strategy = "APEX_MTF_SMC_SCALP"
+        else:
+            chosen_strategy = arm.name
+        signal.update({
+            "index": name,
+            "underlyingKey": key,
+            "chosenStrategy": chosen_strategy,
+            "learningArm": arm.name,
+        })
         neural = neural_model_service.predict_signal(signal)
         signal["neural"] = neural
         if neural.get("status") == "production" and neural.get("probability") is not None and signal.get("action") in {"CE", "PE"}:
@@ -740,6 +789,318 @@ class TradingEngine:
         option["priceSource"] = "exchange_option_chain"
         option["quoteTime"] = datetime.now(IST).isoformat()
         return option, lot_size, expiry
+
+    def manual_do_trade_status(self) -> dict:
+        now = datetime.now(IST)
+        hm = now.strftime("%H:%M")
+        weekday = now.weekday() < 5
+        within_time = weekday and settings.trade_start_time <= hm < settings.manual_do_trade_cutoff_time
+        return {
+            "enabled": bool(settings.manual_do_trade_enabled),
+            "paperOnly": True,
+            "availableNow": bool(
+                settings.manual_do_trade_enabled
+                and within_time
+                and self.state.mode == "PAPER"
+                and not self.state.killed
+            ),
+            "timeEligible": within_time,
+            "cutoffTime": settings.manual_do_trade_cutoff_time,
+            "targetPoints": settings.manual_do_trade_target_points,
+            "stopPoints": settings.manual_do_trade_stop_points,
+            "capitalUsagePct": settings.manual_do_trade_capital_usage_pct,
+            "minMtfScore": settings.manual_do_trade_min_mtf_score,
+            "carryForward": bool(settings.manual_do_trade_carry_forward),
+            "requiresFreshData": True,
+            "last": self.state.last_manual_do_trade or {},
+            "warning": "Aggressive PAPER mode: maximum affordable quantity is capped by remaining hard loss-lock headroom.",
+        }
+
+    def do_trade_now(self, provider) -> dict:
+        now = datetime.now(IST)
+        hm = now.strftime("%H:%M")
+        if not settings.manual_do_trade_enabled:
+            raise ValueError("Do Trade mode is disabled")
+        if now.weekday() >= 5:
+            raise ValueError("Do Trade is available only on market weekdays")
+        if not (settings.trade_start_time <= hm < settings.manual_do_trade_cutoff_time):
+            raise ValueError(
+                f"Do Trade works only {settings.trade_start_time}-{settings.manual_do_trade_cutoff_time} IST"
+            )
+        if not provider.market_ready:
+            raise ValueError("Market data provider is not ready")
+
+        underlying_key = settings.underlying_keys.get("SENSEX")
+        if not underlying_key:
+            raise ValueError("SENSEX is not enabled")
+        candles = provider.intraday_candles(underlying_key)
+        freshness = self._candle_freshness(candles)
+        self.state.market_freshness = {"SENSEX": freshness}
+        if not freshness.get("fresh"):
+            age = freshness.get("ageMinutes")
+            age_text = f"{float(age):.1f}m" if isinstance(age, (int, float)) else "unknown"
+            raise ValueError(
+                f"Do Trade blocked: SENSEX data is stale ({age_text}); fresh candle required"
+            )
+
+        analysis = evaluate_mtf_continuation(candles)
+        candidate = str(analysis.get("candidateAction") or analysis.get("action") or "NO_TRADE")
+        score = float(analysis.get("score") or 0.0)
+        frames = analysis.get("frames") or {}
+        structure = analysis.get("structure") or {}
+        smc = analysis.get("smc") or {}
+        if candidate not in {"CE", "PE"}:
+            raise ValueError("Do Trade found no directional momentum candidate")
+
+        if candidate == "CE":
+            htf_aligned = any((frames.get(tf) or {}).get("trend") == "UP" for tf in ("5m", "15m"))
+            structure_ok = bool(
+                structure.get("higherHigh")
+                or structure.get("previousHighBreak")
+                or smc.get("bos") == "BULL"
+                or smc.get("choch") == "BULL"
+                or smc.get("liquiditySweep") == "BULL"
+            )
+        else:
+            htf_aligned = any((frames.get(tf) or {}).get("trend") == "DOWN" for tf in ("5m", "15m"))
+            structure_ok = bool(
+                structure.get("lowerLow")
+                or structure.get("previousLowBreak")
+                or smc.get("bos") == "BEAR"
+                or smc.get("choch") == "BEAR"
+                or smc.get("liquiditySweep") == "BEAR"
+            )
+
+        if score < settings.manual_do_trade_min_mtf_score or not htf_aligned or not structure_ok:
+            raise ValueError(
+                f"Do Trade refused weak setup: {candidate} score {score:.2f}; needs fresh MTF + SMC/structure confirmation"
+            )
+
+        with SessionLocal() as db:
+            self._authorize(db)
+            capital = self._effective_capital(db)
+            limits = self._limits(db)
+            day_pnl = self._period_pnl(db, "day")
+            week_pnl = self._period_pnl(db, "week")
+            month_pnl = self._period_pnl(db, "month")
+
+        deployable = capital * max(0.0, min(100.0, settings.manual_do_trade_capital_usage_pct)) / 100.0
+        best = {
+            "index": "SENSEX",
+            "underlyingKey": underlying_key,
+            "action": candidate,
+            "underlyingPrice": float(analysis["underlyingPrice"]),
+        }
+        synthetic_demo = not bool(getattr(provider, "supports_option_chain", True))
+        expiry = None
+        if synthetic_demo:
+            option = provider.synthetic_option_candidate(
+                "SENSEX",
+                underlying_key,
+                candidate,
+                best["underlyingPrice"],
+            )
+            lot_size = int(option.get("lotSize") or settings.sensex_lot_size)
+            expiry = option.get("expiry")
+        else:
+            option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
+            if not option:
+                raise ValueError("Do Trade found no liquid/affordable option contract")
+            if lot_size <= 0:
+                raise ValueError("Selected option has invalid lot size")
+
+        entry = float(option["ltp"])
+        stop_distance = max(0.05, float(settings.manual_do_trade_stop_points))
+        target_distance = max(stop_distance + 0.05, float(settings.manual_do_trade_target_points))
+        stop = round(max(0.05, entry - stop_distance), 2)
+        target = round(entry + target_distance, 2)
+
+        lots_by_cash = floor(deployable / max(entry * lot_size, 0.01))
+        hard_headroom = min(
+            max(0.0, float(limits["daily"]) + float(day_pnl)),
+            max(0.0, float(limits["weekly"]) + float(week_pnl)),
+            max(0.0, float(limits["monthly"]) + float(month_pnl)),
+        )
+        lots_by_loss_lock = floor(hard_headroom / max(stop_distance * lot_size, 0.01))
+        lots = max(0, min(lots_by_cash, lots_by_loss_lock))
+        qty = lots * lot_size
+        if qty <= 0:
+            raise ValueError(
+                "Do Trade blocked: one whole lot does not fit available capital and remaining hard loss-lock headroom"
+            )
+
+        deployed = round(entry * qty, 2)
+        initial_risk = round(stop_distance * qty, 2)
+        chart_symbol = "BSE:SENSEX"
+        chart_url = f"https://www.tradingview.com/chart/?symbol={quote(chart_symbol, safe='')}"
+        llm_review = ollama_advisor.analyze_trade({
+            "phase": "MANUAL_DO_TRADE_SHADOW_REVIEW",
+            "index": "SENSEX",
+            "direction": candidate,
+            "signalScore": score,
+            "strategy": "APEX_MANUAL_MTF_MOMENTUM",
+            "frames": frames,
+            "smc": smc,
+            "evidence": analysis.get("evidence") or [],
+            "fibonacci": analysis.get("fibonacci") or {},
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "quantity": qty,
+            "paperOnly": True,
+            "instruction": "Advisory review only. Do not override deterministic freshness, structure or loss-lock gates.",
+        })
+
+        meta = {
+            "strategy": "APEX_MANUAL_MTF_MOMENTUM",
+            "learningArm": None,
+            "displayName": option.get("displayName") or option["instrumentKey"],
+            "contractName": option.get("displayName") or option["instrumentKey"],
+            "priceSource": option.get("priceSource") or ("synthetic_estimate" if synthetic_demo else "exchange_option_chain"),
+            "quoteTime": option.get("quoteTime") or now.isoformat(),
+            "entryTime": now.isoformat(),
+            "tradeStyle": "MANUAL_MOMENTUM_SCALP",
+            "manualDoTrade": True,
+            "carryForward": bool(
+                settings.manual_do_trade_carry_forward
+                and expiry
+                and str(expiry)[:10] > now.date().isoformat()
+            ),
+            "carryForwardSource": "dashboard_do_trade_button",
+            "carryForwardReason": (
+                "eligible future-expiry contract"
+                if settings.manual_do_trade_carry_forward and expiry and str(expiry)[:10] > now.date().isoformat()
+                else "same-day/unknown expiry cannot carry"
+            ),
+            "stopModel": f"fixed {stop_distance:.0f}-point option-premium risk",
+            "targetModel": f"fixed {target_distance:.0f}-point option-premium scalp target",
+            "firstTarget": target,
+            "runnerTarget": target,
+            "partialBookPct": 0.0,
+            "chartSymbol": chart_symbol,
+            "chartUrl": chart_url,
+            "ollamaReview": llm_review,
+            "signalScore": round(score, 4),
+            "rawSignalScore": round(score, 4),
+            "entryReason": "MANUAL_DO_TRADE_MTF_SMC",
+            "entryThreshold": settings.manual_do_trade_min_mtf_score,
+            "smcOverride": True,
+            "smc": smc,
+            "mtfContinuation": analysis,
+            "index": "SENSEX",
+            "underlyingKey": underlying_key,
+            "contextKey": f"MANUAL|{(frames.get('5m') or {}).get('trend','UNKNOWN')}|{(frames.get('15m') or {}).get('trend','UNKNOWN')}",
+            "context": {
+                "trend1m": (frames.get("1m") or {}).get("trend"),
+                "trend5m": (frames.get("5m") or {}).get("trend"),
+                "trend15m": (frames.get("15m") or {}).get("trend"),
+                "fibonacci": analysis.get("fibonacci") or {},
+                "freshness": freshness,
+            },
+            "patterns": analysis.get("patterns") or {},
+            "direction": candidate,
+            "expiry": expiry,
+            "strike": option["strike"],
+            "selectionScore": option.get("selectionScore"),
+            "spreadPct": option.get("spreadPct"),
+            "delta": option.get("delta"),
+            "initialRisk": initial_risk,
+            "hardLossHeadroomAtEntry": round(hard_headroom, 2),
+            "capitalAtEntry": round(capital, 2),
+            "requestedCapitalUsagePct": settings.manual_do_trade_capital_usage_pct,
+            "deployedCapital": deployed,
+            "actualCapitalUsagePct": round(deployed / max(capital, 0.01) * 100, 2),
+            "syntheticDemo": synthetic_demo,
+        }
+        if synthetic_demo:
+            meta.update({
+                "underlyingEntry": float(option["underlyingEntry"]),
+                "syntheticEntryPremium": entry,
+                "syntheticModel": "entryPremium + directional underlying move × fixed delta",
+                "syntheticWarning": "Paper demo only; Yahoo does not provide the real SENSEX option chain here.",
+            })
+
+        sandbox = provider.place_sandbox_order(
+            option["instrumentKey"],
+            qty,
+            "BUY",
+            "apex-manual-do-trade",
+        )
+        meta["sandboxEntryOrderId"] = sandbox.get("orderId")
+
+        with SessionLocal() as db:
+            # Re-authorize immediately before commit to avoid opening after a concurrent lock/position change.
+            self._authorize(db)
+            trade = Trade(
+                symbol=option["instrumentKey"],
+                direction=candidate,
+                entry=entry,
+                stop=stop,
+                target=target,
+                quantity=qty,
+                lot_size=lot_size,
+                current_price=entry,
+                pnl=0,
+                status="OPEN",
+                reason=json.dumps(meta, default=str),
+            )
+            db.add(trade)
+            db.commit()
+            db.refresh(trade)
+            trade_data = self._trade_dict(trade)
+
+        candle_time = freshness.get("candleTime")
+        try:
+            parsed_candle = datetime.fromisoformat(str(candle_time).replace("Z", "+00:00")) if candle_time else None
+        except ValueError:
+            parsed_candle = None
+        try:
+            observation = live_learning_service.observe({
+                "index": "SENSEX",
+                "underlyingPrice": best["underlyingPrice"],
+                "action": candidate,
+                "score": score,
+                "chosenStrategy": "APEX_MANUAL_MTF_MOMENTUM",
+                "context": meta["context"],
+                "smc": smc,
+                "patterns": meta["patterns"],
+                "smcOverride": True,
+                "entryReason": "MANUAL_DO_TRADE_MTF_SMC",
+                "entryThreshold": settings.manual_do_trade_min_mtf_score,
+            }, candle_time=parsed_candle)
+            if observation.get("id"):
+                live_learning_service.attach_trade(int(observation["id"]), int(trade.id))
+        except Exception as exc:
+            self._audit("learning.manual_do_trade_observation_error", {"tradeId": trade.id, "error": str(exc)})
+
+        result = {
+            "status": "EXECUTED",
+            "trade": trade_data,
+            "analysis": analysis,
+            "freshness": freshness,
+            "sandbox": sandbox,
+            "danger": {
+                "requestedCapitalUsagePct": settings.manual_do_trade_capital_usage_pct,
+                "actualCapitalUsagePct": meta["actualCapitalUsagePct"],
+                "deployedCapital": deployed,
+                "initialRisk": initial_risk,
+                "stopPoints": stop_distance,
+                "targetPoints": target_distance,
+                "carryForward": meta["carryForward"],
+            },
+        }
+        self.state.last_manual_do_trade = {
+            "at": now.isoformat(),
+            "status": "EXECUTED",
+            "tradeId": trade.id,
+            "direction": candidate,
+            "score": round(score, 4),
+            "deployedCapital": deployed,
+            "initialRisk": initial_risk,
+        }
+        self._audit("trade.manual_do_trade_opened", result)
+        push_notification_service.notify_trade_opened_async(trade_data)
+        return result
 
     def automation_cycle(self, provider) -> dict:
         self.state.last_cycle_at = datetime.now(timezone.utc).isoformat()
@@ -912,6 +1273,7 @@ class TradingEngine:
             })
             meta = {
                 "strategy": strategy_name,
+                "learningArm": best.get("learningArm") or strategy_name,
                 "displayName": option.get("displayName") or option["instrumentKey"],
                 "contractName": option.get("displayName") or option["instrumentKey"],
                 "priceSource": option.get("priceSource") or ("synthetic_estimate" if synthetic_demo else "exchange_option_chain"),
@@ -1063,6 +1425,7 @@ class TradingEngine:
                     "staleDataPolicy": "NO_TRADE; stale candles never reach score/SMC execution gates",
                 },
                 "marketDataFreshness": self.state.market_freshness or {},
+                "manualDoTrade": self.manual_do_trade_status(),
             },
             "marketResearch": self.state.market_research or {},
             "broker": broker,

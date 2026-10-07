@@ -135,9 +135,11 @@ def market_context(candles: list[dict]) -> dict:
     atr = _atr(candles)
     close = max(closes[-1], 1e-9)
     trend_gap = (fast - slow) / close * 100
-    if trend_gap > 0.08:
+    recent_up = len(closes) >= 6 and closes[-1] > closes[-6] and float(candles[-1]["low"]) > float(candles[-4]["low"])
+    recent_down = len(closes) >= 6 and closes[-1] < closes[-6] and float(candles[-1]["high"]) < float(candles[-4]["high"])
+    if trend_gap > 0.04 or (trend_gap > -0.02 and recent_up):
         trend = "UP"
-    elif trend_gap < -0.08:
+    elif trend_gap < -0.04 or (trend_gap < 0.02 and recent_down):
         trend = "DOWN"
     else:
         trend = "FLAT"
@@ -169,7 +171,11 @@ def eligible_arms(capital: float, context: dict) -> list[StrategyArm]:
         if arm.style == "scalp":
             if not settings.allow_scalp_strategy or capital < settings.min_capital_for_scalp:
                 continue
-            if context.get("volatility") == "LOW" or context.get("trend") == "FLAT":
+            if (
+                context.get("volatility") == "LOW"
+                and context.get("trend") == "FLAT"
+                and context.get("patternBias") in {None, "NONE"}
+            ):
                 continue
         arms.append(arm)
     return arms or [ARMS[0]]
@@ -284,6 +290,209 @@ def evaluate_signal(candles: list[dict], arm: StrategyArm) -> dict:
         "entryReason": entry_reason,
         "entryThreshold": round(entry_threshold, 4),
         "context": market_context(candles),
+    }
+
+
+def resample_candles(candles: list[dict], minutes: int) -> list[dict]:
+    """Aggregate 1m OHLCV candles into deterministic N-minute bars without provider-specific APIs."""
+    if minutes <= 1:
+        return sorted(candles, key=lambda x: x["timestamp"])
+    buckets: dict[str, dict] = {}
+    for row in sorted(candles, key=lambda x: x["timestamp"]):
+        try:
+            ts = datetime.fromisoformat(str(row["timestamp"]).replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=IST)
+            ts = ts.astimezone(IST)
+            minute = (ts.minute // minutes) * minutes
+            bucket_ts = ts.replace(minute=minute, second=0, microsecond=0)
+            key = bucket_ts.isoformat()
+            o, h, l, close = map(float, (row["open"], row["high"], row["low"], row["close"]))
+            volume = float(row.get("volume", 0) or 0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if key not in buckets:
+            buckets[key] = {
+                "timestamp": key,
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": close,
+                "volume": volume,
+                "oi": float(row.get("oi", 0) or 0),
+            }
+        else:
+            bar = buckets[key]
+            bar["high"] = max(float(bar["high"]), h)
+            bar["low"] = min(float(bar["low"]), l)
+            bar["close"] = close
+            bar["volume"] = float(bar.get("volume", 0) or 0) + volume
+    return list(buckets.values())
+
+
+def _frame_direction(candles: list[dict]) -> dict:
+    if len(candles) < 8:
+        return {"trend": "UNKNOWN", "emaFast": 0.0, "emaSlow": 0.0, "rsi": 50.0}
+    closes = [float(row["close"]) for row in candles]
+    highs = [float(row["high"]) for row in candles]
+    lows = [float(row["low"]) for row in candles]
+    fast = _ema(closes, 5)
+    slow = _ema(closes, 13)
+    rsi = _rsi(closes, period=min(14, max(5, len(closes) - 1)))
+    gap = (fast - slow) / max(closes[-1], 1e-9) * 100
+    higher_structure = len(candles) >= 5 and highs[-1] >= highs[-3] and lows[-1] > lows[-3]
+    lower_structure = len(candles) >= 5 and lows[-1] <= lows[-3] and highs[-1] < highs[-3]
+    if gap > 0.025 or (closes[-1] > closes[-4] and higher_structure):
+        trend = "UP"
+    elif gap < -0.025 or (closes[-1] < closes[-4] and lower_structure):
+        trend = "DOWN"
+    else:
+        trend = "FLAT"
+    return {
+        "trend": trend,
+        "emaFast": round(fast, 2),
+        "emaSlow": round(slow, 2),
+        "rsi": round(rsi, 2),
+        "higherStructure": bool(higher_structure),
+        "lowerStructure": bool(lower_structure),
+    }
+
+
+def evaluate_mtf_continuation(candles: list[dict]) -> dict:
+    """SMC/momentum continuation candidate using 1m source data plus derived 5m/15m structure."""
+    one = sorted(candles, key=lambda x: x["timestamp"])
+    five = resample_candles(one, 5)
+    fifteen = resample_candles(one, 15)
+    if len(one) < 30 or len(five) < 8 or len(fifteen) < 6:
+        return {
+            "action": "NO_TRADE",
+            "score": 0.0,
+            "qualified": False,
+            "reason": "insufficient MTF candles",
+            "frames": {},
+        }
+
+    d1, d5, d15 = _frame_direction(one), _frame_direction(five), _frame_direction(fifteen)
+    smc = analyze_structure(one)
+    patterns = detect_candlestick_patterns(one)
+    closes = [float(x["close"]) for x in one]
+    highs = [float(x["high"]) for x in one]
+    lows = [float(x["low"]) for x in one]
+    close = closes[-1]
+    rsi = _rsi(closes)
+    fast, slow = _ema(closes, 5), _ema(closes, 13)
+
+    lower_low = lows[-1] < min(lows[-4:-1])
+    lower_high = highs[-1] < max(highs[-4:-1])
+    higher_high = highs[-1] > max(highs[-4:-1])
+    higher_low = lows[-1] > min(lows[-4:-1])
+    prev_low_break = close < lows[-2]
+    prev_high_break = close > highs[-2]
+
+    swing_low = min(lows[-21:])
+    swing_high = max(highs[-21:])
+    swing_range = max(1e-9, swing_high - swing_low)
+    fib_382 = swing_high - swing_range * 0.382
+    fib_500 = swing_high - swing_range * 0.500
+    fib_618 = swing_high - swing_range * 0.618
+    fib_zone = min(fib_382, fib_618) <= close <= max(fib_382, fib_618)
+
+    bull_points = 0.0
+    bear_points = 0.0
+    evidence_bull: list[str] = []
+    evidence_bear: list[str] = []
+
+    for frame_name, frame, weight in (("15m", d15, 1.6), ("5m", d5, 1.8), ("1m", d1, 1.1)):
+        if frame["trend"] == "UP":
+            bull_points += weight
+            evidence_bull.append(f"{frame_name}_UP")
+        elif frame["trend"] == "DOWN":
+            bear_points += weight
+            evidence_bear.append(f"{frame_name}_DOWN")
+
+    if fast > slow:
+        bull_points += 0.7; evidence_bull.append("EMA_5_13_UP")
+    elif fast < slow:
+        bear_points += 0.7; evidence_bear.append("EMA_5_13_DOWN")
+    if rsi >= 52:
+        bull_points += 0.6; evidence_bull.append("RSI_BULL")
+    elif rsi <= 48:
+        bear_points += 0.6; evidence_bear.append("RSI_BEAR")
+
+    if higher_high: bull_points += 0.7; evidence_bull.append("HIGHER_HIGH")
+    if higher_low: bull_points += 0.5; evidence_bull.append("HIGHER_LOW")
+    if lower_low: bear_points += 0.7; evidence_bear.append("LOWER_LOW")
+    if lower_high: bear_points += 0.5; evidence_bear.append("LOWER_HIGH")
+    if prev_high_break: bull_points += 0.8; evidence_bull.append("PREVIOUS_HIGH_BREAK")
+    if prev_low_break: bear_points += 0.8; evidence_bear.append("PREVIOUS_LOW_BREAK")
+
+    if smc.get("bos") == "BULL": bull_points += 1.1; evidence_bull.append("BOS_BULL")
+    if smc.get("bos") == "BEAR": bear_points += 1.1; evidence_bear.append("BOS_BEAR")
+    if smc.get("choch") == "BULL": bull_points += 1.2; evidence_bull.append("CHOCH_BULL")
+    if smc.get("choch") == "BEAR": bear_points += 1.2; evidence_bear.append("CHOCH_BEAR")
+    if smc.get("liquiditySweep") == "BULL": bull_points += 0.9; evidence_bull.append("SWEEP_BULL")
+    if smc.get("liquiditySweep") == "BEAR": bear_points += 0.9; evidence_bear.append("SWEEP_BEAR")
+    if smc.get("fairValueGap") == "BULL": bull_points += 0.45; evidence_bull.append("FVG_BULL")
+    if smc.get("fairValueGap") == "BEAR": bear_points += 0.45; evidence_bear.append("FVG_BEAR")
+    if patterns["bullishScore"] > 0:
+        bull_points += min(0.7, patterns["bullishScore"]); evidence_bull.extend(patterns["bullish"][:2])
+    if patterns["bearishScore"] > 0:
+        bear_points += min(0.7, patterns["bearishScore"]); evidence_bear.extend(patterns["bearish"][:2])
+    if fib_zone:
+        if bull_points > bear_points:
+            bull_points += 0.35; evidence_bull.append("FIB_382_618_ZONE")
+        elif bear_points > bull_points:
+            bear_points += 0.35; evidence_bear.append("FIB_382_618_ZONE")
+
+    total_scale = 10.0
+    bull_score = min(1.0, bull_points / total_scale)
+    bear_score = min(1.0, bear_points / total_scale)
+    action = "CE" if bull_score > bear_score else "PE" if bear_score > bull_score else "NO_TRADE"
+    score = max(bull_score, bear_score)
+    directional_frames = (
+        sum(1 for x in (d5["trend"], d15["trend"]) if x == "UP")
+        if action == "CE"
+        else sum(1 for x in (d5["trend"], d15["trend"]) if x == "DOWN")
+    )
+    structure_ok = (
+        action == "CE" and (higher_high or prev_high_break or smc.get("bos") == "BULL" or smc.get("choch") == "BULL")
+    ) or (
+        action == "PE" and (lower_low or prev_low_break or smc.get("bos") == "BEAR" or smc.get("choch") == "BEAR")
+    )
+    qualified = bool(action in {"CE", "PE"} and score >= 0.56 and directional_frames >= 1 and structure_ok)
+
+    return {
+        "action": action if qualified else "NO_TRADE",
+        "candidateAction": action,
+        "score": round(score, 4),
+        "qualified": qualified,
+        "reason": "MTF_SMC_CONTINUATION" if qualified else "MTF continuation confluence below gate",
+        "underlyingPrice": close,
+        "rsi": round(rsi, 2),
+        "emaFast": round(fast, 2),
+        "emaSlow": round(slow, 2),
+        "previousHigh": highs[-2],
+        "previousLow": lows[-2],
+        "patterns": patterns,
+        "smc": smc,
+        "frames": {"1m": d1, "5m": d5, "15m": d15},
+        "structure": {
+            "lowerLow": lower_low,
+            "lowerHigh": lower_high,
+            "higherHigh": higher_high,
+            "higherLow": higher_low,
+            "previousLowBreak": prev_low_break,
+            "previousHighBreak": prev_high_break,
+        },
+        "fibonacci": {
+            "swingLow": round(swing_low, 2),
+            "swingHigh": round(swing_high, 2),
+            "fib382": round(fib_382, 2),
+            "fib500": round(fib_500, 2),
+            "fib618": round(fib_618, 2),
+            "inRetracementZone": fib_zone,
+        },
+        "evidence": evidence_bull if action == "CE" else evidence_bear,
     }
 
 
@@ -492,7 +701,10 @@ class AdaptiveLearner:
                     meta = json.loads(trade.reason or "{}")
                 except json.JSONDecodeError:
                     continue
-                arm = meta.get("strategy")
+                if meta.get("manualDoTrade"):
+                    # Explicit user-triggered aggressive paper trades must not bias autonomous arm preferences.
+                    continue
+                arm = meta.get("learningArm") or meta.get("strategy")
                 context = meta.get("contextKey", "UNKNOWN")
                 initial_risk = float(meta.get("initialRisk") or 0)
                 if arm not in {a.name for a in ARMS} or initial_risk <= 0:

@@ -349,6 +349,45 @@ export default function App() {
     }
   }
 
+  async function doTradeNow() {
+    if (busy) return
+    const config = automation?.manualDoTrade || {}
+    const confirmed = window.confirm(
+      [
+        '⚠ DANGER — MANUAL DO TRADE (PAPER ONLY)',
+        '',
+        `APEX will scan fresh SENSEX momentum + SMC + 1m/5m/15m structure and may immediately open one option trade.`,
+        `Target: +${config.targetPoints ?? 30} option points`,
+        `Stop: -${config.stopPoints ?? 15} option points`,
+        `Capital request: up to ${config.capitalUsagePct ?? 100}% (hard loss-lock headroom can reduce quantity)`,
+        `Carry forward: ${config.carryForward ? 'YES, only for this button trade' : 'NO'}`,
+        `New trade cutoff: ${config.cutoffTime ?? '15:20'} IST`,
+        '',
+        'This does NOT guarantee a trade; stale/weak/conflicting setups are refused.',
+        '',
+        'Continue?',
+      ].join('\n'),
+    )
+    if (!confirmed) return
+
+    setBusy('do-trade')
+    setNotice(null)
+    try {
+      const result = await fetchJson('/api/paper/do-trade', { method: 'POST' })
+      const trade = result?.trade || {}
+      const danger = result?.danger || {}
+      setNotice({
+        kind: 'ok',
+        text: `DO TRADE executed #${trade.id ?? '—'} ${trade.direction ?? ''} • Qty ${trade.quantity ?? '—'} • deployed ${money(danger.deployedCapital)} • risk ${money(danger.initialRisk)}`,
+      })
+      await loadAll()
+    } catch (e: any) {
+      setNotice({ kind: 'error', text: e?.message || 'Do Trade was refused by safety/market gates' })
+    } finally {
+      setBusy('')
+    }
+  }
+
   function beginPlanEdit(t: Trade) {
     setEditingTradeId(t.id)
     setPlanDraft({ stop: String(t.stop), target: String(t.target) })
@@ -429,6 +468,7 @@ export default function App() {
   const providerReady = market.marketDataConfigured !== false
   const killed = Boolean(status.killSwitch || r.killSwitch)
   const phase = automation.lastDecision?.phase || {}
+  const manualDoTrade = automation.manualDoTrade || {}
   const freshnessMap = automation.marketDataFreshness || {}
   const latestSignal = Array.isArray(automation.lastDecision?.signals) ? automation.lastDecision.signals[0] : null
   const sensexFreshness = freshnessMap.SENSEX || latestSignal?.dataFreshness || {}
@@ -450,6 +490,16 @@ export default function App() {
   const targetProgress = targetAmount > 0 ? Math.max(0, Math.min(100, monthPnl / targetAmount * 100)) : 0
 
   const scanDisabled = Boolean(busy || killed || status.mode !== 'PAPER' || !providerReady)
+  const doTradeDisabled = Boolean(
+    busy ||
+    killed ||
+    status.mode !== 'PAPER' ||
+    !providerReady ||
+    feedStale ||
+    !manualDoTrade.enabled ||
+    !manualDoTrade.timeEligible ||
+    openTrades.length > 0
+  )
   const flattenDisabled = Boolean(busy || openTrades.length === 0)
   const killDisabled = Boolean(busy || killed)
   const resetDisabled = Boolean(busy || !killed)
@@ -829,6 +879,32 @@ export default function App() {
           <SystemItem label="Provider" value={market.provider || 'unknown'} />
           <SystemItem label="Paper broker" value={market.paperBroker || 'internal'} />
           <SystemItem label="Phase" value={phase.reason || 'Waiting'} />
+        </div>
+
+        <div className="do-trade-card">
+          <div className="do-trade-warning">⚠</div>
+          <div className="do-trade-copy">
+            <div className="do-trade-title">
+              <div><small>MANUAL AGGRESSIVE PAPER SCALP</small><h3>DO TRADE</h3></div>
+              <span>DANGER</span>
+            </div>
+            <p>One-click fresh-market scan using 1m/5m/15m momentum, SMC structure, BOS/CHOCH/sweeps/FVG, lower-high/lower-low, EMA/RSI and Fibonacci context. It executes only when deterministic confluence passes.</p>
+            <div className="do-trade-grid">
+              <span>Target <b>+{manualDoTrade.targetPoints ?? 30} pts</b></span>
+              <span>Stop <b>-{manualDoTrade.stopPoints ?? 15} pts</b></span>
+              <span>Capital request <b>{manualDoTrade.capitalUsagePct ?? 100}% max</b></span>
+              <span>Cutoff <b>{manualDoTrade.cutoffTime ?? '15:20'} IST</b></span>
+              <span>Carry forward <b>{manualDoTrade.carryForward ? 'FUTURE-EXPIRY ONLY' : 'OFF'}</b></span>
+              <span>Feed <b className={feedStale ? 'negative' : 'positive'}>{feedStale ? 'STALE — BLOCKED' : freshnessState}</b></span>
+            </div>
+            <small className="do-trade-foot">PAPER ONLY. Quantity targets maximum affordable deployment but is reduced when needed to stay inside remaining daily / weekly / monthly hard loss-lock headroom. Expiry-day contracts do not carry. Kill + Flatten always overrides carry-forward.</small>
+          </div>
+          <div className="do-trade-action">
+            <button type="button" disabled={doTradeDisabled} onClick={() => void doTradeNow()}>
+              {busy === 'do-trade' ? 'SCANNING…' : '⚠ DO TRADE'}
+            </button>
+            <small>{feedStale ? 'Waiting for fresh candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
+          </div>
         </div>
 
         <div className="trade-alert-card">
