@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 
 from .core import db_health, init_db, settings
 from .dataset_model import dataset_model_service
-from .huggingface_advisor import huggingface_advisor
 from .kite import kite_service
 from .learning_worker import learning_worker
 from .live_learning import live_learning_service
@@ -266,10 +265,6 @@ def neural_learning_train():
 def research_intelligence():
     return research_engine.snapshot()
 
-
-@app.get("/api/research/huggingface")
-def huggingface_status():
-    return huggingface_advisor.snapshot()
 
 
 @app.post("/api/research/huggingface-review")
