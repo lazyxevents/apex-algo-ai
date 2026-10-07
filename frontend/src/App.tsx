@@ -593,13 +593,13 @@ export default function App() {
           <span className={`phase-chip ${chartView === 'tradingview' ? 'live' : marketResearchOnly ? 'historical' : String(chartIntel?.freshness?.state || 'unknown').toLowerCase()}`}>
             {chartView === 'tradingview' ? 'TRADINGVIEW' : marketResearchOnly ? 'HISTORICAL / RESEARCH' : (chartIntel?.freshness?.state || 'WAITING')}
           </span>
-          <span className="phase-sub">{chartView === 'tradingview' ? 'BSE:SENSEX market reference' : chartIntel?.generatedAt ? `updated ${formatDateTime(chartIntel.generatedAt)}` : 'loading APEX chart intelligence'}</span>
+          <span className="phase-sub">{chartView === 'tradingview' ? 'BSE:BSX1! intraday futures reference' : chartIntel?.generatedAt ? `updated ${formatDateTime(chartIntel.generatedAt)}` : 'loading APEX chart intelligence'}</span>
         </div>
       </div>
 
       <div className="chart-view-tabs">
         <button type="button" className={chartView === 'tradingview' ? 'active' : ''} onClick={() => setChartView('tradingview')}>
-          TradingView Live
+          TradingView 1m Futures
         </button>
         <button type="button" className={chartView === 'apex' ? 'active' : ''} onClick={() => setChartView('apex')}>
           APEX Markup
@@ -607,7 +607,7 @@ export default function App() {
       </div>
 
       {chartView === 'tradingview'
-        ? <TradingViewAdvancedChart symbol="BSE:SENSEX" />
+        ? <TradingViewAdvancedChart symbol="BSE:BSX1!" />
         : <MarketIntelligenceChart data={chartIntel} />}
 
       <div className="chart-intel-stats">
@@ -621,7 +621,7 @@ export default function App() {
         <SystemItem label="Plan bias" value={chartIntel?.plan?.marketBias || nextPlan.marketBias || '—'} />
       </div>
       <p className="panel-note">
-        TradingView Live is the visual market-reference view. APEX automated scoring/training still uses the backend provider feed and hard freshness gates; switching chart tabs does not change execution data.
+        TradingView 1m uses the SENSEX continuous futures contract (BSX1!) because the public embedded spot index blocks intraday intervals. Futures can trade at a basis versus spot. APEX automated scoring/training still uses the backend SENSEX provider feed and hard freshness gates.
       </p>
     </section>
 
@@ -1239,7 +1239,7 @@ function TradingViewAdvancedChart({symbol}:{symbol:string}) {
   return <div className="tv-live-shell">
     <div className="tv-live-head">
       <div><small>TRADINGVIEW ADVANCED CHART</small><b>{symbol}</b></div>
-      <span>1m • Asia/Kolkata</span>
+      <span>1m • Futures reference • Asia/Kolkata</span>
     </div>
     <div ref={containerRef} className="tradingview-widget-container tv-widget-host" />
   </div>
