@@ -701,7 +701,10 @@ class AdaptiveLearner:
                     meta = json.loads(trade.reason or "{}")
                 except json.JSONDecodeError:
                     continue
-                arm = meta.get("strategy")
+                if meta.get("manualDoTrade"):
+                    # Explicit user-triggered aggressive paper trades must not bias autonomous arm preferences.
+                    continue
+                arm = meta.get("learningArm") or meta.get("strategy")
                 context = meta.get("contextKey", "UNKNOWN")
                 initial_risk = float(meta.get("initialRisk") or 0)
                 if arm not in {a.name for a in ARMS} or initial_risk <= 0:
