@@ -22,7 +22,7 @@ from .notifications import push_notification_service
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
 from .research_engine import research_engine
-from .strategy import adaptive_learner, evaluate_signal, market_context, select_option
+from .strategy import adaptive_learner, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
 
 IST = ZoneInfo(settings.timezone)
 
@@ -662,7 +662,30 @@ class TradingEngine:
         context = market_context(candles)
         arm = adaptive_learner.choose_arm(context, capital)
         signal = evaluate_signal(candles, arm)
-        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": arm.name})
+        continuation = evaluate_mtf_continuation(candles)
+        signal["mtfContinuation"] = continuation
+        if signal.get("action") == "NO_TRADE" and continuation.get("qualified"):
+            signal.update({
+                "action": continuation["action"],
+                "score": continuation["score"],
+                "underlyingPrice": continuation["underlyingPrice"],
+                "emaFast": continuation["emaFast"],
+                "emaSlow": continuation["emaSlow"],
+                "rsi": continuation["rsi"],
+                "previousHigh": continuation["previousHigh"],
+                "previousLow": continuation["previousLow"],
+                "patterns": continuation["patterns"],
+                "smc": continuation["smc"],
+                "entryReason": "MTF_SMC_CONTINUATION",
+                "entryThreshold": 0.56,
+                "smcOverride": True,
+                "context": context,
+                "strategy": "APEX_MTF_SMC_CONTINUATION",
+            })
+            chosen_strategy = "APEX_MTF_SMC_CONTINUATION"
+        else:
+            chosen_strategy = arm.name
+        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": chosen_strategy})
         neural = neural_model_service.predict_signal(signal)
         signal["neural"] = neural
         if neural.get("status") == "production" and neural.get("probability") is not None and signal.get("action") in {"CE", "PE"}:
