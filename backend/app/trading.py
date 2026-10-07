@@ -706,7 +706,12 @@ class TradingEngine:
             chosen_strategy = "APEX_MTF_SMC_SCALP"
         else:
             chosen_strategy = arm.name
-        signal.update({"index": name, "underlyingKey": key, "chosenStrategy": chosen_strategy})
+        signal.update({
+            "index": name,
+            "underlyingKey": key,
+            "chosenStrategy": chosen_strategy,
+            "learningArm": arm.name,
+        })
         neural = neural_model_service.predict_signal(signal)
         signal["neural"] = neural
         if neural.get("status") == "production" and neural.get("probability") is not None and signal.get("action") in {"CE", "PE"}:
@@ -948,6 +953,7 @@ class TradingEngine:
 
         meta = {
             "strategy": "APEX_MANUAL_MTF_MOMENTUM",
+            "learningArm": None,
             "displayName": option.get("displayName") or option["instrumentKey"],
             "contractName": option.get("displayName") or option["instrumentKey"],
             "priceSource": option.get("priceSource") or ("synthetic_estimate" if synthetic_demo else "exchange_option_chain"),
@@ -955,8 +961,17 @@ class TradingEngine:
             "entryTime": now.isoformat(),
             "tradeStyle": "MANUAL_MOMENTUM_SCALP",
             "manualDoTrade": True,
-            "carryForward": bool(settings.manual_do_trade_carry_forward),
+            "carryForward": bool(
+                settings.manual_do_trade_carry_forward
+                and expiry
+                and str(expiry)[:10] > now.date().isoformat()
+            ),
             "carryForwardSource": "dashboard_do_trade_button",
+            "carryForwardReason": (
+                "eligible future-expiry contract"
+                if settings.manual_do_trade_carry_forward and expiry and str(expiry)[:10] > now.date().isoformat()
+                else "same-day/unknown expiry cannot carry"
+            ),
             "stopModel": f"fixed {stop_distance:.0f}-point option-premium risk",
             "targetModel": f"fixed {target_distance:.0f}-point option-premium scalp target",
             "firstTarget": target,
@@ -1258,6 +1273,7 @@ class TradingEngine:
             })
             meta = {
                 "strategy": strategy_name,
+                "learningArm": best.get("learningArm") or strategy_name,
                 "displayName": option.get("displayName") or option["instrumentKey"],
                 "contractName": option.get("displayName") or option["instrumentKey"],
                 "priceSource": option.get("priceSource") or ("synthetic_estimate" if synthetic_demo else "exchange_option_chain"),
