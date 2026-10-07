@@ -177,3 +177,16 @@ class LearningRewardEvent(Base):
     shaped_reward: Mapped[float] = mapped_column(Float, default=0.0)
     detail_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    endpoint: Mapped[str] = mapped_column(String(1400), unique=True)
+    p256dh: Mapped[str] = mapped_column(String(512))
+    auth: Mapped[str] = mapped_column(String(256))
+    user_agent: Mapped[str] = mapped_column(String(512), default="")
+    active: Mapped[int] = mapped_column(Integer, default=1, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
