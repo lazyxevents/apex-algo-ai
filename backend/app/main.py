@@ -276,21 +276,10 @@ def market_chart_intelligence(force: bool = False):
 
 
 
-@app.post("/api/research/huggingface-review")
-def huggingface_review():
-    if not huggingface_advisor.configured:
-        raise HTTPException(status_code=503, detail="Hugging Face shadow reviewer needs HF_TOKEN")
-    analytics = trading_engine.state.market_research or {}
-    return huggingface_advisor.review(
-        (analytics.get("analytics") or analytics) if isinstance(analytics, dict) else {},
-        research_engine.snapshot(),
-    )
-
-
 @app.post("/api/research/run-once")
 def research_run_once():
     try:
-        return adaptive_learner.daily_research(market_service)
+        return learning_worker.run_cycle(market_service, force=True)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
