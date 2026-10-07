@@ -1409,6 +1409,7 @@ class TradingEngine:
                     "staleDataPolicy": "NO_TRADE; stale candles never reach score/SMC execution gates",
                 },
                 "marketDataFreshness": self.state.market_freshness or {},
+                "manualDoTrade": self.manual_do_trade_status(),
             },
             "marketResearch": self.state.market_research or {},
             "broker": broker,
