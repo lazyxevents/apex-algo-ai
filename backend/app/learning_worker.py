@@ -6,6 +6,7 @@ from threading import Lock
 from zoneinfo import ZoneInfo
 
 from .core import settings
+from .huggingface_advisor import huggingface_advisor
 from .llm_research import ollama_research
 from .dataset_model import dataset_model_service
 from .market_research import build_market_research
@@ -46,6 +47,8 @@ class LearningState:
     neuralTrainedSamples: int = 0
     neuralOosAuc: float | None = None
     neuralOosBrier: float | None = None
+    huggingFaceStatus: str = "NOT_CONFIGURED"
+    huggingFaceLastReview: dict | None = None
 
 
 class ContinuousLearningWorker:
@@ -76,6 +79,7 @@ class ContinuousLearningWorker:
         metrics = (production.get("metrics") or latest_neural.get("metrics") or {}).get("outOfSample") or {}
         data["neuralOosAuc"] = metrics.get("auc")
         data["neuralOosBrier"] = metrics.get("brier")
+        data["huggingFace"] = huggingface_advisor.snapshot()
         data.update({
             "intervalMinutes": settings.learning_worker_interval_minutes,
             "dailyHourBudget": settings.learning_worker_daily_hours,
@@ -153,6 +157,9 @@ class ContinuousLearningWorker:
                 self.state.latestPlan = research_bundle.get("plan") or {}
                 self._heartbeat("hypothesis", "Connecting research evidence to scalp/swing/SMC hypotheses")
                 summary = ollama_research.summarize(analytics, research_bundle)
+                hf_review = huggingface_advisor.review(analytics, research_bundle)
+                self.state.huggingFaceStatus = str(hf_review.get("status") or "UNKNOWN").upper()
+                self.state.huggingFaceLastReview = hf_review
                 observations = summary.get("observations") or []
                 self.state.hypothesesTested += max(1, len(observations))
             else:
