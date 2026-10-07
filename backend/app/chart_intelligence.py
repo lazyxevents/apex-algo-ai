@@ -87,7 +87,7 @@ class ChartIntelligenceService:
         self._lock = Lock()
         self._cached: dict = {}
         self._cached_at = 0.0
-        self.cache_seconds = 15.0
+        self.cache_seconds = 20.0
 
     @staticmethod
     def _latest_plan() -> dict:
@@ -144,7 +144,11 @@ class ChartIntelligenceService:
 
     def snapshot(self, provider, force: bool = False) -> dict:
         now_mono = monotonic()
-        if not force and self._cached and now_mono - self._cached_at < self.cache_seconds:
+        now_ist = datetime.now(IST)
+        hm = now_ist.strftime("%H:%M")
+        live_market = now_ist.weekday() < 5 and settings.market_open_time <= hm < settings.market_close_time
+        ttl = self.cache_seconds if live_market else 300.0
+        if not force and self._cached and now_mono - self._cached_at < ttl:
             return self._cached
         if not self._lock.acquire(blocking=False):
             return self._cached or {"status": "busy"}
@@ -239,7 +243,7 @@ class ChartIntelligenceService:
                     "patternsSeen": plan.get("patternsSeen") or [],
                     "structureSeen": plan.get("structureSeen") or [],
                 },
-                "cacheSeconds": self.cache_seconds,
+                "cacheSeconds": ttl,
                 "note": "Chart overlays use the same underlying candle/SMC/pattern features as APEX paper-decision support. Provider delay still applies.",
             }
             self._cached = result
