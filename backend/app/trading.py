@@ -11,7 +11,7 @@ from urllib.parse import quote
 from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
-from .huggingface_advisor import huggingface_advisor
+from .dataset_model import dataset_model_service
 from .llm_research import ollama_research
 from .llm_advisor import ollama_advisor
 from .learning_worker import learning_worker
@@ -605,14 +605,18 @@ class TradingEngine:
             self.state.market_research = result
             return result
         analytics = build_market_research(provider)
-        news = ollama_research.news_research()
-        llm_summary = ollama_research.summarize(analytics, news)
+        bundle = research_engine.run(analytics, "PREMARKET")
+        llm_summary = ollama_research.summarize(analytics, bundle)
         result = {
             "status": "completed",
             "runDate": today,
-            "scheduledTime": settings.premarket_research_time,
+            "scheduledTime": settings.premarket_plan_time,
             "analytics": analytics,
-            "news": news,
+            "news": bundle.get("news") or [],
+            "newsHealth": bundle.get("newsHealth") or {},
+            "sectors": bundle.get("sectors") or [],
+            "plan": bundle.get("plan") or {},
+            "sources": bundle.get("sources") or [],
             "llm": llm_summary,
         }
         self.state.last_premarket_date = today
@@ -1115,7 +1119,7 @@ class TradingEngine:
             if (
                 settings.learning_worker_enabled
                 and now_ist.weekday() < 5
-                and settings.premarket_research_time <= hm < settings.market_open_time
+                and settings.premarket_plan_time <= hm < settings.market_open_time
                 and self.state.last_premarket_learning_date != today_key
             ):
                 decision["premarketLearning"] = learning_worker.run_cycle(provider, force=True)
@@ -1133,7 +1137,7 @@ class TradingEngine:
                 settings.premarket_research_enabled
                 and provider.market_ready
                 and now_ist.weekday() < 5
-                and now_ist.strftime("%H:%M") >= settings.premarket_research_time
+                and now_ist.strftime("%H:%M") >= settings.premarket_plan_time
                 and self.state.last_premarket_date != now_ist.date().isoformat()
             ):
                 decision["premarketResearch"] = self.run_premarket_research(provider)
@@ -1416,7 +1420,8 @@ class TradingEngine:
                 "tradeWindow": f"{settings.trade_start_time}-{settings.stop_new_trade_time}",
                 "forceExit": settings.force_exit_time,
                 "researchTime": settings.daily_research_time,
-                "premarketResearchTime": settings.premarket_research_time,
+                "premarketResearchTime": settings.premarket_plan_time,
+                "learningWindow": f"{settings.learning_worker_window_start_time}-{settings.learning_worker_window_end_time}",
                 "entryPolicy": {
                     "standardMinScore": settings.signal_min_score,
                     "smcOverrideMinScore": settings.smc_override_min_score,
@@ -1437,7 +1442,7 @@ class TradingEngine:
             "liveLearning": live_learning_service.snapshot(),
             "researchIntelligence": research_engine.snapshot(),
             "neuralModel": neural_model_service.snapshot(),
-            "huggingFace": huggingface_advisor.snapshot(),
+            "datasetModel": dataset_model_service.snapshot(),
             "ollama": {
                 "enabled": ollama_advisor.configured,
                 "configured": ollama_advisor.configured,

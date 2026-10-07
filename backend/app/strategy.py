@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from .core import SessionLocal, settings
 from .models import LearningRewardEvent, ResearchRun, StrategyState, Trade
-from .market_research import analyze_structure
+from .market_research import _patterns as research_patterns, analyze_structure
 
 IST = ZoneInfo(settings.timezone)
 
@@ -72,60 +72,27 @@ def _atr(candles: list[dict], period: int = 14) -> float:
 
 
 def detect_candlestick_patterns(candles: list[dict]) -> dict:
-    if len(candles) < 3:
-        return {"bullishScore": 0.0, "bearishScore": 0.0, "bullish": [], "bearish": [], "neutral": []}
-    older, prev, cur = candles[-3], candles[-2], candles[-1]
-    o, h, l, c = map(float, (cur["open"], cur["high"], cur["low"], cur["close"]))
-    po, ph, pl, pc = map(float, (prev["open"], prev["high"], prev["low"], prev["close"]))
-    oo, oh, ol, oc = map(float, (older["open"], older["high"], older["low"], older["close"]))
-    body = max(abs(c - o), 1e-9)
-    prev_body = max(abs(pc - po), 1e-9)
-    rng = max(h - l, 1e-9)
-    upper = h - max(o, c)
-    lower = min(o, c) - l
-    bullish: list[str] = []
-    bearish: list[str] = []
-    neutral: list[str] = []
-
-    if body / rng <= 0.12:
-        neutral.append("DOJI")
-    if h < ph and l > pl:
-        neutral.append("INSIDE_BAR")
-    if lower >= body * 1.8 and upper <= body and c >= o:
-        bullish.extend(["BULLISH_PIN_BAR", "HAMMER"])
-    if upper >= body * 1.8 and lower <= body and c <= o:
-        bearish.extend(["BEARISH_PIN_BAR", "SHOOTING_STAR"])
-    if c > o and pc < po and o <= pc and c >= po:
-        bullish.append("BULLISH_ENGULFING")
-    if c < o and pc > po and o >= pc and c <= po:
-        bearish.append("BEARISH_ENGULFING")
-    if c > o and pc < po and o >= pc and c <= po and body < prev_body:
-        bullish.append("BULLISH_HARAMI")
-    if c < o and pc > po and o <= pc and c >= po and body < prev_body:
-        bearish.append("BEARISH_HARAMI")
-    if c > ph and c > o:
-        bullish.append("BREAKOUT_CLOSE")
-    if c < pl and c < o:
-        bearish.append("BREAKDOWN_CLOSE")
-    if oc < oo and abs(pc - po) <= max((ph - pl) * 0.35, 1e-9) and c > o and c > (oo + oc) / 2:
-        bullish.append("MORNING_STAR")
-    if oc > oo and abs(pc - po) <= max((ph - pl) * 0.35, 1e-9) and c < o and c < (oo + oc) / 2:
-        bearish.append("EVENING_STAR")
-    if c > o and body / rng >= 0.68:
-        bullish.append("STRONG_BULL_BODY")
-    if c < o and body / rng >= 0.68:
-        bearish.append("STRONG_BEAR_BODY")
-
-    bull_unique = list(dict.fromkeys(bullish))
-    bear_unique = list(dict.fromkeys(bearish))
-    return {
-        "bullishScore": min(1.0, len(bull_unique) * 0.28),
-        "bearishScore": min(1.0, len(bear_unique) * 0.28),
-        "bullish": bull_unique,
-        "bearish": bear_unique,
-        "neutral": neutral,
+    raw = research_patterns(candles)
+    bullish = raw.get("bullish") or []
+    bearish = raw.get("bearish") or []
+    # Strong multi-candle / breakout patterns carry more live-scoring weight.
+    strong = {
+        "BULLISH_MARUBOZU", "BEARISH_MARUBOZU", "THREE_WHITE_SOLDIERS", "THREE_BLACK_CROWS",
+        "BULLISH_ENGULFING", "BEARISH_ENGULFING", "BREAKOUT_CLOSE", "BREAKDOWN_CLOSE",
+        "MORNING_STAR", "EVENING_STAR",
     }
-
+    def score(rows: list[str]) -> float:
+        value = 0.0
+        for name in rows:
+            value += 0.38 if name in strong else 0.24
+        return min(1.0, value)
+    return {
+        "bullishScore": round(score(bullish), 4),
+        "bearishScore": round(score(bearish), 4),
+        "bullish": bullish,
+        "bearish": bearish,
+        "neutral": raw.get("neutral") or [],
+    }
 
 def market_context(candles: list[dict]) -> dict:
     if len(candles) < 22:

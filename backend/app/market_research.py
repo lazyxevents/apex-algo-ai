@@ -49,11 +49,20 @@ def _trend(candles: list[dict]) -> dict:
     if len(candles) < 24:
         return {"trend": "UNKNOWN", "emaFast": 0.0, "emaSlow": 0.0, "rsi": 50.0, "atr": 0.0}
     closes = [float(row["close"]) for row in candles]
+    highs = [float(row["high"]) for row in candles]
+    lows = [float(row["low"]) for row in candles]
     fast = _ema(closes, 9)
     slow = _ema(closes, 21)
     close = max(closes[-1], 1e-9)
     gap_pct = (fast - slow) / close * 100
-    trend = "UP" if gap_pct > 0.025 else "DOWN" if gap_pct < -0.025 else "FLAT"
+    recent_higher = len(candles) >= 6 and highs[-1] >= highs[-4] and lows[-1] > lows[-4]
+    recent_lower = len(candles) >= 6 and lows[-1] <= lows[-4] and highs[-1] < highs[-4]
+    if gap_pct > 0.025 or (gap_pct > -0.01 and recent_higher):
+        trend = "UP"
+    elif gap_pct < -0.025 or (gap_pct < 0.01 and recent_lower):
+        trend = "DOWN"
+    else:
+        trend = "FLAT"
     return {
         "trend": trend,
         "emaFast": round(fast, 2),
@@ -62,6 +71,7 @@ def _trend(candles: list[dict]) -> dict:
         "rsi": round(_rsi(closes), 2),
         "atr": round(_atr(candles), 2),
         "lastPrice": round(closes[-1], 2),
+        "recentStructure": "HH_HL" if recent_higher else "LL_LH" if recent_lower else "MIXED",
     }
 
 
@@ -91,35 +101,71 @@ def _patterns(candles: list[dict]) -> dict:
     bearish: list[str] = []
     neutral: list[str] = []
 
-    if body / rng <= 0.12:
+    body_ratio = body / rng
+    if body_ratio <= 0.10:
         neutral.append("DOJI")
+    elif body_ratio <= 0.28 and upper >= body * 0.7 and lower >= body * 0.7:
+        neutral.append("SPINNING_TOP")
     if h < ph and l > pl:
         neutral.append("INSIDE_BAR")
+    if h > ph and l < pl:
+        neutral.append("OUTSIDE_BAR")
+
     if lower >= body * 1.8 and upper <= body and c >= o:
         bullish.extend(["BULLISH_PIN_BAR", "HAMMER"])
     if upper >= body * 1.8 and lower <= body and c <= o:
         bearish.extend(["BEARISH_PIN_BAR", "SHOOTING_STAR"])
+
     if c > o and pc < po and o <= pc and c >= po:
         bullish.append("BULLISH_ENGULFING")
     if c < o and pc > po and o >= pc and c <= po:
         bearish.append("BEARISH_ENGULFING")
+
     if c > o and pc < po and o >= pc and c <= po and body < prev_body:
         bullish.append("BULLISH_HARAMI")
     if c < o and pc > po and o <= pc and c >= po and body < prev_body:
         bearish.append("BEARISH_HARAMI")
+
+    if pc < po and c > o and o < pc and c > (po + pc) / 2 and c < po:
+        bullish.append("PIERCING_LINE")
+    if pc > po and c < o and o > pc and c < (po + pc) / 2 and c > po:
+        bearish.append("DARK_CLOUD_COVER")
+
+    if abs(l - pl) <= max(rng, ph - pl) * 0.08 and pc < po and c > o:
+        bullish.append("TWEEZER_BOTTOM")
+    if abs(h - ph) <= max(rng, ph - pl) * 0.08 and pc > po and c < o:
+        bearish.append("TWEEZER_TOP")
+
     if c > ph and c > o:
         bullish.append("BREAKOUT_CLOSE")
     if c < pl and c < o:
         bearish.append("BREAKDOWN_CLOSE")
+
     if oc < oo and abs(pc - po) <= max((ph - pl) * 0.35, 1e-9) and c > o and c > (oo + oc) / 2:
         bullish.append("MORNING_STAR")
     if oc > oo and abs(pc - po) <= max((ph - pl) * 0.35, 1e-9) and c < o and c < (oo + oc) / 2:
         bearish.append("EVENING_STAR")
-    if c > o and body / rng >= 0.68:
+
+    if c > o and body_ratio >= 0.68:
         bullish.append("STRONG_BULL_BODY")
-    if c < o and body / rng >= 0.68:
+    if c < o and body_ratio >= 0.68:
         bearish.append("STRONG_BEAR_BODY")
-    return {"bullish": list(dict.fromkeys(bullish)), "bearish": list(dict.fromkeys(bearish)), "neutral": neutral}
+    if c > o and body_ratio >= 0.88 and upper <= rng * 0.06 and lower <= rng * 0.06:
+        bullish.append("BULLISH_MARUBOZU")
+    if c < o and body_ratio >= 0.88 and upper <= rng * 0.06 and lower <= rng * 0.06:
+        bearish.append("BEARISH_MARUBOZU")
+
+    # Three-candle momentum patterns.
+    if oc > oo and pc > po and c > o and oc < pc < c and ol < pl < l:
+        bullish.append("THREE_WHITE_SOLDIERS")
+    if oc < oo and pc < po and c < o and oc > pc > c and oh > ph > h:
+        bearish.append("THREE_BLACK_CROWS")
+
+    return {
+        "bullish": list(dict.fromkeys(bullish)),
+        "bearish": list(dict.fromkeys(bearish)),
+        "neutral": list(dict.fromkeys(neutral)),
+    }
 
 
 def _structure(candles: list[dict]) -> dict:
@@ -131,6 +177,11 @@ def _structure(candles: list[dict]) -> dict:
             "liquiditySweep": "NONE",
             "fairValueGap": "NONE",
             "fakeBreakout": "NONE",
+            "swingStructure": "UNKNOWN",
+            "higherHigh": False,
+            "higherLow": False,
+            "lowerHigh": False,
+            "lowerLow": False,
             "levels": levels,
         }
 
@@ -156,12 +207,31 @@ def _structure(candles: list[dict]) -> dict:
     elif float(candles[-1]["high"]) < float(older["low"]):
         fvg = "BEAR"
 
+    highs = [float(x["high"]) for x in candles[-6:]]
+    lows = [float(x["low"]) for x in candles[-6:]]
+    higher_high = highs[-1] > highs[-3]
+    higher_low = lows[-1] > lows[-3]
+    lower_high = highs[-1] < highs[-3]
+    lower_low = lows[-1] < lows[-3]
+    swing_structure = (
+        "HH_HL" if higher_high and higher_low
+        else "LL_LH" if lower_low and lower_high
+        else "EXPANSION_UP" if higher_high
+        else "EXPANSION_DOWN" if lower_low
+        else "MIXED"
+    )
+
     return {
         "bos": bos,
         "choch": choch,
         "liquiditySweep": sweep,
         "fairValueGap": fvg,
         "fakeBreakout": fake,
+        "swingStructure": swing_structure,
+        "higherHigh": higher_high,
+        "higherLow": higher_low,
+        "lowerHigh": lower_high,
+        "lowerLow": lower_low,
         "levels": levels,
     }
 
@@ -170,33 +240,107 @@ def analyze_structure(candles: list[dict]) -> dict:
     """Public SMC structure helper shared by research and live entry scoring."""
     return _structure(candles)
 
+
 def _fetch(provider, key: str, minutes: int) -> list[dict]:
     if hasattr(provider, "intraday_candles_interval"):
         return provider.intraday_candles_interval(key, minutes)
     return provider.intraday_candles(key)
 
 
+def _parse_time(row: dict) -> datetime | None:
+    raw = row.get("timestamp") or row.get("time") or row.get("date")
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=IST)
+        return dt.astimezone(IST)
+    except Exception:
+        return None
+
+
+def _session_profile(candles: list[dict]) -> dict:
+    if not candles:
+        return {}
+    grouped: dict[str, list[dict]] = {}
+    for row in candles:
+        dt = _parse_time(row)
+        if not dt:
+            continue
+        grouped.setdefault(dt.date().isoformat(), []).append(row)
+    dates = sorted(grouped)
+    if not dates:
+        return {}
+    current_date = dates[-1]
+    current = grouped[current_date]
+    previous = grouped[dates[-2]] if len(dates) >= 2 else []
+    day_open = float(current[0]["open"])
+    day_high = max(float(x["high"]) for x in current)
+    day_low = min(float(x["low"]) for x in current)
+    day_close = float(current[-1]["close"])
+    out = {
+        "sessionDate": current_date,
+        "dayOpen": round(day_open, 2),
+        "dayHigh": round(day_high, 2),
+        "dayLow": round(day_low, 2),
+        "dayLast": round(day_close, 2),
+        "dayRange": round(day_high - day_low, 2),
+    }
+    if previous:
+        prev_high = max(float(x["high"]) for x in previous)
+        prev_low = min(float(x["low"]) for x in previous)
+        prev_close = float(previous[-1]["close"])
+        out.update({
+            "previousDayHigh": round(prev_high, 2),
+            "previousDayLow": round(prev_low, 2),
+            "previousDayClose": round(prev_close, 2),
+            "gapPoints": round(day_open - prev_close, 2),
+            "gapPct": round((day_open - prev_close) / max(prev_close, 1e-9) * 100, 4),
+            "openVsPreviousRange": "ABOVE_HIGH" if day_open > prev_high else "BELOW_LOW" if day_open < prev_low else "INSIDE_RANGE",
+        })
+    return out
+
+
 def build_market_research(provider) -> dict:
     markets: dict[str, dict] = {}
     for name, key in settings.underlying_keys.items():
         frames: dict[str, dict] = {}
+        raw_1m: list[dict] = []
         for minutes in (1, 5, 15):
             try:
                 candles = _fetch(provider, key, minutes)
+                if minutes == 1:
+                    raw_1m = candles
                 frames[f"{minutes}m"] = {
                     **_trend(candles),
                     "structure": _structure(candles),
                     "patterns": _patterns(candles),
+                    "candleCount": len(candles),
+                    "lastCandleTime": (
+                        candles[-1].get("timestamp") or candles[-1].get("time") or candles[-1].get("date")
+                        if candles else None
+                    ),
                 }
             except Exception as exc:
                 frames[f"{minutes}m"] = {"error": str(exc)[:180]}
 
-        trends = [frames.get("5m", {}).get("trend"), frames.get("15m", {}).get("trend")]
-        state = "BULLISH" if trends == ["UP", "UP"] else "BEARISH" if trends == ["DOWN", "DOWN"] else "MIXED"
-        markets[name] = {"state": state, "frames": frames}
+        t5, t15 = frames.get("5m", {}).get("trend"), frames.get("15m", {}).get("trend")
+        t1 = frames.get("1m", {}).get("trend")
+        if t5 == "UP" and t15 == "UP":
+            state = "BULLISH"
+        elif t5 == "DOWN" and t15 == "DOWN":
+            state = "BEARISH"
+        elif t1 == t5 and t1 in {"UP", "DOWN"}:
+            state = "EARLY_BULLISH" if t1 == "UP" else "EARLY_BEARISH"
+        else:
+            state = "MIXED"
+        markets[name] = {
+            "state": state,
+            "frames": frames,
+            "sessionProfile": _session_profile(raw_1m),
+        }
 
     return {
         "generatedAt": datetime.now(IST).isoformat(),
-        "purpose": "research_only",
+        "purpose": "research_and_paper_decision_support",
         "markets": markets,
     }

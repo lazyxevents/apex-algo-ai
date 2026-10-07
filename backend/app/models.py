@@ -106,6 +106,17 @@ class LiveMarketObservation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 
+class ResearchActivity(Base):
+    __tablename__ = "research_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(48), index=True)
+    stage: Mapped[str] = mapped_column(String(48), default="", index=True)
+    title: Mapped[str] = mapped_column(String(300))
+    detail_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
+
+
 class ResearchKnowledge(Base):
     __tablename__ = "research_knowledge"
 

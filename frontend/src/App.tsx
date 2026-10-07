@@ -175,6 +175,7 @@ export default function App() {
   const [pushSubscribed, setPushSubscribed] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
   const [pushError, setPushError] = useState('')
+  const [chartIntel, setChartIntel] = useState<any>(null)
   const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
 
   const loadStatus = useCallback(async (silent = false) => {
@@ -198,21 +199,33 @@ export default function App() {
     }
   }, [])
 
+  const loadChartIntel = useCallback(async (silent = false) => {
+    try {
+      const data = await fetchJson('/api/market/chart-intelligence')
+      setChartIntel(data)
+      if (!silent) setError('')
+    } catch (e: any) {
+      if (!silent) setError(e?.message || 'Could not load chart intelligence')
+    }
+  }, [])
+
   const loadAll = useCallback(async () => {
-    await Promise.all([loadStatus(), loadTrades()])
-  }, [loadStatus, loadTrades])
+    await Promise.all([loadStatus(), loadTrades(), loadChartIntel()])
+  }, [loadStatus, loadTrades, loadChartIntel])
 
   useEffect(() => {
     void loadAll()
     const tradePoll = window.setInterval(() => void loadTrades(true), 1000)
     const statusPoll = window.setInterval(() => void loadStatus(true), 3000)
+    const chartPoll = window.setInterval(() => void loadChartIntel(true), 5000)
     const clockPoll = window.setInterval(() => setClock(new Date()), 1000)
     return () => {
       window.clearInterval(tradePoll)
       window.clearInterval(statusPoll)
+      window.clearInterval(chartPoll)
       window.clearInterval(clockPoll)
     }
-  }, [loadAll, loadStatus, loadTrades])
+  }, [loadAll, loadStatus, loadTrades, loadChartIntel])
 
   useEffect(() => {
     let cancelled = false
@@ -454,6 +467,12 @@ export default function App() {
   const liveMoments = Array.isArray(liveLearning.latest) ? liveLearning.latest : []
   const intelligence = status.researchIntelligence || {}
   const neuralModel = status.neuralModel || worker.neural || {}
+  const datasetModel = status.datasetModel || {}
+  const patternInsights = Array.isArray(datasetModel.patternInsights) ? datasetModel.patternInsights : []
+  const newsHealth = intelligence.newsHealth || worker.newsHealth || {}
+  const latestNews = Array.isArray(intelligence.latestNews) ? intelligence.latestNews : []
+  const researchActivities = Array.isArray(intelligence.activities) ? intelligence.activities : []
+  const readingQueue = Array.isArray(intelligence.readingQueue) ? intelligence.readingQueue : []
   const neuralProduction = neuralModel.production || {}
   const neuralLatest = neuralModel.latest || {}
   const activeNeural = Object.keys(neuralProduction).length ? neuralProduction : neuralLatest
@@ -475,8 +494,8 @@ export default function App() {
   const freshnessState = String(sensexFreshness.state || 'UNKNOWN').toUpperCase()
   const feedStale = ['STALE', 'MISSING', 'INVALID_TIMESTAMP'].includes(freshnessState)
   const feedDelayed = freshnessState === 'DELAYED'
-  const huggingFace = status.huggingFace || worker.huggingFace || {}
-  const huggingFaceReview = worker.huggingFaceLastReview || {}
+  const marketResearchOnly = Boolean(phase?.researchPhase && !phase?.tradable && !phase?.liveScan)
+  const showFeedWarning = !marketResearchOnly && (feedStale || feedDelayed)
   const lastMoment = liveMoments[0] || {}
   const lastVerifiedTrend = String(
     latestSignal?.context?.trend ||
@@ -484,7 +503,6 @@ export default function App() {
     researchMarkets?.SENSEX?.frames?.['1m']?.trend ||
     'UNKNOWN'
   ).toUpperCase()
-  const verifiedTrend = feedStale ? 'STALE' : lastVerifiedTrend
   const targetAmount = Number(mt.targetAmount || 0)
   const monthPnl = Number(mt.monthPnl || 0)
   const targetProgress = targetAmount > 0 ? Math.max(0, Math.min(100, monthPnl / targetAmount * 100)) : 0
@@ -531,12 +549,12 @@ export default function App() {
         <b>Testing / Synthetic Paper Mode</b>
         <span>Yahoo supplies index data; option premium and execution are simulated. Live entries now require a fresh candle; stale Yahoo data is blocked from trading.</span>
       </div>
-      <span className={`badge ${feedStale ? 'freshness-bad' : feedDelayed ? 'freshness-warn' : ''}`}>
-        {feedStale ? 'STALE FEED • NO ENTRY' : feedDelayed ? 'DELAYED FEED • PAPER' : 'FRESHNESS GUARD ON • PAPER'}
+      <span className={`badge ${!marketResearchOnly && feedStale ? 'freshness-bad' : !marketResearchOnly && feedDelayed ? 'freshness-warn' : ''}`}>
+        {marketResearchOnly ? 'MARKET CLOSED • RESEARCH MODE' : feedStale ? 'STALE FEED • NO ENTRY' : feedDelayed ? 'DELAYED FEED • PAPER' : 'FRESHNESS GUARD ON • PAPER'}
       </span>
     </section>}
 
-    {(feedStale || feedDelayed) && <section className={`freshness-banner ${feedStale ? 'stale' : 'delayed'}`}>
+    {showFeedWarning && <section className={`freshness-banner ${feedStale ? 'stale' : 'delayed'}`}>
       <div className="freshness-icon">{feedStale ? '!' : '◷'}</div>
       <div>
         <b>{feedStale ? 'Market data too old for a new trade' : 'Market data is delayed but still inside the live-entry limit'}</b>
@@ -561,6 +579,32 @@ export default function App() {
       <Metric title="Risk / Trade" value={money(r.riskPerTrade)} sub={`${r.dynamicLimits ? 'Dynamic' : 'Fixed'} risk limit`} />
       <Metric title="Deployable Cap" value={money(Number(r.effectiveCapital || 0) * Number(r.capitalUsagePct || 0) / 100)} sub={`${r.capitalUsagePct || 0}% maximum usage`} />
       <Metric title="Max Drawdown" value={money(p.maxDrawdown)} sub={`Monthly cap ${money(r.maxMonthlyDrawdown)}`} tone={Number(p.maxDrawdown) > 0 ? 'negative' : 'neutral'} />
+    </section>
+
+    <section className="panel chart-intelligence-panel">
+      <div className="section-head intelligence-head">
+        <div>
+          <div className="eyebrow">APEX ANNOTATED MARKET MAP</div>
+          <h2>SENSEX 1m • What the Bot Actually Sees</h2>
+          <p>Candles, EMA 9/21, day/previous-day levels, support-resistance, Fibonacci and SMC/pattern events come from the same backend evidence pipeline used for paper decision support.</p>
+        </div>
+        <div className="phase-stack">
+          <span className={`phase-chip ${marketResearchOnly ? 'historical' : String(chartIntel?.freshness?.state || 'unknown').toLowerCase()}`}>{marketResearchOnly ? 'HISTORICAL / RESEARCH' : (chartIntel?.freshness?.state || 'WAITING')}</span>
+          <span className="phase-sub">{chartIntel?.generatedAt ? `updated ${formatDateTime(chartIntel.generatedAt)}` : 'loading chart intelligence'}</span>
+        </div>
+      </div>
+      <MarketIntelligenceChart data={chartIntel} />
+      <div className="chart-intel-stats">
+        <SystemItem label="1m trend" value={chartIntel?.trends?.['1m']?.trend || '—'} />
+        <SystemItem label="5m trend" value={chartIntel?.trends?.['5m']?.trend || '—'} />
+        <SystemItem label="15m trend" value={chartIntel?.trends?.['15m']?.trend || '—'} />
+        <SystemItem label="Swing structure" value={chartIntel?.currentCandle?.smc?.swingStructure || '—'} />
+        <SystemItem label="Day H / L" value={chartIntel?.sessionProfile?.dayHigh ? `${chartIntel.sessionProfile.dayHigh} / ${chartIntel.sessionProfile.dayLow}` : '—'} />
+        <SystemItem label="Prev day H / L" value={chartIntel?.sessionProfile?.previousDayHigh ? `${chartIntel.sessionProfile.previousDayHigh} / ${chartIntel.sessionProfile.previousDayLow}` : '—'} />
+        <SystemItem label="Gap" value={chartIntel?.sessionProfile?.gapPct != null ? `${Number(chartIntel.sessionProfile.gapPct) >= 0 ? '+' : ''}${Number(chartIntel.sessionProfile.gapPct).toFixed(2)}%` : '—'} />
+        <SystemItem label="Plan bias" value={chartIntel?.plan?.marketBias || nextPlan.marketBias || '—'} />
+      </div>
+      <p className="panel-note">Markers are analysis annotations, not automatic trade commands. If provider data is stale, the chart stays visible for audit but new entries remain blocked.</p>
     </section>
 
     <section className="panel intelligence-panel">
@@ -615,11 +659,17 @@ export default function App() {
         <div className="research-box">
           <div className="research-box-head"><b>Strategy Hypotheses</b><span>BACKTEST BEFORE TRUST</span></div>
           <div className="hypothesis-stack">
-            {hypotheses.slice(0,6).map((h:any) => <div className="hypothesis-node" key={h.name}>
-              <div><span className={`family ${String(h.family || '').toLowerCase()}`}>{h.family}</span><b>{h.name}</b></div>
-              <p>{h.description}</p>
-              <small>{h.status} • score {Number(h.score || 0).toFixed(2)}</small>
-            </div>)}
+            {hypotheses.slice(0,8).map((h:any) => {
+              const m = h.evidence?.metrics || {}
+              return <div className="hypothesis-node" key={h.name}>
+                <div><span className={`family ${String(h.family || '').toLowerCase()}`}>{h.family}</span><b>{h.name}</b></div>
+                <p>{h.description}</p>
+                <small>
+                  {h.status} • score {Number(h.score || 0).toFixed(2)}
+                  {m.trades != null ? ` • ${m.trades} tests • ${Number(m.winRate || 0).toFixed(1)}% WR • ${Number(m.expectancyR || 0).toFixed(2)}R exp` : ''}
+                </small>
+              </div>
+            })}
           </div>
         </div>
 
@@ -641,11 +691,79 @@ export default function App() {
       </div>
 
       <div className="session-rail">
-        <div><b>08:00</b><span>Premarket refresh</span></div>
+        <div><b>08:00</b><span>News • Gap scenarios • Day plan</span></div>
         <i />
-        <div className="active"><b>09:20–15:15</b><span>Scan • Paper trade • Live learning</span></div>
+        <div className="active"><b>09:20–15:15</b><span>Fresh candles • Scalp search • Live memory</span></div>
         <i />
-        <div><b>15:15+</b><span>Research • Sectors • Backtests • Tomorrow plan</span></div>
+        <div><b>15:15–17:00</b><span>Session review • Backtests</span></div>
+        <i />
+        <div><b>17:00–08:00</b><span>15h research window • Learning cycles</span></div>
+      </div>
+    </section>
+
+    <section className="panel research-ops-panel">
+      <div className="section-head intelligence-head">
+        <div>
+          <div className="eyebrow">NIGHT LEARNING CONSOLE</div>
+          <h2>What APEX Read • Tested • Learned</h2>
+          <p>Persistent activity survives backend restarts. This is evidence collected from public education, news, labeled candle outcomes, strategy backtests and neural evaluation—not a claim of guaranteed profitability.</p>
+        </div>
+        <div className="phase-stack">
+          <span className={`phase-chip ${worker.learningWindowActive ? 'night_research' : String(worker.researchPhase || '').toLowerCase()}`}>{worker.learningWindowActive ? 'LEARNING WINDOW' : (worker.researchPhase || 'IDLE')}</span>
+          <span className="phase-sub">{Number(worker.researchHoursToday || 0).toFixed(1)} / {worker.dailyHourBudget ?? 15}h coverage</span>
+        </div>
+      </div>
+
+      <div className="research-ops-grid">
+        <div className="research-console-card">
+          <div className="research-console-head"><b>News Monitor</b><span className={String(newsHealth.status || '').toUpperCase()==='OK'?'positive':'negative'}>{newsHealth.status || 'NOT RUN'}</span></div>
+          <div className="console-mini-grid">
+            <span><small>Fresh today</small><b>{intelligence.todayNewsCount ?? worker.todayNewsCount ?? 0}</b></span>
+            <span><small>Last fetch</small><b>{formatDateTime(newsHealth.lastFetchAt)}</b></span>
+            <span><small>Fetched last cycle</small><b>{newsHealth.fetchedCount ?? 0}</b></span>
+            <span><small>Queries OK</small><b>{newsHealth.successfulQueries ?? 0}/{newsHealth.queryCount ?? 0}</b></span>
+          </div>
+          <div className="news-stream">
+            {latestNews.length===0 ? <div className="empty-mini">No cached headlines yet. Next deep research cycle will retry RSS and keep the exact error state here.</div> :
+              latestNews.slice(0,6).map((n:any,i:number)=><a key={`${n.url}-${i}`} href={n.url} target="_blank" rel="noreferrer">
+                <b>{n.title}</b><small>{formatDateTime(n.lastCheckedAt)}</small>
+              </a>)}
+          </div>
+          {Array.isArray(newsHealth.errors) && newsHealth.errors.length>0 && <details className="console-detail"><summary>News fetch errors</summary><pre>{JSON.stringify(newsHealth.errors,null,2)}</pre></details>}
+        </div>
+
+        <div className="research-console-card">
+          <div className="research-console-head"><b>Learning Activity</b><span>{intelligence.todayActivityCount ?? 0} TODAY</span></div>
+          <div className="activity-stream">
+            {researchActivities.length===0 ? <div className="empty-mini">No persisted learning activity yet.</div> :
+              researchActivities.slice(0,10).map((a:any,i:number)=><div className="activity-row" key={`${a.createdAt}-${i}`}>
+                <i/><div><b>{a.title}</b><small>{a.stage || a.kind} • {formatDateTime(a.createdAt)}</small></div>
+              </div>)}
+          </div>
+        </div>
+
+        <div className="research-console-card">
+          <div className="research-console-head"><b>Learned Pattern Stats</b><span>{datasetModel.datasetSize ?? 0} LABELS</span></div>
+          <div className="pattern-insight-stack">
+            {patternInsights.length===0 ? <div className="empty-mini">Pattern stats appear after labeled SMC V2 samples accumulate.</div> :
+              patternInsights.slice(0,10).map((x:any)=><div className="pattern-insight-row" key={x.pattern}>
+                <span>{String(x.pattern).replace(/_/g,' ')}</span>
+                <b>{Number(x.winRate||0).toFixed(1)}%</b>
+                <small>{x.samples} samples • {x.confidence}</small>
+              </div>)}
+          </div>
+          <p className="console-foot">Win rate here means target-first in the labeled historical setup, not guaranteed live performance.</p>
+        </div>
+
+        <div className="research-console-card">
+          <div className="research-console-head"><b>Public Reading Queue</b><span>{readingQueue.length} SOURCES</span></div>
+          <div className="reading-stack">
+            {readingQueue.slice(0,8).map((x:any,i:number)=><a href={x.url} target="_blank" rel="noreferrer" key={`${x.url}-${i}`}>
+              <span>{x.category}</span><b>{x.title}</b>
+            </a>)}
+          </div>
+          <p className="console-foot">APEX reads bounded public educational pages; it does not copy paid/copyrighted books.</p>
+        </div>
       </div>
     </section>
 
@@ -655,7 +773,7 @@ export default function App() {
         <div>
           <div className="eyebrow">MARKET RESEARCH</div>
           <h2>1m / 5m / 15m Structure Snapshot</h2>
-          <p>Multi-timeframe market intelligence: trend, support/resistance, BOS/CHOCH, liquidity sweep, FVG, fake breakout, pin bar, hammer, engulfing, harami, inside bar, doji and star patterns.</p>
+          <p>Multi-timeframe market intelligence: trend, HH/HL/LH/LL, support/resistance, BOS/CHOCH, liquidity sweep, FVG, fake breakout, pin bars, engulfing, harami, marubozu, tweezers, stars, soldiers/crows, inside/outside bars and doji/spinning-top context.</p>
         </div>
         <span className="badge subtle">{marketResearch.status || 'waiting'}</span>
       </div>
@@ -667,11 +785,13 @@ export default function App() {
           const f15 = m.frames?.['15m'] || {}
           return <div className="system-item" key={name}>
             <small>{name}</small>
-            <b>{feedStale ? 'STALE / UNVERIFIED' : (m.state || 'WAITING')}</b>
+            <b>{marketResearchOnly ? 'HISTORICAL SNAPSHOT' : feedStale ? 'STALE / UNVERIFIED' : (m.state || 'WAITING')}</b>
             <span style={{display:'block',marginTop:6,fontSize:10,color:feedStale?'#ef8d8d':'#71849a'}}>
-              {feedStale
-                ? `Last verified 1m trend: ${lastVerifiedTrend} • live trend unavailable`
-                : `1m ${f1.trend || '—'} • 5m ${f5.trend || '—'} • 15m ${f15.trend || '—'}`}
+              {marketResearchOnly
+                ? `Last session: 1m ${f1.trend || '—'} • 5m ${f5.trend || '—'} • 15m ${f15.trend || '—'}`
+                : feedStale
+                  ? `Last verified 1m trend: ${lastVerifiedTrend} • live trend unavailable`
+                  : `1m ${f1.trend || '—'} • 5m ${f5.trend || '—'} • 15m ${f15.trend || '—'}`}
             </span>
             <span style={{display:'block',marginTop:4,fontSize:10,color:'#71849a'}}>
               S {f5.structure?.levels?.support ?? '—'} • R {f5.structure?.levels?.resistance ?? '—'}
@@ -680,29 +800,31 @@ export default function App() {
         })}
       </div>
       {marketResearch.llm?.summary && <p className="panel-note"><b>LLM summary:</b> {marketResearch.llm.summary}</p>}
-      <p className="panel-note">News/LLM/Hugging Face research stays optional and does not place orders or override hard risk controls. Hugging Face is a shadow reviewer only.</p>
+      <p className="panel-note">News and LLM research are advisory only. Trade entries, position sizing and hard risk locks remain deterministic and fresh-data gated.</p>
     </section>
 
     <section className="panel learning-panel">
       <div className="section-head compact">
-        <div><div className="eyebrow">APEX LEARNING ENGINE</div><h2>Sources → Patterns → Hypotheses → Backtest → Candidate</h2><p>During market hours it learns from structure/outcomes. After 15:15 it crawls bounded public research/news, studies sectors and builds the next-session plan.</p></div>
+        <div><div className="eyebrow">APEX LEARNING ENGINE</div><h2>Observe → Label → Research → Backtest → Train → Validate</h2><p>Live session stores fresh candle/SMC moments. Postmarket reviews the day, then 17:00–08:00 runs the 15-hour research window. At 08:00 APEX refreshes news, previous-day levels, gap scenarios and the session plan.</p></div>
         <span className={`badge subtle ${worker.running ? 'worker-live' : ''}`}>{worker.running ? 'LEARNING NOW' : (worker.stage || 'WAITING')}</span>
       </div>
       <div className="learning-grid">
         <SystemItem label="Worker" value={worker.enabled ? 'Enabled' : 'Disabled'} good={worker.enabled} />
         <SystemItem label="Stage" value={worker.stage || 'idle'} />
         <SystemItem label="Cycles today" value={worker.cyclesToday ?? 0} />
-        <SystemItem label="Runtime today" value={`${worker.researchHoursToday ?? 0}h / ${worker.dailyHourBudget ?? 15}h`} />
+        <SystemItem label="Research coverage" value={`${worker.researchHoursToday ?? 0}h / ${worker.dailyHourBudget ?? 15}h`} />
+        <SystemItem label="Learning window" value={worker.learningWindow || '17:00-08:00'} good={Boolean(worker.learningWindowActive)} />
         <SystemItem label="Sources reviewed" value={worker.sourcesReviewed ?? 0} />
+        <SystemItem label="News reviewed" value={worker.newsReviewed ?? intelligence.todayNewsCount ?? 0} />
         <SystemItem label="Knowledge memory" value={worker.knowledgeCount ?? intelligence.knowledgeCount ?? 0} />
         <SystemItem label="Research phase" value={worker.researchPhase || 'IDLE'} />
-        <SystemItem label="Hugging Face" value={huggingFace.configured ? 'Shadow Ready' : 'Token needed'} good={Boolean(huggingFace.configured)} />
-        <SystemItem label="HF last review" value={huggingFaceReview.status ? String(huggingFaceReview.status).toUpperCase() : 'Not run'} good={huggingFaceReview.status === 'ok'} />
         <SystemItem label="Sectors tracked" value={worker.sectorsTracked ?? sectors.length} />
         <SystemItem label="Patterns found" value={worker.patternsDetected ?? 0} />
         <SystemItem label="Hypotheses" value={worker.hypothesesTested ?? 0} />
         <SystemItem label="Backtests" value={worker.backtestsRun ?? 0} />
+        <SystemItem label="Strategy-lab setups" value={worker.strategyLabTests ?? 0} />
         <SystemItem label="Dataset" value={worker.datasetSize ?? 0} />
+        <SystemItem label="New labels last cycle" value={worker.datasetInsertedLastCycle ?? 0} />
         <SystemItem label="Labeled progress" value={trainingReadiness.minimumSamples ? `${trainingReadiness.eligibleSamples ?? 0} / ${trainingReadiness.minimumSamples}` : String(trainingReadiness.eligibleSamples ?? 0)} good={Boolean(trainingReadiness.sampleThresholdReady)} />
         <SystemItem label="Training state" value={trainingReadiness.status || 'COLLECTING_LABELS'} good={Boolean(trainingReadiness.productionModelReady)} />
         <SystemItem label="Candidate" value={worker.candidateVersion || 'not ready'} />
@@ -710,16 +832,6 @@ export default function App() {
         <SystemItem label="LLM provider" value={ollama.configured ? (ollama.provider || 'Connected') : 'Not configured'} good={ollama.configured} />
         <SystemItem label="LLM model" value={ollama.model || '—'} />
       </div>
-
-      <ReactiveHuggingFace
-        configured={Boolean(huggingFace.configured)}
-        review={huggingFaceReview}
-        worker={worker}
-        verifiedTrend={verifiedTrend}
-        lastVerifiedTrend={lastVerifiedTrend}
-        freshness={sensexFreshness}
-        feedStale={feedStale}
-      />
 
       <div className="auto-learning-core">
         <div className="learning-core-card neural-core-card">
@@ -778,12 +890,12 @@ export default function App() {
         <div><div className="eyebrow">LIVE MARKET LEARNING</div><h2>SENSEX 1m Moment Memory</h2><p>09:20–15:15 only. Valid-price SMC/price-action moments are stored before outcomes are known; after cutoff the worker switches to deep research instead of creating after-hours noise.</p></div>
         <span className="badge subtle">{liveLearning.totalObservations ?? 0} OBSERVATIONS</span>
       </div>
-      {feedStale && <div className="live-feed-freeze">
+      {feedStale && !marketResearchOnly && <div className="live-feed-freeze">
         <b>Live moment memory paused — feed is stale</b>
         <span>Last verified trend: <strong>{lastVerifiedTrend}</strong> • latest verified candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'} • no new market moment is stored until a fresh candle arrives.</span>
       </div>}
       <div className="learning-grid">
-        <SystemItem label="Mode" value={feedStale ? 'STALE_FEED_PAUSED' : (liveLearning.mode || 'waiting')} good={Boolean(liveLearning.enabled && !feedStale)} />
+        <SystemItem label="Mode" value={marketResearchOnly ? 'MARKET_CLOSED_RESEARCH' : feedStale ? 'STALE_FEED_PAUSED' : (liveLearning.mode || 'waiting')} good={Boolean(liveLearning.enabled && !feedStale)} />
         <SystemItem label="Moments stored" value={liveLearning.totalObservations ?? 0} />
         <SystemItem label="Pending outcomes" value={liveLearning.pendingOutcomes ?? 0} />
         <SystemItem label="LLM live review" value={ollama.configured ? `Active • ${ollama.provider || 'LLM'}` : 'Not configured'} good={ollama.configured} />
@@ -1055,66 +1167,105 @@ export default function App() {
   </main>
 }
 
-function ReactiveHuggingFace({
-  configured, review, worker, verifiedTrend, lastVerifiedTrend, freshness, feedStale,
-}:{
-  configured:boolean,
-  review:any,
-  worker:any,
-  verifiedTrend:string,
-  lastVerifiedTrend:string,
-  freshness:any,
-  feedStale:boolean,
-}) {
-  const reviewState = String(review?.marketState || '').toUpperCase()
-  const riskState = String(review?.riskState || '').toUpperCase()
-  const researchPhase = String(worker?.researchPhase || '').toUpperCase()
-  let emoji = '🤗'
-  let mood = 'READY'
-  let title = 'Shadow reviewer ready'
-  let detail = 'Waiting for verified market evidence or the next deep-research review.'
+function MarketIntelligenceChart({data}:{data:any}) {
+  const all = Array.isArray(data?.candles) ? data.candles : []
+  if (all.length < 2) return <div className="chart-empty">Waiting for SENSEX candle intelligence…</div>
 
-  if (!configured) {
-    emoji = '🔒'; mood = 'TOKEN NEEDED'; title = 'Hugging Face not connected'
-    detail = 'HF_TOKEN is required before the shadow reviewer can run.'
-  } else if (feedStale) {
-    emoji = '😴'; mood = 'STALE FEED'; title = 'Waiting for fresh SENSEX candles'
-    detail = `APEX will not fake a live trend. Last verified trend was ${lastVerifiedTrend}; candle age is ${freshness?.ageSeconds != null ? Math.round(Number(freshness.ageSeconds)) + 's' : 'unknown'}.`
-  } else if (worker?.running && researchPhase !== 'LIVE_SESSION') {
-    emoji = '🧐'; mood = 'RESEARCHING'; title = 'Reviewing post/premarket evidence'
-    detail = 'Hugging Face is running as a second research reviewer; hard risk and order logic remain deterministic.'
-  } else if (review?.status === 'error') {
-    emoji = '😵'; mood = 'REVIEW ERROR'; title = 'Shadow review failed safely'
-    detail = String(review?.warnings?.[0] || 'The deterministic engine continues without Hugging Face.')
-  } else if (reviewState === 'BEARISH' || verifiedTrend === 'DOWN') {
-    emoji = riskState === 'HIGH' ? '😬' : '😟'; mood = 'BEARISH'; title = 'Verified bearish pressure'
-    detail = 'Reaction follows verified market structure / latest shadow review. It does not create a PE entry by itself.'
-  } else if (reviewState === 'BULLISH' || verifiedTrend === 'UP') {
-    emoji = '🤗'; mood = 'BULLISH'; title = 'Verified bullish pressure'
-    detail = 'Reaction follows verified market structure / latest shadow review. It does not create a CE entry by itself.'
-  } else if (verifiedTrend === 'FLAT' || reviewState === 'NEUTRAL' || reviewState === 'MIXED') {
-    emoji = '🤔'; mood = 'NEUTRAL'; title = 'Range / mixed evidence'
-    detail = 'Waiting for cleaner structure before showing directional confidence.'
-  }
+  const maxBars = 90
+  const offset = Math.max(0, all.length - maxBars)
+  const rows = all.slice(offset)
+  const width = 1000
+  const height = 430
+  const pad = {left:58,right:94,top:25,bottom:42}
+  const plotW = width - pad.left - pad.right
+  const plotH = height - pad.top - pad.bottom
+  const levelValues = [
+    data?.levels?.support,data?.levels?.resistance,data?.levels?.dayHigh,data?.levels?.dayLow,
+    data?.levels?.previousDayHigh,data?.levels?.previousDayLow,
+    data?.fibonacci?.fib382,data?.fibonacci?.fib500,data?.fibonacci?.fib618,
+  ].map(Number).filter(Number.isFinite)
+  const lows = rows.map((x:any)=>Number(x.low))
+  const highs = rows.map((x:any)=>Number(x.high))
+  let minP = Math.min(...lows,...levelValues)
+  let maxP = Math.max(...highs,...levelValues)
+  const extra = Math.max(8,(maxP-minP)*0.06)
+  minP -= extra; maxP += extra
+  const range = Math.max(1,maxP-minP)
+  const x = (i:number)=>pad.left + (i/(Math.max(1,rows.length-1)))*plotW
+  const y = (p:number)=>pad.top + (maxP-p)/range*plotH
+  const candleW = Math.max(2,Math.min(7,plotW/rows.length*0.58))
+  const points = (key:string)=>rows.map((r:any,i:number)=>`${x(i).toFixed(1)},${y(Number(r[key])).toFixed(1)}`).join(' ')
+  const levelDefs = [
+    {key:'dayHigh',label:'DAY HIGH',value:data?.levels?.dayHigh,kind:'day-high'},
+    {key:'dayLow',label:'DAY LOW',value:data?.levels?.dayLow,kind:'day-low'},
+    {key:'previousDayHigh',label:'PDH',value:data?.levels?.previousDayHigh,kind:'prev'},
+    {key:'previousDayLow',label:'PDL',value:data?.levels?.previousDayLow,kind:'prev'},
+    {key:'support',label:'SUPPORT',value:data?.levels?.support,kind:'support'},
+    {key:'resistance',label:'RESIST',value:data?.levels?.resistance,kind:'resistance'},
+    {key:'fib382',label:'FIB 38.2',value:data?.fibonacci?.fib382,kind:'fib'},
+    {key:'fib500',label:'FIB 50',value:data?.fibonacci?.fib500,kind:'fib'},
+    {key:'fib618',label:'FIB 61.8',value:data?.fibonacci?.fib618,kind:'fib'},
+  ].filter((l:any)=>Number.isFinite(Number(l.value)))
+  const events = (Array.isArray(data?.events)?data.events:[])
+    .filter((e:any)=>Number(e.index)>=offset && Number(e.index)<all.length)
+    .map((e:any)=>({...e,index:Number(e.index)-offset}))
+  const ticks = Array.from({length:6},(_,i)=>maxP-(range*i/5))
 
-  return <div className={`hf-reactive-card ${mood.toLowerCase().replace(/ /g,'-')}`}>
-    <div className="hf-face-wrap" aria-label={`Hugging Face reaction: ${mood}`}>
-      <div className="hf-face">{emoji}</div>
-      <span className="hf-pulse-ring" />
-    </div>
-    <div className="hf-reactive-copy">
-      <div className="hf-reactive-head">
-        <div><small>HUGGING FACE • SHADOW AI</small><h3>{title}</h3></div>
-        <b>{mood}</b>
-      </div>
-      <p>{detail}</p>
-      <div className="hf-reactive-meta">
-        <span>HF API <b>{configured ? 'CONNECTED' : 'OFF'}</b></span>
-        <span>Verified trend <b>{verifiedTrend}</b></span>
-        <span>HF review <b>{review?.status ? String(review.status).toUpperCase() : 'NOT RUN'}</b></span>
-        <span>Risk <b>{riskState || '—'}</b></span>
-      </div>
-      <small className="hf-reactive-note">Face reacts to verified data only. When Yahoo is stale it switches to waiting instead of pretending the current market is bullish/bearish.</small>
+  return <div className="market-intel-chart-wrap">
+    <svg className="market-intel-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="SENSEX candlestick chart with APEX SMC and pattern annotations">
+      <rect x={pad.left} y={pad.top} width={plotW} height={plotH} className="chart-bg"/>
+      {ticks.map((p,i)=><g key={i}>
+        <line x1={pad.left} x2={width-pad.right} y1={y(p)} y2={y(p)} className="chart-grid-line"/>
+        <text x={pad.left-8} y={y(p)+4} textAnchor="end" className="chart-axis-label">{p.toFixed(0)}</text>
+      </g>)}
+
+      {levelDefs.map((l:any)=><g key={l.key} className={`chart-level ${l.kind}`}>
+        <line x1={pad.left} x2={width-pad.right} y1={y(Number(l.value))} y2={y(Number(l.value))}/>
+        <text x={width-pad.right+6} y={y(Number(l.value))+4}>{l.label} {Number(l.value).toFixed(0)}</text>
+      </g>)}
+
+      <polyline points={points('ema21')} className="ema-line ema21"/>
+      <polyline points={points('ema9')} className="ema-line ema9"/>
+
+      {rows.map((r:any,i:number)=>{
+        const o=Number(r.open), h=Number(r.high), l=Number(r.low), close=Number(r.close)
+        const bull=close>=o
+        const top=y(Math.max(o,close))
+        const bottom=y(Math.min(o,close))
+        const bodyH=Math.max(1.5,bottom-top)
+        return <g key={`${r.time}-${i}`} className={`candle ${bull?'bull':'bear'}`}>
+          <line x1={x(i)} x2={x(i)} y1={y(h)} y2={y(l)} className="wick"/>
+          <rect x={x(i)-candleW/2} y={top} width={candleW} height={bodyH} rx="0.8"/>
+        </g>
+      })}
+
+      {events.map((e:any,i:number)=>{
+        const cx=x(e.index)
+        const cy=y(Number(e.price))
+        const above=String(e.direction).toUpperCase()==='BEAR'
+        const labelY=above?cy-15:cy+24
+        return <g key={`${e.time}-${e.kind}-${i}`} className={`chart-event ${String(e.direction).toLowerCase()} ${String(e.kind).toLowerCase()}`}>
+          <circle cx={cx} cy={cy} r="3.4"/>
+          <line x1={cx} x2={cx} y1={cy} y2={above?labelY+4:labelY-10}/>
+          <text x={cx} y={labelY} textAnchor="middle">{String(e.label).replace(/_/g,' ').slice(0,20)}</text>
+        </g>
+      })}
+
+      {rows.filter((_:any,i:number)=>i%15===0 || i===rows.length-1).map((r:any,i:number)=>{
+        const index=rows.indexOf(r)
+        const d=new Date(r.time)
+        const label=Number.isNaN(d.getTime())?'':d.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'})
+        return <text key={`t-${index}`} x={x(index)} y={height-15} textAnchor="middle" className="chart-time-label">{label}</text>
+      })}
+    </svg>
+    <div className="chart-legend">
+      <span><i className="legend-chip ema9-chip"/>EMA 9</span>
+      <span><i className="legend-chip ema21-chip"/>EMA 21</span>
+      <span><i className="legend-chip smc-chip"/>SMC / Pattern marker</span>
+      <span><b>{data?.currentCandle?.smc?.bos || 'NONE'}</b> BOS</span>
+      <span><b>{data?.currentCandle?.smc?.choch || 'NONE'}</b> CHOCH</span>
+      <span><b>{data?.currentCandle?.smc?.liquiditySweep || 'NONE'}</b> SWEEP</span>
+      <span><b>{data?.currentCandle?.smc?.fairValueGap || 'NONE'}</b> FVG</span>
     </div>
   </div>
 }

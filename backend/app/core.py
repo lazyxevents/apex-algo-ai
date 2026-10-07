@@ -121,16 +121,15 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "openrouter/free"
     openrouter_timeout_seconds: float = 15.0
-    huggingface_enabled: bool = True
-    hf_token: str = ""
-    huggingface_model: str = "openai/gpt-oss-20b:fastest"
-    huggingface_timeout_seconds: float = 15.0
     news_query_limit: int = 6
     news_results_per_query: int = 5
 
     learning_worker_enabled: bool = True
     learning_worker_interval_minutes: int = 60
     learning_worker_daily_hours: int = 15
+    learning_worker_window_start_time: str = "17:00"
+    learning_worker_window_end_time: str = "08:00"
+    premarket_plan_time: str = "08:00"
     learning_worker_max_sources: int = 120
     research_web_enabled: bool = True
     research_max_articles_per_cycle: int = 16
@@ -219,7 +218,7 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from .models import AuditLog, DailyMarketPlan, LearningRewardEvent, LearningSample, LiveMarketObservation, ModelEvaluation, NeuralModelArtifact, PushSubscription, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
+    from .models import AuditLog, DailyMarketPlan, LearningRewardEvent, LearningSample, LiveMarketObservation, ModelEvaluation, NeuralModelArtifact, PushSubscription, ResearchActivity, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 

@@ -180,12 +180,70 @@ class DatasetModelService:
             db.commit()
         return {"version":version,**result}
 
+    @staticmethod
+    def _pattern_insights(rows: list[LearningSample]) -> list[dict]:
+        buckets: dict[str, dict[str, int]] = {}
+        for row in rows:
+            try:
+                f = json.loads(row.features_json or "{}")
+            except Exception:
+                continue
+            names: list[str] = []
+            names.extend(str(x) for x in (f.get("bullPatterns") or []))
+            names.extend(str(x) for x in (f.get("bearPatterns") or []))
+            mapping = {
+                "bos": "BOS",
+                "choch": "CHOCH",
+                "liquiditySweep": "LIQUIDITY_SWEEP",
+                "fairValueGap": "FVG",
+                "fakeBreakout": "FAKE_BREAKOUT",
+            }
+            for key, label in mapping.items():
+                value = str(f.get(key) or "NONE")
+                if value != "NONE":
+                    names.append(f"{label}_{value}")
+            for name in set(names):
+                bucket = buckets.setdefault(name, {"samples": 0, "wins": 0})
+                bucket["samples"] += 1
+                bucket["wins"] += int(row.label == 1)
+        insights = []
+        for name, stat in buckets.items():
+            samples = stat["samples"]
+            if samples < 3:
+                continue
+            rate = stat["wins"] / max(1, samples)
+            insights.append({
+                "pattern": name,
+                "samples": samples,
+                "targetFirst": stat["wins"],
+                "winRate": round(rate * 100, 2),
+                "confidence": "HIGH" if samples >= 50 else "MEDIUM" if samples >= 15 else "LOW",
+            })
+        return sorted(insights, key=lambda x: (x["samples"], abs(x["winRate"] - 50)), reverse=True)[:24]
+
     def snapshot(self) -> dict:
         with SessionLocal() as db:
             total=int(db.scalar(select(func.count(LearningSample.id))) or 0)
             wins=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.label==1)) or 0)
             latest=db.execute(select(ModelEvaluation).order_by(ModelEvaluation.id.desc()).limit(1)).scalar_one_or_none()
-        return {"datasetSize":total,"positiveLabels":wins,"labelRate":round(wins/total,4) if total else 0.0,
-                "latestCandidate": None if not latest else {"version":latest.version,"status":latest.status,"samples":latest.samples,"metrics":json.loads(latest.metrics_json or "{}")}}
+            recent_rows=list(db.execute(
+                select(LearningSample).order_by(LearningSample.id.desc()).limit(5000)
+            ).scalars().all())
+            scalp=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.strategy=="SMC_SCALP_V2")) or 0)
+            swing=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.strategy=="SMC_SWING_V2")) or 0)
+        return {
+            "datasetSize":total,
+            "positiveLabels":wins,
+            "negativeLabels":max(0,total-wins),
+            "labelRate":round(wins/total,4) if total else 0.0,
+            "strategySamples":{"SMC_SCALP_V2":scalp,"SMC_SWING_V2":swing},
+            "patternInsights":self._pattern_insights(recent_rows),
+            "latestCandidate": None if not latest else {
+                "version":latest.version,
+                "status":latest.status,
+                "samples":latest.samples,
+                "metrics":json.loads(latest.metrics_json or "{}"),
+            },
+        }
 
 dataset_model_service=DatasetModelService()
