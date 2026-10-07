@@ -402,6 +402,14 @@ class NeuralModelService:
 
         minimum = max(200, int(settings.neural_min_labeled_samples))
         progress_pct = round(min(100.0, eligible / max(1, minimum) * 100.0), 1)
+        remaining_samples = max(0, minimum - eligible)
+        jar_state = (
+            "PRODUCTION_READY"
+            if production is not None
+            else "READY_TO_TRAIN"
+            if eligible >= minimum and positive >= 25 and negative >= 25
+            else "COLLECTING_LABELS"
+        )
 
         def view(row: NeuralModelArtifact | None):
             if row is None:
@@ -432,6 +440,16 @@ class NeuralModelService:
                 "eligibleSamples": eligible,
                 "minimumSamples": minimum,
                 "sampleProgressPct": progress_pct,
+                "jarLevelPct": 100.0 if production is not None else progress_pct,
+                "jarState": jar_state,
+                "remainingSamples": remaining_samples,
+                "milestoneLabel": (
+                    "Promoted neural model active"
+                    if production is not None
+                    else "Enough labels collected; next off-market cycle can train"
+                    if jar_state == "READY_TO_TRAIN"
+                    else f"{remaining_samples} more clean labeled setups to first training milestone"
+                ),
                 "positiveSamples": positive,
                 "negativeSamples": negative,
                 "classBalanceReady": positive >= 25 and negative >= 25,
@@ -441,13 +459,7 @@ class NeuralModelService:
                     "minimumAuc": settings.neural_promotion_min_auc,
                     "maximumBrier": settings.neural_promotion_max_brier,
                 },
-                "status": (
-                    "PRODUCTION_READY"
-                    if production is not None
-                    else "READY_TO_TRAIN"
-                    if eligible >= minimum and positive >= 25 and negative >= 25
-                    else "COLLECTING_LABELS"
-                ),
+                "status": jar_state,
             },
             "production": view(production),
             "latest": view(latest),
