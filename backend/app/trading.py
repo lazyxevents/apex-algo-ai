@@ -41,6 +41,7 @@ class RuntimeState:
     market_research: dict | None = None
     last_decision: dict | None = None
     market_freshness: dict | None = None
+    last_manual_do_trade: dict | None = None
     last_error: str | None = None
 
 
@@ -783,6 +784,308 @@ class TradingEngine:
         option["priceSource"] = "exchange_option_chain"
         option["quoteTime"] = datetime.now(IST).isoformat()
         return option, lot_size, expiry
+
+    def manual_do_trade_status(self) -> dict:
+        now = datetime.now(IST)
+        hm = now.strftime("%H:%M")
+        weekday = now.weekday() < 5
+        within_time = weekday and settings.trade_start_time <= hm < settings.manual_do_trade_cutoff_time
+        return {
+            "enabled": bool(settings.manual_do_trade_enabled),
+            "paperOnly": True,
+            "availableNow": bool(
+                settings.manual_do_trade_enabled
+                and within_time
+                and self.state.mode == "PAPER"
+                and not self.state.killed
+            ),
+            "timeEligible": within_time,
+            "cutoffTime": settings.manual_do_trade_cutoff_time,
+            "targetPoints": settings.manual_do_trade_target_points,
+            "stopPoints": settings.manual_do_trade_stop_points,
+            "capitalUsagePct": settings.manual_do_trade_capital_usage_pct,
+            "minMtfScore": settings.manual_do_trade_min_mtf_score,
+            "carryForward": bool(settings.manual_do_trade_carry_forward),
+            "requiresFreshData": True,
+            "last": self.state.last_manual_do_trade or {},
+            "warning": "Aggressive PAPER mode: maximum affordable quantity is capped by remaining hard loss-lock headroom.",
+        }
+
+    def do_trade_now(self, provider) -> dict:
+        now = datetime.now(IST)
+        hm = now.strftime("%H:%M")
+        if not settings.manual_do_trade_enabled:
+            raise ValueError("Do Trade mode is disabled")
+        if now.weekday() >= 5:
+            raise ValueError("Do Trade is available only on market weekdays")
+        if not (settings.trade_start_time <= hm < settings.manual_do_trade_cutoff_time):
+            raise ValueError(
+                f"Do Trade works only {settings.trade_start_time}-{settings.manual_do_trade_cutoff_time} IST"
+            )
+        if not provider.market_ready:
+            raise ValueError("Market data provider is not ready")
+
+        underlying_key = settings.underlying_keys.get("SENSEX")
+        if not underlying_key:
+            raise ValueError("SENSEX is not enabled")
+        candles = provider.intraday_candles(underlying_key)
+        freshness = self._candle_freshness(candles)
+        self.state.market_freshness = {"SENSEX": freshness}
+        if not freshness.get("fresh"):
+            age = freshness.get("ageMinutes")
+            age_text = f"{float(age):.1f}m" if isinstance(age, (int, float)) else "unknown"
+            raise ValueError(
+                f"Do Trade blocked: SENSEX data is stale ({age_text}); fresh candle required"
+            )
+
+        analysis = evaluate_mtf_continuation(candles)
+        candidate = str(analysis.get("candidateAction") or analysis.get("action") or "NO_TRADE")
+        score = float(analysis.get("score") or 0.0)
+        frames = analysis.get("frames") or {}
+        structure = analysis.get("structure") or {}
+        smc = analysis.get("smc") or {}
+        if candidate not in {"CE", "PE"}:
+            raise ValueError("Do Trade found no directional momentum candidate")
+
+        if candidate == "CE":
+            htf_aligned = any((frames.get(tf) or {}).get("trend") == "UP" for tf in ("5m", "15m"))
+            structure_ok = bool(
+                structure.get("higherHigh")
+                or structure.get("previousHighBreak")
+                or smc.get("bos") == "BULL"
+                or smc.get("choch") == "BULL"
+                or smc.get("liquiditySweep") == "BULL"
+            )
+        else:
+            htf_aligned = any((frames.get(tf) or {}).get("trend") == "DOWN" for tf in ("5m", "15m"))
+            structure_ok = bool(
+                structure.get("lowerLow")
+                or structure.get("previousLowBreak")
+                or smc.get("bos") == "BEAR"
+                or smc.get("choch") == "BEAR"
+                or smc.get("liquiditySweep") == "BEAR"
+            )
+
+        if score < settings.manual_do_trade_min_mtf_score or not htf_aligned or not structure_ok:
+            raise ValueError(
+                f"Do Trade refused weak setup: {candidate} score {score:.2f}; needs fresh MTF + SMC/structure confirmation"
+            )
+
+        with SessionLocal() as db:
+            self._authorize(db)
+            capital = self._effective_capital(db)
+            limits = self._limits(db)
+            day_pnl = self._period_pnl(db, "day")
+            week_pnl = self._period_pnl(db, "week")
+            month_pnl = self._period_pnl(db, "month")
+
+        deployable = capital * max(0.0, min(100.0, settings.manual_do_trade_capital_usage_pct)) / 100.0
+        best = {
+            "index": "SENSEX",
+            "underlyingKey": underlying_key,
+            "action": candidate,
+            "underlyingPrice": float(analysis["underlyingPrice"]),
+        }
+        synthetic_demo = not bool(getattr(provider, "supports_option_chain", True))
+        expiry = None
+        if synthetic_demo:
+            option = provider.synthetic_option_candidate(
+                "SENSEX",
+                underlying_key,
+                candidate,
+                best["underlyingPrice"],
+            )
+            lot_size = int(option.get("lotSize") or settings.sensex_lot_size)
+            expiry = option.get("expiry")
+        else:
+            option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
+            if not option:
+                raise ValueError("Do Trade found no liquid/affordable option contract")
+            if lot_size <= 0:
+                raise ValueError("Selected option has invalid lot size")
+
+        entry = float(option["ltp"])
+        stop_distance = max(0.05, float(settings.manual_do_trade_stop_points))
+        target_distance = max(stop_distance + 0.05, float(settings.manual_do_trade_target_points))
+        stop = round(max(0.05, entry - stop_distance), 2)
+        target = round(entry + target_distance, 2)
+
+        lots_by_cash = floor(deployable / max(entry * lot_size, 0.01))
+        hard_headroom = min(
+            max(0.0, float(limits["daily"]) + float(day_pnl)),
+            max(0.0, float(limits["weekly"]) + float(week_pnl)),
+            max(0.0, float(limits["monthly"]) + float(month_pnl)),
+        )
+        lots_by_loss_lock = floor(hard_headroom / max(stop_distance * lot_size, 0.01))
+        lots = max(0, min(lots_by_cash, lots_by_loss_lock))
+        qty = lots * lot_size
+        if qty <= 0:
+            raise ValueError(
+                "Do Trade blocked: one whole lot does not fit available capital and remaining hard loss-lock headroom"
+            )
+
+        deployed = round(entry * qty, 2)
+        initial_risk = round(stop_distance * qty, 2)
+        chart_symbol = "BSE:SENSEX"
+        chart_url = f"https://www.tradingview.com/chart/?symbol={quote(chart_symbol, safe='')}"
+        llm_review = ollama_advisor.analyze_trade({
+            "phase": "MANUAL_DO_TRADE_SHADOW_REVIEW",
+            "index": "SENSEX",
+            "direction": candidate,
+            "signalScore": score,
+            "strategy": "APEX_MANUAL_MTF_MOMENTUM",
+            "frames": frames,
+            "smc": smc,
+            "evidence": analysis.get("evidence") or [],
+            "fibonacci": analysis.get("fibonacci") or {},
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "quantity": qty,
+            "paperOnly": True,
+            "instruction": "Advisory review only. Do not override deterministic freshness, structure or loss-lock gates.",
+        })
+
+        meta = {
+            "strategy": "APEX_MANUAL_MTF_MOMENTUM",
+            "displayName": option.get("displayName") or option["instrumentKey"],
+            "contractName": option.get("displayName") or option["instrumentKey"],
+            "priceSource": option.get("priceSource") or ("synthetic_estimate" if synthetic_demo else "exchange_option_chain"),
+            "quoteTime": option.get("quoteTime") or now.isoformat(),
+            "entryTime": now.isoformat(),
+            "tradeStyle": "MANUAL_MOMENTUM_SCALP",
+            "manualDoTrade": True,
+            "carryForward": bool(settings.manual_do_trade_carry_forward),
+            "carryForwardSource": "dashboard_do_trade_button",
+            "stopModel": f"fixed {stop_distance:.0f}-point option-premium risk",
+            "targetModel": f"fixed {target_distance:.0f}-point option-premium scalp target",
+            "firstTarget": target,
+            "runnerTarget": target,
+            "partialBookPct": 0.0,
+            "chartSymbol": chart_symbol,
+            "chartUrl": chart_url,
+            "ollamaReview": llm_review,
+            "signalScore": round(score, 4),
+            "rawSignalScore": round(score, 4),
+            "entryReason": "MANUAL_DO_TRADE_MTF_SMC",
+            "entryThreshold": settings.manual_do_trade_min_mtf_score,
+            "smcOverride": True,
+            "smc": smc,
+            "mtfContinuation": analysis,
+            "index": "SENSEX",
+            "underlyingKey": underlying_key,
+            "contextKey": f"MANUAL|{(frames.get('5m') or {}).get('trend','UNKNOWN')}|{(frames.get('15m') or {}).get('trend','UNKNOWN')}",
+            "context": {
+                "trend1m": (frames.get("1m") or {}).get("trend"),
+                "trend5m": (frames.get("5m") or {}).get("trend"),
+                "trend15m": (frames.get("15m") or {}).get("trend"),
+                "fibonacci": analysis.get("fibonacci") or {},
+                "freshness": freshness,
+            },
+            "patterns": analysis.get("patterns") or {},
+            "direction": candidate,
+            "expiry": expiry,
+            "strike": option["strike"],
+            "selectionScore": option.get("selectionScore"),
+            "spreadPct": option.get("spreadPct"),
+            "delta": option.get("delta"),
+            "initialRisk": initial_risk,
+            "hardLossHeadroomAtEntry": round(hard_headroom, 2),
+            "capitalAtEntry": round(capital, 2),
+            "requestedCapitalUsagePct": settings.manual_do_trade_capital_usage_pct,
+            "deployedCapital": deployed,
+            "actualCapitalUsagePct": round(deployed / max(capital, 0.01) * 100, 2),
+            "syntheticDemo": synthetic_demo,
+        }
+        if synthetic_demo:
+            meta.update({
+                "underlyingEntry": float(option["underlyingEntry"]),
+                "syntheticEntryPremium": entry,
+                "syntheticModel": "entryPremium + directional underlying move × fixed delta",
+                "syntheticWarning": "Paper demo only; Yahoo does not provide the real SENSEX option chain here.",
+            })
+
+        sandbox = provider.place_sandbox_order(
+            option["instrumentKey"],
+            qty,
+            "BUY",
+            "apex-manual-do-trade",
+        )
+        meta["sandboxEntryOrderId"] = sandbox.get("orderId")
+
+        with SessionLocal() as db:
+            # Re-authorize immediately before commit to avoid opening after a concurrent lock/position change.
+            self._authorize(db)
+            trade = Trade(
+                symbol=option["instrumentKey"],
+                direction=candidate,
+                entry=entry,
+                stop=stop,
+                target=target,
+                quantity=qty,
+                lot_size=lot_size,
+                current_price=entry,
+                pnl=0,
+                status="OPEN",
+                reason=json.dumps(meta, default=str),
+            )
+            db.add(trade)
+            db.commit()
+            db.refresh(trade)
+            trade_data = self._trade_dict(trade)
+
+        candle_time = freshness.get("candleTime")
+        try:
+            parsed_candle = datetime.fromisoformat(str(candle_time).replace("Z", "+00:00")) if candle_time else None
+        except ValueError:
+            parsed_candle = None
+        try:
+            observation = live_learning_service.observe({
+                "index": "SENSEX",
+                "underlyingPrice": best["underlyingPrice"],
+                "action": candidate,
+                "score": score,
+                "chosenStrategy": "APEX_MANUAL_MTF_MOMENTUM",
+                "context": meta["context"],
+                "smc": smc,
+                "patterns": meta["patterns"],
+                "smcOverride": True,
+                "entryReason": "MANUAL_DO_TRADE_MTF_SMC",
+                "entryThreshold": settings.manual_do_trade_min_mtf_score,
+            }, candle_time=parsed_candle)
+            if observation.get("id"):
+                live_learning_service.attach_trade(int(observation["id"]), int(trade.id))
+        except Exception as exc:
+            self._audit("learning.manual_do_trade_observation_error", {"tradeId": trade.id, "error": str(exc)})
+
+        result = {
+            "status": "EXECUTED",
+            "trade": trade_data,
+            "analysis": analysis,
+            "freshness": freshness,
+            "sandbox": sandbox,
+            "danger": {
+                "requestedCapitalUsagePct": settings.manual_do_trade_capital_usage_pct,
+                "actualCapitalUsagePct": meta["actualCapitalUsagePct"],
+                "deployedCapital": deployed,
+                "initialRisk": initial_risk,
+                "stopPoints": stop_distance,
+                "targetPoints": target_distance,
+                "carryForward": meta["carryForward"],
+            },
+        }
+        self.state.last_manual_do_trade = {
+            "at": now.isoformat(),
+            "status": "EXECUTED",
+            "tradeId": trade.id,
+            "direction": candidate,
+            "score": round(score, 4),
+            "deployedCapital": deployed,
+            "initialRisk": initial_risk,
+        }
+        self._audit("trade.manual_do_trade_opened", result)
+        push_notification_service.notify_trade_opened_async(trade_data)
+        return result
 
     def automation_cycle(self, provider) -> dict:
         self.state.last_cycle_at = datetime.now(timezone.utc).isoformat()
