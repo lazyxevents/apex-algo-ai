@@ -430,6 +430,7 @@ export default function App() {
             <div><small>REAL NEURAL MODEL</small><h3>{activeNeural.version || 'Waiting for labeled data'}</h3></div>
             <span className={`model-role ${String(activeNeural.role || activeNeural.status || 'waiting').toLowerCase()}`}>{activeNeural.role || activeNeural.status || 'WAITING'}</span>
           </div>
+          <LearningJar readiness={trainingReadiness} model={activeNeural} />
           <div className="core-stat-grid">
             <span><small>Architecture</small><b>{activeNeural.architecture || '14 → 24 → 1 MLP'}</b></span>
             <span><small>Labeled samples</small><b>{trainingReadiness.eligibleSamples ?? activeNeural.trainedSamples ?? worker.neuralTrainedSamples ?? 0}</b></span>
@@ -703,6 +704,50 @@ export default function App() {
       <span>NO TRADE is valid • Monthly target is a lock, not a guaranteed return • Real broker orders disabled</span>
     </footer>
   </main>
+}
+
+function LearningJar({readiness, model}:{readiness:any, model:any}) {
+  const raw = Number(readiness?.jarLevelPct ?? readiness?.sampleProgressPct ?? 0)
+  const level = Math.max(0, Math.min(100, Number.isFinite(raw) ? raw : 0))
+  const state = String(readiness?.jarState || readiness?.status || 'COLLECTING_LABELS')
+  const productionReady = Boolean(readiness?.productionModelReady || model?.role === 'PRODUCTION')
+  const eligible = Number(readiness?.eligibleSamples || 0)
+  const minimum = Number(readiness?.minimumSamples || 0)
+  const remaining = Number(readiness?.remainingSamples ?? Math.max(0, minimum - eligible))
+  const milestone = readiness?.milestoneLabel || (productionReady
+    ? 'Promoted neural model active'
+    : `${remaining} more clean labeled setups to first training milestone`)
+
+  return <div className="learning-jar-wrap">
+    <div className={`learning-jar ${productionReady ? 'ready' : ''}`} aria-label={`APEX learning jar ${level.toFixed(0)} percent`}>
+      <div className="jar-cap"><i/><i/><i/></div>
+      <div className="jar-neck"/>
+      <div className="jar-vessel">
+        <div className="jar-liquid" style={{height:`${Math.max(4, level)}%`}}>
+          <span className="jar-wave wave-a"/>
+          <span className="jar-wave wave-b"/>
+          <i className="bubble b1"/><i className="bubble b2"/><i className="bubble b3"/><i className="bubble b4"/>
+        </div>
+        <div className="jar-glass-shine"/>
+        <div className="jar-level-label">
+          <strong>{level.toFixed(0)}%</strong>
+          <span>{productionReady ? 'MODEL READY' : 'TRAINING DATA'}</span>
+        </div>
+      </div>
+      <div className="jar-base"/>
+    </div>
+    <div className="jar-copy">
+      <div className="jar-copy-top"><span>APEX LEARNING JAR</span><b>{state.replaceAll('_',' ')}</b></div>
+      <h4>{eligible.toLocaleString('en-IN')} / {minimum ? minimum.toLocaleString('en-IN') : '—'} clean labels</h4>
+      <p>{milestone}</p>
+      <div className="jar-mini-stats">
+        <span><b>{readiness?.positiveSamples ?? 0}</b> target-first</span>
+        <span><b>{readiness?.negativeSamples ?? 0}</b> stop-first</span>
+        <span><b>{readiness?.classBalanceReady ? 'YES' : 'NO'}</b> class balance</span>
+      </div>
+      <small>This jar measures first-training readiness from clean labeled SMC V2 outcomes; it is not a promise of model accuracy or profit.</small>
+    </div>
+  </div>
 }
 
 function KnowledgeGraph({research, worker, marketResearch, neuralModel, learning}:{research:any, worker:any, marketResearch:any, neuralModel:any, learning:any}) {
