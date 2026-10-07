@@ -133,6 +133,11 @@ class Settings(BaseSettings):
     neural_promotion_max_brier: float = 0.25
     neural_inference_weight: float = 0.15
 
+    push_notifications_enabled: bool = True
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:officialtarun070@gmail.com"
+
     upstox_access_token: str = ""
     upstox_sandbox_token: str = ""
     upstox_sandbox_product: str = "I"
@@ -200,7 +205,7 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from .models import AuditLog, DailyMarketPlan, LearningRewardEvent, LearningSample, LiveMarketObservation, ModelEvaluation, NeuralModelArtifact, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
+    from .models import AuditLog, DailyMarketPlan, LearningRewardEvent, LearningSample, LiveMarketObservation, ModelEvaluation, NeuralModelArtifact, PushSubscription, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
