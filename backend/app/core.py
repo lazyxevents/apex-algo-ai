@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     yfinance_sensex_symbol: str = "^BSESN"
     yfinance_intraday_period: str = "5d"
     yfinance_max_delay_minutes: int = 30
+    live_trade_candle_max_age_seconds: int = 180
     yfinance_synthetic_premium_pct: float = 0.50
     yfinance_synthetic_delta: float = 0.45
     yfinance_synthetic_lot_size: int = 1
@@ -111,6 +112,10 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_model: str = "openrouter/free"
     openrouter_timeout_seconds: float = 15.0
+    huggingface_enabled: bool = True
+    hf_token: str = ""
+    huggingface_model: str = "openai/gpt-oss-20b:fastest"
+    huggingface_timeout_seconds: float = 15.0
     news_query_limit: int = 6
     news_results_per_query: int = 5
 
