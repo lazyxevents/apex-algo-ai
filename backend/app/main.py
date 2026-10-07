@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .core import db_health, init_db, settings
 from .dataset_model import dataset_model_service
+from .huggingface_advisor import huggingface_advisor
 from .kite import kite_service
 from .learning_worker import learning_worker
 from .live_learning import live_learning_service
@@ -264,6 +265,22 @@ def neural_learning_train():
 @app.get("/api/research/intelligence")
 def research_intelligence():
     return research_engine.snapshot()
+
+
+@app.get("/api/research/huggingface")
+def huggingface_status():
+    return huggingface_advisor.snapshot()
+
+
+@app.post("/api/research/huggingface-review")
+def huggingface_review():
+    if not huggingface_advisor.configured:
+        raise HTTPException(status_code=503, detail="Hugging Face shadow reviewer needs HF_TOKEN")
+    analytics = trading_engine.state.market_research or {}
+    return huggingface_advisor.review(
+        (analytics.get("analytics") or analytics) if isinstance(analytics, dict) else {},
+        research_engine.snapshot(),
+    )
 
 
 @app.post("/api/research/run-once")

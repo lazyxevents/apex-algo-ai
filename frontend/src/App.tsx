@@ -429,6 +429,14 @@ export default function App() {
   const providerReady = market.marketDataConfigured !== false
   const killed = Boolean(status.killSwitch || r.killSwitch)
   const phase = automation.lastDecision?.phase || {}
+  const freshnessMap = automation.marketDataFreshness || {}
+  const latestSignal = Array.isArray(automation.lastDecision?.signals) ? automation.lastDecision.signals[0] : null
+  const sensexFreshness = freshnessMap.SENSEX || latestSignal?.dataFreshness || {}
+  const freshnessState = String(sensexFreshness.state || 'UNKNOWN').toUpperCase()
+  const feedStale = ['STALE', 'MISSING', 'INVALID_TIMESTAMP'].includes(freshnessState)
+  const feedDelayed = freshnessState === 'DELAYED'
+  const huggingFace = status.huggingFace || worker.huggingFace || {}
+  const huggingFaceReview = worker.huggingFaceLastReview || {}
   const targetAmount = Number(mt.targetAmount || 0)
   const monthPnl = Number(mt.monthPnl || 0)
   const targetProgress = targetAmount > 0 ? Math.max(0, Math.min(100, monthPnl / targetAmount * 100)) : 0
@@ -463,9 +471,25 @@ export default function App() {
     {market.syntheticPaper && <section className="demo-banner">
       <div>
         <b>Testing / Synthetic Paper Mode</b>
-        <span>Yahoo supplies index data; option premium and execution are simulated. This is for forward testing, not proof of real broker fills.</span>
+        <span>Yahoo supplies index data; option premium and execution are simulated. Live entries now require a fresh candle; stale Yahoo data is blocked from trading.</span>
       </div>
-      <span className="badge">LIVE MARKET ON • PAPER ORDERS</span>
+      <span className={`badge ${feedStale ? 'freshness-bad' : feedDelayed ? 'freshness-warn' : ''}`}>
+        {feedStale ? 'STALE FEED • NO ENTRY' : feedDelayed ? 'DELAYED FEED • PAPER' : 'FRESHNESS GUARD ON • PAPER'}
+      </span>
+    </section>}
+
+    {(feedStale || feedDelayed) && <section className={`freshness-banner ${feedStale ? 'stale' : 'delayed'}`}>
+      <div className="freshness-icon">{feedStale ? '!' : '◷'}</div>
+      <div>
+        <b>{feedStale ? 'Market data too old for a new trade' : 'Market data is delayed but still inside the live-entry limit'}</b>
+        <span>
+          SENSEX candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'}
+          {' • '}age {sensexFreshness.ageSeconds != null ? `${Math.max(0, Number(sensexFreshness.ageSeconds)).toFixed(0)}s` : '—'}
+          {' • '}max {sensexFreshness.maxAgeSeconds ?? '—'}s.
+          {feedStale ? ' APEX will not score or execute this candle.' : ''}
+        </span>
+      </div>
+      <strong>{freshnessState}</strong>
     </section>}
 
     <section className="summary-grid">
@@ -596,7 +620,7 @@ export default function App() {
         })}
       </div>
       {marketResearch.llm?.summary && <p className="panel-note"><b>LLM summary:</b> {marketResearch.llm.summary}</p>}
-      <p className="panel-note">News/LLM research stays optional and does not place orders or override hard risk controls.</p>
+      <p className="panel-note">News/LLM/Hugging Face research stays optional and does not place orders or override hard risk controls. Hugging Face is a shadow reviewer only.</p>
     </section>
 
     <section className="panel learning-panel">
@@ -612,6 +636,8 @@ export default function App() {
         <SystemItem label="Sources reviewed" value={worker.sourcesReviewed ?? 0} />
         <SystemItem label="Knowledge memory" value={worker.knowledgeCount ?? intelligence.knowledgeCount ?? 0} />
         <SystemItem label="Research phase" value={worker.researchPhase || 'IDLE'} />
+        <SystemItem label="Hugging Face" value={huggingFace.configured ? 'Shadow Ready' : 'Token needed'} good={Boolean(huggingFace.configured)} />
+        <SystemItem label="HF last review" value={huggingFaceReview.status ? String(huggingFaceReview.status).toUpperCase() : 'Not run'} good={huggingFaceReview.status === 'ok'} />
         <SystemItem label="Sectors tracked" value={worker.sectorsTracked ?? sectors.length} />
         <SystemItem label="Patterns found" value={worker.patternsDetected ?? 0} />
         <SystemItem label="Hypotheses" value={worker.hypothesesTested ?? 0} />
@@ -765,7 +791,7 @@ export default function App() {
           </tr>)}</tbody>
         </table>
       </div>}
-      <p className="panel-note">Note: dashboard checks every 1s, but Yahoo/yfinance itself can be delayed and may not publish a new market price every second.</p>
+      <p className="panel-note">Dashboard checks every 1s, but provider freshness is independent. APEX now hard-blocks new entries when the latest decision candle exceeds <b>{automation.entryPolicy?.maxLiveCandleAgeSeconds ?? 180}s</b>; stale Yahoo candles remain visible for audit/research only.</p>
     </section>
 
     <section className="two-col">
@@ -774,7 +800,8 @@ export default function App() {
         <div className="system-strip">
           <SystemItem label="Strategy loop" value={automation.running ? 'Running' : 'Stopped'} good={automation.running} />
           <SystemItem label="Position monitor" value={positionMonitor.running ? 'Running' : 'Stopped'} good={positionMonitor.running} />
-          <SystemItem label="Market data" value={providerReady ? 'Ready' : 'Not ready'} good={providerReady} />
+          <SystemItem label="Market data" value={feedStale ? 'STALE — blocked' : feedDelayed ? 'Delayed' : providerReady ? 'Ready' : 'Not ready'} good={providerReady && !feedStale} />
+          <SystemItem label="Candle age" value={sensexFreshness.ageSeconds != null ? `${Math.max(0, Number(sensexFreshness.ageSeconds)).toFixed(0)}s / ${sensexFreshness.maxAgeSeconds ?? '—'}s` : 'Waiting'} good={Boolean(sensexFreshness.fresh)} />
           <SystemItem label="Provider" value={market.provider || 'unknown'} />
           <SystemItem label="Paper broker" value={market.paperBroker || 'internal'} />
           <SystemItem label="Phase" value={phase.reason || 'Waiting'} />

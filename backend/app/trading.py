@@ -11,6 +11,7 @@ from urllib.parse import quote
 from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
+from .huggingface_advisor import huggingface_advisor
 from .llm_research import ollama_research
 from .llm_advisor import ollama_advisor
 from .learning_worker import learning_worker
@@ -39,6 +40,7 @@ class RuntimeState:
     last_postmarket_learning_date: str | None = None
     market_research: dict | None = None
     last_decision: dict | None = None
+    market_freshness: dict | None = None
     last_error: str | None = None
 
 
@@ -597,15 +599,65 @@ class TradingEngine:
         self._audit("research.premarket", result)
         return result
 
+    @staticmethod
+    def _candle_freshness(candles: list[dict]) -> dict:
+        checked_at = datetime.now(IST)
+        max_age = max(60, int(settings.live_trade_candle_max_age_seconds))
+        if not candles:
+            return {
+                "fresh": False,
+                "state": "MISSING",
+                "ageSeconds": None,
+                "ageMinutes": None,
+                "candleTime": None,
+                "checkedAt": checked_at.isoformat(),
+                "maxAgeSeconds": max_age,
+            }
+        raw = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date")
+        try:
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=IST)
+            ts = ts.astimezone(IST)
+        except (TypeError, ValueError):
+            return {
+                "fresh": False,
+                "state": "INVALID_TIMESTAMP",
+                "ageSeconds": None,
+                "ageMinutes": None,
+                "candleTime": str(raw) if raw else None,
+                "checkedAt": checked_at.isoformat(),
+                "maxAgeSeconds": max_age,
+            }
+        age_seconds = (checked_at - ts).total_seconds()
+        fresh = -120 <= age_seconds <= max_age
+        interval_seconds = max(60, int(settings.candle_interval_minutes) * 60)
+        state = "LIVE" if fresh and age_seconds <= interval_seconds * 2 else "DELAYED" if fresh else "STALE"
+        return {
+            "fresh": fresh,
+            "state": state,
+            "ageSeconds": round(age_seconds, 1),
+            "ageMinutes": round(age_seconds / 60.0, 2),
+            "candleTime": ts.isoformat(),
+            "checkedAt": checked_at.isoformat(),
+            "maxAgeSeconds": max_age,
+        }
+
     def _scan_one(self, provider, name: str, key: str, capital: float) -> dict:
         candles = provider.intraday_candles(key)
-        if not provider.candles_fresh(candles):
+        freshness = self._candle_freshness(candles)
+        if not freshness["fresh"]:
+            age = freshness.get("ageMinutes")
+            age_text = f"{age:.1f}m old" if isinstance(age, (int, float)) else "missing"
             return {
                 "action": "NO_TRADE",
                 "score": 0.0,
-                "reason": "stale/missing market data",
+                "reason": f"STALE_DATA: latest {name} candle is {age_text}; max live-entry age is {freshness['maxAgeSeconds']}s",
                 "index": name,
                 "underlyingKey": key,
+                "candleTime": freshness.get("candleTime"),
+                "dataFreshness": freshness,
+                "entryReason": "STALE_DATA",
             }
         context = market_context(candles)
         arm = adaptive_learner.choose_arm(context, capital)
@@ -622,6 +674,7 @@ class TradingEngine:
             signal["neuralBlendWeight"] = weight
         latest_candle_time = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date") if candles else None
         signal["candleTime"] = latest_candle_time
+        signal["dataFreshness"] = freshness
         return signal
 
     def _scan_and_observe(self, provider, capital: float) -> tuple[list[dict], list[dict]]:
@@ -645,6 +698,10 @@ class TradingEngine:
                         "index": futures[future],
                     })
         ranked.sort(key=lambda x: x.get("score", 0), reverse=True)
+        self.state.market_freshness = {
+            str(row.get("index") or "UNKNOWN"): row.get("dataFreshness") or {}
+            for row in ranked
+        }
         observations: list[dict] = []
         for signal in ranked:
             try:
@@ -779,7 +836,7 @@ class TradingEngine:
                 decision["signals"] = ranked
             best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
             if best.get("action") not in {"CE", "PE"}:
-                decision["reason"] = "no strategy setup passed score + candlestick confirmation"
+                decision["reason"] = best.get("reason") or "no strategy setup passed score + candlestick confirmation"
                 self.state.last_decision = decision
                 return decision
 
@@ -1002,7 +1059,10 @@ class TradingEngine:
                     "standardMinScore": settings.signal_min_score,
                     "smcOverrideMinScore": settings.smc_override_min_score,
                     "smcOverrideRule": "CHOCH or liquidity sweep, or BOS with directional candle confirmation",
+                    "maxLiveCandleAgeSeconds": settings.live_trade_candle_max_age_seconds,
+                    "staleDataPolicy": "NO_TRADE; stale candles never reach score/SMC execution gates",
                 },
+                "marketDataFreshness": self.state.market_freshness or {},
             },
             "marketResearch": self.state.market_research or {},
             "broker": broker,
@@ -1014,6 +1074,7 @@ class TradingEngine:
             "liveLearning": live_learning_service.snapshot(),
             "researchIntelligence": research_engine.snapshot(),
             "neuralModel": neural_model_service.snapshot(),
+            "huggingFace": huggingface_advisor.snapshot(),
             "ollama": {
                 "enabled": ollama_advisor.configured,
                 "configured": ollama_advisor.configured,
