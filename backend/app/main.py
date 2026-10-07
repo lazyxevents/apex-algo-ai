@@ -304,6 +304,14 @@ def automation_run_once():
     return trading_engine.automation_cycle(market_service)
 
 
+@app.post("/api/paper/do-trade")
+def manual_do_trade():
+    try:
+        return trading_engine.do_trade_now(market_service)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/trades")
 def list_trades(limit: int = 100):
     return trading_engine.list_trades(limit=min(max(limit, 1), 500))
