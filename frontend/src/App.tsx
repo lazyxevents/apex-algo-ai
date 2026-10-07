@@ -737,7 +737,7 @@ function LearningJar({readiness, model}:{readiness:any, model:any}) {
       <div className="jar-base"/>
     </div>
     <div className="jar-copy">
-      <div className="jar-copy-top"><span>APEX LEARNING JAR</span><b>{state.replaceAll('_',' ')}</b></div>
+      <div className="jar-copy-top"><span>APEX LEARNING JAR</span><b>{state.replace(/_/g,' ')}</b></div>
       <h4>{eligible.toLocaleString('en-IN')} / {minimum ? minimum.toLocaleString('en-IN') : '—'} clean labels</h4>
       <p>{milestone}</p>
       <div className="jar-mini-stats">
