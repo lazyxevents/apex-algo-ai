@@ -8,7 +8,6 @@ from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconn
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .chart_intelligence import chart_intelligence_service
 from .core import db_health, init_db, settings
 from .dataset_model import dataset_model_service
 from .kite import kite_service
@@ -265,15 +264,6 @@ def neural_learning_train():
 @app.get("/api/research/intelligence")
 def research_intelligence():
     return research_engine.snapshot()
-
-
-@app.get("/api/market/chart-intelligence")
-def market_chart_intelligence(force: bool = False):
-    try:
-        return chart_intelligence_service.snapshot(market_service, force=force)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 
 @app.post("/api/research/run-once")
