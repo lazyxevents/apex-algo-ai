@@ -181,15 +181,19 @@ def evaluate_signal(candles: list[dict], arm: StrategyArm) -> dict:
         "CHOCH": smc.get("choch") == "BEAR",
         "LIQUIDITY_SWEEP": smc.get("liquiditySweep") == "BEAR",
     }
+    bull_momentum = fast > slow and rsi >= max(50.0, arm.rsi_bull - 4.0)
+    bear_momentum = fast < slow and rsi <= min(50.0, arm.rsi_bear + 4.0)
+    bull_breakout = close > ref_high
+    bear_breakdown = close < ref_low
     strong_bull_smc = (
         bull_smc["CHOCH"]
         or bull_smc["LIQUIDITY_SWEEP"]
-        or (bull_smc["BOS"] and patterns["bullishScore"] > 0)
+        or (bull_smc["BOS"] and (patterns["bullishScore"] > 0 or bull_momentum))
     )
     strong_bear_smc = (
         bear_smc["CHOCH"]
         or bear_smc["LIQUIDITY_SWEEP"]
-        or (bear_smc["BOS"] and patterns["bearishScore"] > 0)
+        or (bear_smc["BOS"] and (patterns["bearishScore"] > 0 or bear_momentum))
     )
 
     bull = 0.0
@@ -212,28 +216,59 @@ def evaluate_signal(candles: list[dict], arm: StrategyArm) -> dict:
     entry_reason = "NO_TRADE"
     entry_threshold = arm.min_score
     smc_override = False
+    blocked_by: list[str] = []
+    direction_candidate = "CE" if bull > bear else "PE" if bear > bull else "NO_TRADE"
 
     if score >= arm.min_score:
-        if bull > bear:
-            if not settings.candle_confirmation_required or patterns["bullishScore"] > 0:
+        if direction_candidate == "CE":
+            standard_confirmed = (
+                not settings.candle_confirmation_required
+                or patterns["bullishScore"] > 0
+                or bull_breakout
+                or strong_bull_smc
+            )
+            if standard_confirmed:
                 action, score = "CE", bull
                 entry_reason = "STANDARD_SIGNAL"
-        elif bear > bull:
-            if not settings.candle_confirmation_required or patterns["bearishScore"] > 0:
+            else:
+                blocked_by.append("CONFIRMATION_MISSING")
+        elif direction_candidate == "PE":
+            standard_confirmed = (
+                not settings.candle_confirmation_required
+                or patterns["bearishScore"] > 0
+                or bear_breakdown
+                or strong_bear_smc
+            )
+            if standard_confirmed:
                 action, score = "PE", bear
                 entry_reason = "STANDARD_SIGNAL"
+            else:
+                blocked_by.append("CONFIRMATION_MISSING")
+        else:
+            blocked_by.append("DIRECTION_CONFLICT")
+    else:
+        blocked_by.append("SCORE_BELOW_STANDARD_THRESHOLD")
 
     if action == "NO_TRADE" and score >= settings.smc_override_min_score:
-        if bull > bear and strong_bull_smc:
+        if direction_candidate == "CE" and strong_bull_smc:
             action, score = "CE", bull
             entry_reason = "SMC_OVERRIDE"
             entry_threshold = settings.smc_override_min_score
             smc_override = True
-        elif bear > bull and strong_bear_smc:
+            blocked_by = []
+        elif direction_candidate == "PE" and strong_bear_smc:
             action, score = "PE", bear
             entry_reason = "SMC_OVERRIDE"
             entry_threshold = settings.smc_override_min_score
             smc_override = True
+            blocked_by = []
+        elif "SMC_GATE_MISSING" not in blocked_by:
+            blocked_by.append("SMC_GATE_MISSING")
+
+    if action == "NO_TRADE" and direction_candidate == "NO_TRADE" and "DIRECTION_CONFLICT" not in blocked_by:
+        blocked_by.append("DIRECTION_CONFLICT")
+
+    reason = entry_reason if action in {"CE", "PE"} else " | ".join(blocked_by) or "NO_TRADE"
 
     return {
         "action": action,
@@ -256,6 +291,19 @@ def evaluate_signal(candles: list[dict], arm: StrategyArm) -> dict:
         "smcOverride": smc_override,
         "entryReason": entry_reason,
         "entryThreshold": round(entry_threshold, 4),
+        "directionCandidate": direction_candidate,
+        "blockedBy": blocked_by,
+        "reason": reason,
+        "confirmations": {
+            "bullishPattern": patterns["bullishScore"] > 0,
+            "bearishPattern": patterns["bearishScore"] > 0,
+            "bullBreakout": bull_breakout,
+            "bearBreakdown": bear_breakdown,
+            "bullMomentum": bull_momentum,
+            "bearMomentum": bear_momentum,
+            "strongBullSmc": strong_bull_smc,
+            "strongBearSmc": strong_bear_smc,
+        },
         "context": market_context(candles),
     }
 
