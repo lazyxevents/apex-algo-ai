@@ -736,7 +736,7 @@ export default function App() {
           <h2>1m / 5m / 15m Structure Snapshot</h2>
           <p>Multi-timeframe market intelligence: trend, HH/HL/LH/LL, support/resistance, BOS/CHOCH, liquidity sweep, FVG, fake breakout, pin bars, engulfing, harami, marubozu, tweezers, stars, soldiers/crows, inside/outside bars and doji/spinning-top context.</p>
         </div>
-        <span className="badge subtle">{marketResearch.status || 'waiting'}</span>
+        <span className="badge subtle">{!marketResearchOnly && feedStale ? 'STALE SNAPSHOT' : (marketResearch.status || 'waiting')}</span>
       </div>
       <div className="system-strip">
         {['SENSEX'].map(name => {
@@ -755,12 +755,16 @@ export default function App() {
                   : `1m ${f1.trend || '—'} • 5m ${f5.trend || '—'} • 15m ${f15.trend || '—'}`}
             </span>
             <span style={{display:'block',marginTop:4,fontSize:10,color:'#71849a'}}>
-              S {f5.structure?.levels?.support ?? '—'} • R {f5.structure?.levels?.resistance ?? '—'}
+              {feedStale && !marketResearchOnly ? 'Last verified ' : ''}S {f5.structure?.levels?.support ?? '—'} • R {f5.structure?.levels?.resistance ?? '—'}
             </span>
           </div>
         })}
       </div>
-      {marketResearch.llm?.summary && <p className="panel-note"><b>LLM summary:</b> {marketResearch.llm.summary}</p>}
+      {marketResearch.llm?.summary && (
+        !marketResearchOnly && feedStale
+          ? <p className="panel-note stale-llm-note"><b>LLM live summary suppressed:</b> backend feed is stale, so the current bullish/bearish state is unverified. Last verified 1m trend: <b>{lastVerifiedTrend}</b>. The stored LLM narrative is historical only and will refresh after fresh candles arrive.</p>
+          : <p className="panel-note"><b>{marketResearchOnly ? 'Historical LLM summary:' : 'LLM summary:'}</b> {marketResearch.llm.summary}</p>
+      )}
       <p className="panel-note">News and LLM research are advisory only. Trade entries, position sizing and hard risk locks remain deterministic and fresh-data gated.</p>
     </section>
 
