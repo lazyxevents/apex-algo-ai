@@ -1410,6 +1410,19 @@ class TradingEngine:
                 "enabled": settings.auto_trading_enabled,
                 "running": self.state.automation_running,
                 "lastCycleAt": self.state.last_cycle_at,
+                "scanLoop": {
+                    "running": self.state.automation_running,
+                    "intervalSeconds": max(15, settings.auto_scan_interval_seconds),
+                    "lastAttemptAt": self.state.last_cycle_at,
+                    "state": (
+                        "RETRYING_STALE_FEED"
+                        if self.state.automation_running and any(
+                            str((row or {}).get("state") or "").upper() in {"STALE", "MISSING", "INVALID_TIMESTAMP"}
+                            for row in (self.state.market_freshness or {}).values()
+                        )
+                        else "RUNNING" if self.state.automation_running else "STOPPED"
+                    ),
+                },
                 "positionMonitor": {
                     "running": self.state.position_monitor_running,
                     "intervalSeconds": settings.position_monitor_interval_seconds,
