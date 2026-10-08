@@ -320,6 +320,8 @@ class TradingEngine:
                 "effectiveCapital": round(capital, 2),
                 "minimumCapital": settings.min_trading_capital,
                 "capitalUsagePct": settings.capital_usage_pct,
+                "paperTradeRiskPctOfDeployed": settings.paper_trade_risk_pct_of_deployed,
+                "paperStopBufferPoints": settings.paper_stop_buffer_points,
                 "autoCompoundProfits": settings.auto_compound_profits,
                 "maxDeployableCapital": settings.max_deployable_capital,
                 "dynamicLimits": settings.dynamic_risk_limits,
@@ -1312,21 +1314,42 @@ class TradingEngine:
             previous_low = float(best.get("previousLow") or best["underlyingPrice"])
             previous_high = float(best.get("previousHigh") or best["underlyingPrice"])
             spot = float(best["underlyingPrice"])
+            buffer_points = max(0.0, settings.paper_stop_buffer_points)
             if best["action"] == "CE":
-                structure_distance = max(0.0, spot - previous_low) * delta
+                structure_distance = max(0.0, spot - previous_low + buffer_points) * delta
             else:
-                structure_distance = max(0.0, previous_high - spot) * delta
+                structure_distance = max(0.0, previous_high - spot + buffer_points) * delta
             fallback_stop = max(entry * settings.option_stop_pct / 100, 0.05)
-            stop_distance = structure_distance if structure_distance > 0.05 else fallback_stop
-            stop_distance = min(stop_distance, settings.scalp_max_stop_points) if is_scalp else stop_distance
-            stop = round(max(0.05, entry - stop_distance), 2)
+            desired_distance = structure_distance if structure_distance > 0.05 else fallback_stop
+            premium_risk_cap = entry * max(0.0, settings.paper_trade_risk_pct_of_deployed) / 100
+            stop_distance = min(desired_distance, premium_risk_cap)
             if is_scalp:
-                target = round(entry + settings.scalp_target_points, 2)
+                stop_distance = min(stop_distance, settings.scalp_max_stop_points)
+            stop = round(max(0.05, entry - stop_distance), 2)
+            stop_distance = round(entry - stop, 2)
+            minimum_target = stop_distance * max(1.0, settings.reward_risk_ratio)
+            if is_scalp:
+                target = round(entry + max(settings.scalp_target_points, minimum_target), 2)
             else:
-                target = round(entry + settings.swing_runner_target_points, 2)
+                target = round(entry + max(settings.swing_runner_target_points, minimum_target), 2)
             with SessionLocal() as db:
-                qty = self._quantity_for_risk(entry, stop, lot_size, db)
-                risk_limit = self._limits(db)["perTrade"]
+                limits = self._limits(db)
+                day_pnl = self._period_pnl(db, "day")
+                week_pnl = self._period_pnl(db, "week")
+                month_pnl = self._period_pnl(db, "month")
+                hard_headroom = min(
+                    max(0.0, limits["daily"] + day_pnl),
+                    max(0.0, limits["weekly"] + week_pnl),
+                    max(0.0, limits["monthly"] + month_pnl),
+                )
+                per_trade_budget = min(
+                    hard_headroom,
+                    max(0.0, capital * settings.paper_trade_risk_pct_of_deployed / 100),
+                )
+                lots_cash = floor(deployable / max(entry * lot_size, 0.01))
+                lots_risk = floor(per_trade_budget / max(stop_distance * lot_size, 0.01))
+                qty = max(0, min(lots_cash, lots_risk)) * lot_size
+                risk_limit = per_trade_budget
             if qty <= 0:
                 one_lot_risk = round(max(0.0, entry - stop) * lot_size, 2)
                 one_lot_cost = round(entry * lot_size, 2)
@@ -1393,6 +1416,10 @@ class TradingEngine:
                 "previousCandleLow": previous_low,
                 "previousCandleHigh": previous_high,
                 "structureStopDistance": round(stop_distance, 2),
+                "optionFilterTier": option.get("filterTier", "STRICT"),
+                "paperRiskPctOfDeployed": settings.paper_trade_risk_pct_of_deployed,
+                "paperStopBufferPoints": buffer_points,
+                "remainingLossHeadroomAtEntry": round(hard_headroom, 2),
                 "firstTarget": round(entry + (settings.scalp_target_points if is_scalp else settings.swing_first_target_points), 2),
                 "runnerTarget": target,
                 "partialBookPct": 0.0 if is_scalp else settings.swing_partial_pct,

@@ -745,6 +745,7 @@ export default function App() {
       <Metric title="Win Rate" value={percent(p.winRate)} sub={`${p.wins || 0}W / ${p.losses || 0}L`} />
       <Metric title="Risk / Trade" value={money(r.riskPerTrade)} sub={`${r.dynamicLimits ? 'Dynamic' : 'Fixed'} risk limit`} />
       <Metric title="Deployable Cap" value={money(Number(r.effectiveCapital || 0) * Number(r.capitalUsagePct || 0) / 100)} sub={`${r.capitalUsagePct || 0}% maximum usage`} />
+      <Metric title="PAPER Premium Risk Cap" value={`${Number(r.paperTradeRiskPctOfDeployed ?? 15).toFixed(0)}%`} sub="SL loss cap on deployed option premium; daily/weekly/monthly locks still apply" />
       <Metric title="Max Drawdown" value={money(p.maxDrawdown)} sub={`Monthly cap ${money(r.maxMonthlyDrawdown)}`} tone={Number(p.maxDrawdown) > 0 ? 'negative' : 'neutral'} />
     </section>
 
@@ -1085,7 +1086,7 @@ export default function App() {
           </tr>)}</tbody>
         </table>
       </div>}
-      <p className="panel-note">“Blocked By” explains signal qualification. “Execution” is separate: EXECUTED means a paper position actually opened; SIGNAL ONLY means the signal has not yet produced a position; OPTION_FILTER / RISK_LOT / CAPITAL_LOT / RISK_AUTHORIZATION show the post-signal gate that stopped execution.</p>
+      <p className="panel-note">A qualified signal is not a filled trade. PAPER option selection tries strict liquidity first, then a bounded fallback; risk and capital locks may still reject a contract. Max deployed capital {r.capitalUsagePct || 0}%, planned option premium risk cap {r.paperTradeRiskPctOfDeployed ?? 15}%, plus daily/weekly/monthly loss locks. The SL uses previous-candle structure and a {r.paperStopBufferPoints ?? 2}-point index buffer mapped to option premium.</p>
     </section>
 
     <section className="panel positions-panel">

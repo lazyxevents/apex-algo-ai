@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     option_stop_pct: float = 18.0
     max_option_spread_pct: float = 2.5
     min_option_volume: int = 1000
+    paper_fallback_max_spread_pct: float = 5.0
+    paper_fallback_min_volume: int = 100
+    paper_trade_risk_pct_of_deployed: float = 15.0
+    paper_stop_buffer_points: float = 2.0
     target_delta: float = 0.42
     max_otm_steps: int = 3
     candle_confirmation_required: bool = True
