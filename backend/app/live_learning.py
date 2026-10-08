@@ -182,6 +182,7 @@ class LiveLearningService:
                 valid_filter,
                 LiveMarketObservation.outcome == "PENDING",
                 LiveMarketObservation.action.in_(["CE", "PE"]),
+                LiveMarketObservation.trade_id.is_not(None),
             )) or 0
             rows = list(db.execute(
                 select(LiveMarketObservation).where(valid_filter).order_by(LiveMarketObservation.id.desc()).limit(max(1, min(limit, 50)))
