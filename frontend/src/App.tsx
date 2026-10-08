@@ -439,18 +439,24 @@ export default function App() {
 
   useEffect(() => {
     if (!chartAutoFollow) return
-    const decision = status?.automation?.lastDecision || {}
+    const automationState = status?.automation || {}
+    const decision = automationState?.lastDecision || {}
     const signal = Array.isArray(decision?.signals) ? decision.signals[0] : null
+    const freshness = automationState?.marketDataFreshness?.SENSEX || signal?.dataFreshness || {}
+    const freshnessState = String(freshness?.state || 'UNKNOWN').toUpperCase()
+    const verifiedFresh = Boolean(freshness?.fresh) && !['STALE', 'MISSING', 'INVALID_TIMESTAMP'].includes(freshnessState)
     const direction = String(decision?.action || signal?.action || signal?.candidateAction || '').toUpperCase()
     const score = Number(signal?.score ?? decision?.score ?? 0)
-    const meaningfulSetup = ['CE', 'PE'].includes(direction) && score >= 0.5
+    const meaningfulSetup = verifiedFresh && ['CE', 'PE'].includes(direction) && score >= 0.5
 
-    if (openTrades.length > 0 || meaningfulSetup) {
+    // Never auto-switch to frozen backend markup on stale Yahoo data.
+    // TradingView stays as the moving visual reference while APEX execution remains blocked.
+    if (verifiedFresh && (openTrades.length > 0 || meaningfulSetup)) {
       setChartView('apex')
     } else {
       setChartView('tradingview')
     }
-  }, [chartAutoFollow, openTrades.length, status?.automation?.lastDecision])
+  }, [chartAutoFollow, openTrades.length, status?.automation])
 
   const closedTrades = useMemo(() => trades.filter(t => t.status !== 'OPEN'), [trades])
   const invalidClosedTrades = useMemo(() => closedTrades.filter(t => t.status === 'INVALID_CONTRACT'), [closedTrades])
@@ -646,7 +652,7 @@ export default function App() {
         <SystemItem label="Plan bias" value={chartIntel?.plan?.marketBias || nextPlan.marketBias || '—'} />
       </div>
       <p className="panel-note">
-        AUTO FOLLOW switches to APEX Live Markup whenever a meaningful setup or open trade exists, then returns to TradingView when the active setup clears. Option Entry/SL/TG are shown on a separate premium ladder because those prices must not be drawn on the SENSEX underlying scale.
+        AUTO FOLLOW uses APEX Live Markup only when the backend SENSEX candle is fresh and a meaningful setup/open trade exists. If Yahoo is stale, TradingView stays visible as the moving market reference while APEX correctly blocks execution. Option Entry/SL/TG remain on the separate premium ladder.
       </p>
     </section>
 
