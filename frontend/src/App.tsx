@@ -1087,7 +1087,12 @@ export default function App() {
               {m.tradeId
                 ? <b>EXECUTED #T{m.tradeId}</b>
                 : m.decision?.executionBlock
-                  ? <><b>{m.decision.executionBlock.stage}</b><br/>{m.decision.executionBlock.reason}</>
+                  ? <><b>{m.decision.executionBlock.stage}</b><br/>{m.decision.executionBlock.reason}
+                    {m.decision.executionBlock.details?.diagnostics ? <details>
+                      <summary>Option filter diagnostics</summary>
+                      <small>{m.decision.executionBlock.details.diagnostics.reason || 'UNKNOWN'}</small>
+                      <pre style={{whiteSpace:'pre-wrap',fontSize:'11px'}}>{JSON.stringify(m.decision.executionBlock.details.diagnostics, null, 2)}</pre>
+                    </details> : null}</>
                   : (m.action === 'NO_TRADE' ? '—' : 'SIGNAL ONLY')}
             </small></td>
             <td><small>{m.ollama?.status || (ollama.configured ? 'waiting' : 'not configured')}<br/>{m.ollama?.bias || '—'} {Number.isFinite(Number(m.ollama?.confidence)) ? `${Math.round(Number(m.ollama.confidence)*100)}%` : ''}</small></td>
