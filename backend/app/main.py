@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .core import db_health, init_db, settings
 from .dataset_model import dataset_model_service
+from .dhan import dhan_service
 from .kite import kite_service
 from .learning_worker import learning_worker
 from .live_learning import live_learning_service
@@ -28,6 +29,8 @@ def get_market_service():
         return yahoo_service
     if provider == "upstox":
         return upstox_service
+    if provider == "dhan":
+        return dhan_service
     raise RuntimeError(f"Unsupported MARKET_DATA_PROVIDER={settings.market_data_provider}")
 
 
@@ -145,7 +148,21 @@ def health():
 
 @app.get("/api/system/status")
 def system_status():
-    return trading_engine.status(kite_service.connection_status(), market_service.status())
+    execution = (
+        dhan_service.execution_status()
+        if settings.execution_broker.strip().lower() == "dhan"
+        else kite_service.connection_status()
+    )
+    return trading_engine.status(execution, market_service.status())
+
+
+@app.get("/api/dhan/account")
+def dhan_account():
+    """On-demand Dhan account check; never places an order."""
+    try:
+        return dhan_service.account_snapshot()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/notifications/config")
