@@ -1052,7 +1052,7 @@ export default function App() {
       {liveMoments.length === 0 ? <div className="empty-line">Waiting for the next live SENSEX scan.</div> :
       <div className="table-scroll">
         <table className="trade-table">
-          <thead><tr><th>Time</th><th>Market</th><th>Action</th><th>Score</th><th>Strategy</th><th>SMC / Context</th><th>Ollama</th><th>Outcome</th></tr></thead>
+          <thead><tr><th>Time</th><th>Market</th><th>Action</th><th>Score</th><th>Strategy</th><th>SMC / Context</th><th>Blocked By</th><th>Ollama</th><th>Outcome</th></tr></thead>
           <tbody>{liveMoments.slice(0,10).map((m:any) => <tr key={m.id}>
             <td className="time-cell">{formatDateTime(m.observedAt)}</td>
             <td>{m.instrument}<br/><small>{Number(m.marketPrice || 0).toFixed(2)}</small></td>
@@ -1065,12 +1065,20 @@ export default function App() {
               Sweep {m.context?.smc?.liquiditySweep || 'NONE'}
               {m.context?.smcOverride ? <><br/><b>SMC OVERRIDE</b></> : null}
             </small></td>
+            <td><small>
+              {Array.isArray(m.decision?.blockedBy) && m.decision.blockedBy.length
+                ? m.decision.blockedBy.join(' • ')
+                : m.action === 'NO_TRADE'
+                  ? (m.decision?.reason || 'NO_TRADE')
+                  : 'PASSED'}
+              {m.decision?.directionCandidate && m.action === 'NO_TRADE' ? <><br/>Candidate {m.decision.directionCandidate}</> : null}
+            </small></td>
             <td><small>{m.ollama?.status || (ollama.configured ? 'waiting' : 'not configured')}<br/>{m.ollama?.bias || '—'} {m.ollama?.confidence != null ? `${Math.round(Number(m.ollama.confidence)*100)}%` : ''}</small></td>
             <td><span className={`trade-status ${m.outcome}`}>{m.outcome || 'PENDING'}</span>{m.tradeId ? <small> #T{m.tradeId}</small> : null}</td>
           </tr>)}</tbody>
         </table>
       </div>}
-      <p className="panel-note">Normal entries keep the standard score threshold. A lower score is allowed only when the live SMC engine confirms CHOCH/liquidity sweep, or BOS with directional candle confirmation. Primary evidence remains raw candle/SMC data.</p>
+      <p className="panel-note">Standard entries still require the score threshold, but a valid directional breakout or strong SMC confirmation can satisfy confirmation even when no named candle pattern fires. Lower-score SMC entries still require CHOCH/liquidity sweep, or BOS with directional candle/momentum confirmation. “Blocked By” shows the exact gate that rejected each moment.</p>
     </section>
 
     <section className="panel positions-panel">
@@ -1124,7 +1132,7 @@ export default function App() {
           </tr>)}</tbody>
         </table>
       </div>}
-      <p className="panel-note">Dashboard checks every 1s, but provider freshness is independent. APEX now hard-blocks new entries when the latest decision candle exceeds <b>{automation.entryPolicy?.maxLiveCandleAgeSeconds ?? 180}s</b>; stale Yahoo candles remain visible for audit/research only.</p>
+      <p className="panel-note">Dashboard checks every 1s, but provider freshness is independent. APEX hard-blocks new entries when the latest Dhan decision candle exceeds <b>{automation.entryPolicy?.maxLiveCandleAgeSeconds ?? 180}s</b>; stale broker candles remain visible for audit/research only.</p>
     </section>
 
     <section className="two-col">
