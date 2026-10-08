@@ -865,7 +865,7 @@ class TradingEngine:
             self._last_option_filter_diagnostics["reason"] = "NO_AFFORDABLE_LISTED_LOT"
             return None, 0, expiry
 
-        option = select_option(affordable_chain, best["action"], best["underlyingPrice"], deployable)
+        option = select_option(affordable_chain, best["action"], best["underlyingPrice"], deployable, reference_strikes=[float(x.get("strike_price") or 0) for x in chain])
         if not option:
             self._last_option_filter_diagnostics["reason"] = "SPREAD_VOLUME_OR_STRIKE_FILTER"
             self._last_option_filter_diagnostics.update(
