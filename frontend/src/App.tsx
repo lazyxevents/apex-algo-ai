@@ -1052,7 +1052,7 @@ export default function App() {
       {liveMoments.length === 0 ? <div className="empty-line">Waiting for the next live SENSEX scan.</div> :
       <div className="table-scroll">
         <table className="trade-table">
-          <thead><tr><th>Time</th><th>Market</th><th>Action</th><th>Score</th><th>Strategy</th><th>SMC / Context</th><th>Blocked By</th><th>Ollama</th><th>Outcome</th></tr></thead>
+          <thead><tr><th>Time</th><th>Market</th><th>Action</th><th>Score</th><th>Strategy</th><th>SMC / Context</th><th>Blocked By</th><th>Execution</th><th>Ollama</th><th>Outcome</th></tr></thead>
           <tbody>{liveMoments.slice(0,10).map((m:any) => <tr key={m.id}>
             <td className="time-cell">{formatDateTime(m.observedAt)}</td>
             <td>{m.instrument}<br/><small>{Number(m.marketPrice || 0).toFixed(2)}</small></td>
@@ -1073,12 +1073,19 @@ export default function App() {
                   : 'PASSED'}
               {m.decision?.directionCandidate && m.action === 'NO_TRADE' ? <><br/>Candidate {m.decision.directionCandidate}</> : null}
             </small></td>
+            <td><small>
+              {m.tradeId
+                ? <b>EXECUTED #T{m.tradeId}</b>
+                : m.decision?.executionBlock
+                  ? <><b>{m.decision.executionBlock.stage}</b><br/>{m.decision.executionBlock.reason}</>
+                  : (m.action === 'NO_TRADE' ? '—' : 'SIGNAL ONLY')}
+            </small></td>
             <td><small>{m.ollama?.status || (ollama.configured ? 'waiting' : 'not configured')}<br/>{m.ollama?.bias || '—'} {m.ollama?.confidence != null ? `${Math.round(Number(m.ollama.confidence)*100)}%` : ''}</small></td>
             <td><span className={`trade-status ${m.outcome}`}>{m.outcome || 'PENDING'}</span>{m.tradeId ? <small> #T{m.tradeId}</small> : null}</td>
           </tr>)}</tbody>
         </table>
       </div>}
-      <p className="panel-note">Standard entries still require the score threshold, but a valid directional breakout or strong SMC confirmation can satisfy confirmation even when no named candle pattern fires. Lower-score SMC entries still require CHOCH/liquidity sweep, or BOS with directional candle/momentum confirmation. “Blocked By” shows the exact gate that rejected each moment.</p>
+      <p className="panel-note">“Blocked By” explains signal qualification. “Execution” is separate: EXECUTED means a paper position actually opened; SIGNAL ONLY means the signal has not yet produced a position; OPTION_FILTER / RISK_LOT / CAPITAL_LOT / RISK_AUTHORIZATION show the post-signal gate that stopped execution.</p>
     </section>
 
     <section className="panel positions-panel">
@@ -1170,7 +1177,7 @@ export default function App() {
             <button type="button" disabled={doTradeDisabled} onClick={() => void doTradeNow()}>
               {busy === 'do-trade' ? 'SCANNING…' : '⚠ DO TRADE'}
             </button>
-            <small>{feedStale ? 'Waiting for fresh candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
+            <small>{busy === 'do-trade' ? 'Scanning current Dhan setup…' : manualDoTrade.last?.status === 'REFUSED' ? `Last refused: ${manualDoTrade.last.reason || 'safety/market gate'}` : feedStale ? 'Waiting for fresh candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
           </div>
         </div>
 

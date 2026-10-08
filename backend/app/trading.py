@@ -56,6 +56,44 @@ class TradingEngine:
             db.add(AuditLog(event=event, detail=payload))
             db.commit()
 
+    def _mark_signal_block(
+        self,
+        live_observations: list[dict],
+        best: dict | None,
+        *,
+        stage: str,
+        reason: str,
+        details: dict | None = None,
+    ) -> dict:
+        gate = {"status": "BLOCKED", "stage": stage, "reason": reason, "details": details or {}}
+        if not best:
+            return gate
+        matched = next(
+            (
+                row for row in live_observations
+                if row.get("instrument") == best.get("index")
+                and row.get("action") == best.get("action")
+            ),
+            None,
+        )
+        if matched and matched.get("id"):
+            live_learning_service.mark_execution_block(
+                int(matched["id"]),
+                stage=stage,
+                reason=reason,
+                details=details or {},
+            )
+        return gate
+
+    def record_manual_do_trade_rejection(self, reason: str) -> None:
+        payload = {
+            "at": datetime.now(IST).isoformat(),
+            "status": "REFUSED",
+            "reason": str(reason),
+        }
+        self.state.last_manual_do_trade = payload
+        self._audit("trade.manual_do_trade_refused", payload)
+
     def set_mode(self, mode: str) -> None:
         if mode == "LIVE":
             raise ValueError("LIVE mode is intentionally unavailable")
@@ -706,6 +744,9 @@ class TradingEngine:
                 "smcOverride": True,
                 "context": context,
                 "strategy": "APEX_MTF_SMC_SCALP",
+                "blockedBy": [],
+                "reason": "MTF_SMC_CONTINUATION",
+                "directionCandidate": continuation.get("candidateAction") or continuation.get("action"),
             })
             chosen_strategy = "APEX_MTF_SMC_SCALP"
         else:
@@ -1191,7 +1232,6 @@ class TradingEngine:
                 return decision
 
             with SessionLocal() as db:
-                self._authorize(db)
                 capital = self._effective_capital(db)
                 deployable = capital * settings.capital_usage_pct / 100
 
@@ -1202,6 +1242,22 @@ class TradingEngine:
             best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
             if best.get("action") not in {"CE", "PE"}:
                 decision["reason"] = best.get("reason") or "no strategy setup passed score + candlestick confirmation"
+                self.state.last_decision = decision
+                return decision
+
+            try:
+                with SessionLocal() as db:
+                    self._authorize(db)
+            except ValueError as exc:
+                reason = str(exc)
+                decision["reason"] = reason
+                decision["executionGate"] = self._mark_signal_block(
+                    live_observations,
+                    best,
+                    stage="RISK_AUTHORIZATION",
+                    reason=reason,
+                    details={"capital": round(capital, 2), "deployableCapital": round(deployable, 2)},
+                )
                 self.state.last_decision = decision
                 return decision
 
@@ -1219,11 +1275,33 @@ class TradingEngine:
             else:
                 option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
                 if not option:
-                    decision["reason"] = "no liquid/affordable option contract passed filters"
+                    reason = "no liquid/affordable option contract passed filters"
+                    decision["reason"] = reason
+                    decision["executionGate"] = self._mark_signal_block(
+                        live_observations,
+                        best,
+                        stage="OPTION_FILTER",
+                        reason=reason,
+                        details={
+                            "maxSpreadPct": settings.max_option_spread_pct,
+                            "minVolume": settings.min_option_volume,
+                            "maxOtmSteps": settings.max_otm_steps,
+                            "deployableCapital": round(deployable, 2),
+                            "expiry": expiry,
+                        },
+                    )
                     self.state.last_decision = decision
                     return decision
                 if lot_size <= 0:
-                    decision["reason"] = "selected option has invalid/missing exchange lot size"
+                    reason = "selected option has invalid/missing exchange lot size"
+                    decision["reason"] = reason
+                    decision["executionGate"] = self._mark_signal_block(
+                        live_observations,
+                        best,
+                        stage="LOT_SIZE",
+                        reason=reason,
+                        details={"expiry": expiry, "instrumentKey": option.get("instrumentKey")},
+                    )
                     self.state.last_decision = decision
                     return decision
 
@@ -1250,7 +1328,34 @@ class TradingEngine:
                 qty = self._quantity_for_risk(entry, stop, lot_size, db)
                 risk_limit = self._limits(db)["perTrade"]
             if qty <= 0:
-                decision["reason"] = "one valid paper unit/lot does not fit capital/risk budget"
+                one_lot_risk = round(max(0.0, entry - stop) * lot_size, 2)
+                one_lot_cost = round(entry * lot_size, 2)
+                if one_lot_risk > float(risk_limit):
+                    stage = "RISK_LOT"
+                    reason = f"one SENSEX lot risks ₹{one_lot_risk:.2f}, above per-trade limit ₹{float(risk_limit):.2f}"
+                elif one_lot_cost > float(deployable):
+                    stage = "CAPITAL_LOT"
+                    reason = f"one SENSEX lot costs ₹{one_lot_cost:.2f}, above deployable capital ₹{float(deployable):.2f}"
+                else:
+                    stage = "RISK_CAPITAL"
+                    reason = "one valid paper lot does not fit current capital/risk budget"
+                decision["reason"] = reason
+                decision["executionGate"] = self._mark_signal_block(
+                    live_observations,
+                    best,
+                    stage=stage,
+                    reason=reason,
+                    details={
+                        "entry": round(entry, 2),
+                        "stop": round(stop, 2),
+                        "stopPoints": round(max(0.0, entry - stop), 2),
+                        "lotSize": lot_size,
+                        "oneLotRisk": one_lot_risk,
+                        "riskLimit": round(float(risk_limit), 2),
+                        "oneLotCost": one_lot_cost,
+                        "deployableCapital": round(float(deployable), 2),
+                    },
+                )
                 self.state.last_decision = decision
                 return decision
 
@@ -1354,6 +1459,12 @@ class TradingEngine:
                 "option": option,
                 "sandbox": sandbox,
                 "meta": meta,
+                "executionGate": {
+                    "status": "EXECUTED",
+                    "stage": "PAPER_OPEN",
+                    "reason": "paper trade opened",
+                    "details": {"tradeId": trade.get("id"), "quantity": qty, "lotSize": lot_size},
+                },
             })
             if synthetic_demo:
                 decision["warning"] = "Yahoo demo uses synthetic option premium and unit sizing; do not interpret as real options execution."

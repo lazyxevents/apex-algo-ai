@@ -326,6 +326,7 @@ def manual_do_trade():
     try:
         return trading_engine.do_trade_now(market_service)
     except ValueError as exc:
+        trading_engine.record_manual_do_trade_rejection(str(exc))
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
