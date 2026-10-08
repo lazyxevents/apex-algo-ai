@@ -420,7 +420,7 @@ class DhanService:
                 raw = body.get("data") if isinstance(body, dict) else body
                 rows = raw if isinstance(raw, list) else []
             else:
-                rows = list(csv.DictReader(StringIO(res.text.lstrip("\\ufeff"))))
+                rows = list(csv.DictReader(StringIO(res.text.lstrip(chr(0xfeff)))))
             normalized = self._normalize_instrument_master(rows, segment)
             if not normalized:
                 errors.append(f"segment master returned {len(rows)} rows but zero valid OPTIDX lots")
@@ -434,7 +434,7 @@ class DhanService:
                 with httpx.Client(timeout=35, follow_redirects=True) as client:
                     res = client.get("https://images.dhan.co/api-data/api-scrip-master-detailed.csv")
                     res.raise_for_status()
-                rows = list(csv.DictReader(StringIO(res.text.lstrip("\\ufeff"))))
+                rows = list(csv.DictReader(StringIO(res.text.lstrip(chr(0xfeff)))))
                 normalized = self._normalize_instrument_master(rows, segment)
                 if not normalized:
                     errors.append("daily master CSV contains no valid OPTIDX contracts")
