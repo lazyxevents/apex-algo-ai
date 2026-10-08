@@ -38,7 +38,11 @@ async def automation_loop():
     trading_engine.state.automation_running = True
     try:
         while True:
-            await asyncio.to_thread(trading_engine.automation_cycle, market_service)
+            try:
+                await asyncio.to_thread(trading_engine.automation_cycle, market_service)
+            except Exception as exc:
+                # Never let one provider/strategy failure kill the long-running scan loop.
+                trading_engine.state.last_error = f"automation loop recovered: {exc}"
             await asyncio.sleep(max(15, settings.auto_scan_interval_seconds))
     finally:
         trading_engine.state.automation_running = False
