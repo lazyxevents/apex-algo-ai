@@ -92,6 +92,7 @@ class Settings(BaseSettings):
 
     market_data_provider: str = "yfinance"
     paper_broker: str = "internal"
+    execution_broker: str = "dhan"
 
     yfinance_nifty_symbol: str = "^NSEI"
     yfinance_banknifty_symbol: str = "^NSEBANK"
@@ -158,6 +159,15 @@ class Settings(BaseSettings):
     upstox_banknifty_key: str = "NSE_INDEX|Nifty Bank"
     upstox_sensex_key: str = "BSE_INDEX|SENSEX"
 
+    # DhanHQ market-data provider. Keys are exchangeSegment|securityId|instrument.
+    dhan_client_id: str = ""
+    dhan_access_token: str = ""
+    dhan_nifty_key: str = "IDX_I|13|INDEX"
+    dhan_banknifty_key: str = "IDX_I|25|INDEX"
+    dhan_sensex_key: str = "IDX_I|51|INDEX"
+    dhan_intraday_lookback_days: int = 5
+    dhan_product_type: str = "INTRADAY"
+
     kite_api_key: str = ""
     kite_api_secret: str = ""
     kite_access_token: str = ""
@@ -184,6 +194,12 @@ class Settings(BaseSettings):
                 "NIFTY": self.yfinance_nifty_symbol,
                 "BANKNIFTY": self.yfinance_banknifty_symbol,
                 "SENSEX": self.yfinance_sensex_symbol,
+            }
+        elif provider == "dhan":
+            keys = {
+                "NIFTY": self.dhan_nifty_key,
+                "BANKNIFTY": self.dhan_banknifty_key,
+                "SENSEX": self.dhan_sensex_key,
             }
         else:
             keys = {
