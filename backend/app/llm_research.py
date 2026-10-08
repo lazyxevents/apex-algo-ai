@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import httpx
 
 from .core import settings
+
+IST = ZoneInfo(settings.timezone)
 
 
 class OllamaResearchAssistant:
@@ -42,6 +46,32 @@ class OllamaResearchAssistant:
             headers["Authorization"] = f"Bearer {settings.ollama_api_key}"
         return headers
 
+    @staticmethod
+    def _evidence_freshness(research: dict[str, Any]) -> dict[str, Any]:
+        markets = research.get("markets") or ((research.get("analytics") or {}).get("markets") if isinstance(research.get("analytics"), dict) else {}) or {}
+        sensex = markets.get("SENSEX") or {}
+        frame = (sensex.get("frames") or {}).get("1m") or {}
+        raw = frame.get("lastCandleTime")
+        max_age = max(60, int(settings.live_trade_candle_max_age_seconds))
+        if not raw:
+            return {"fresh": False, "state": "MISSING", "ageSeconds": None, "maxAgeSeconds": max_age, "candleTime": None}
+        try:
+            ts = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=IST)
+            ts = ts.astimezone(IST)
+            age = (datetime.now(IST) - ts).total_seconds()
+            fresh = -120 <= age <= max_age
+            return {
+                "fresh": fresh,
+                "state": "LIVE" if fresh else "STALE",
+                "ageSeconds": round(age, 1),
+                "maxAgeSeconds": max_age,
+                "candleTime": ts.isoformat(),
+            }
+        except Exception:
+            return {"fresh": False, "state": "INVALID_TIMESTAMP", "ageSeconds": None, "maxAgeSeconds": max_age, "candleTime": str(raw)}
+
     def summarize(self, research: dict[str, Any], news: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.configured:
             return {
@@ -57,20 +87,30 @@ class OllamaResearchAssistant:
         schema = {
             "type": "object",
             "properties": {
-                "marketState": {"type": "string", "enum": ["BULLISH", "BEARISH", "MIXED", "NEUTRAL"]},
+                "marketState": {"type": "string", "enum": ["BULLISH", "BEARISH", "MIXED", "NEUTRAL", "UNKNOWN"]},
                 "riskState": {"type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "UNKNOWN"]},
                 "summary": {"type": "string"},
                 "observations": {"type": "array", "items": {"type": "string"}},
             },
             "required": ["marketState", "riskState", "summary", "observations"],
         }
+        freshness = self._evidence_freshness(research)
+        stale = not bool(freshness.get("fresh"))
         prompt = {
             "marketResearch": research,
             "newsResearch": news or {},
+            "evidenceFreshness": freshness,
             "instruction": (
                 "Summarize only the supplied evidence for a PAPER-TRADING research dashboard. "
                 "Do not recommend a trade, option side, entry, stop, target, leverage, or position size. "
-                "If evidence conflicts, say MIXED. Do not invent facts."
+                "If evidence conflicts, say MIXED. Do not invent facts. "
+                + (
+                    "IMPORTANT: the 1-minute market evidence is stale/unverified. Treat every market observation as a LAST VERIFIED/HISTORICAL snapshot, "
+                    "set marketState to UNKNOWN, do not use words like current, firmly, now, presently, or live to describe direction, "
+                    "and explicitly state that the present market trend cannot be verified until fresh data arrives."
+                    if stale else
+                    "The 1-minute evidence is fresh enough for a current research summary, but remain conservative."
+                )
             ),
         }
         payload = {
@@ -121,7 +161,21 @@ class OllamaResearchAssistant:
             parsed["enabled"] = True
             parsed["status"] = "ok"
             parsed["provider"] = self.provider
-            parsed["sources"] = [row.get("url") for row in (news or {}).get("results", []) if row.get("url")]
+            parsed["freshness"] = freshness
+            if stale:
+                parsed["marketState"] = "UNKNOWN"
+                parsed["riskState"] = "UNKNOWN"
+                raw_summary = str(parsed.get("summary") or "").strip()
+                parsed["summary"] = (
+                    "STALE / HISTORICAL SNAPSHOT — current market direction is unverified. "
+                    + raw_summary
+                )[:1200]
+                parsed["observations"] = [
+                    "Live directional interpretation suppressed until a fresh 1-minute candle is available.",
+                    *[str(x)[:260] for x in (parsed.get("observations") or [])[:6]],
+                ]
+            news_rows = (news or {}).get("results", []) if isinstance(news, dict) else (news or [])
+            parsed["sources"] = [row.get("url") for row in news_rows if isinstance(row, dict) and row.get("url")]
             return parsed
         except Exception as exc:
             return {
