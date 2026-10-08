@@ -14,23 +14,21 @@ from .dhan import dhan_service
 from .kite import kite_service
 from .learning_worker import learning_worker
 from .live_learning import live_learning_service
+from .market_chart import build_market_chart
 from .neural_model import neural_model_service
 from .notifications import push_notification_service
 from .research_engine import research_engine
 from .strategy import adaptive_learner
 from .trading import trading_engine
 from .upstox import upstox_service
-from .yahoo import yahoo_service
 
 
 def get_market_service():
     provider = settings.market_data_provider.strip().lower()
-    if provider in {"yfinance", "yahoo"}:
-        return yahoo_service
-    if provider == "upstox":
-        return upstox_service
     if provider == "dhan":
         return dhan_service
+    if provider == "upstox":
+        return upstox_service
     raise RuntimeError(f"Unsupported MARKET_DATA_PROVIDER={settings.market_data_provider}")
 
 
@@ -161,6 +159,21 @@ def dhan_account():
     """On-demand Dhan account check; never places an order."""
     try:
         return dhan_service.account_snapshot()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/market/chart")
+def market_chart(timeframe: int = 1, limit: int = 160):
+    """Fresh broker candles for the native APEX chart. Read-only in PAPER mode."""
+    if timeframe not in {1, 5, 15}:
+        raise HTTPException(status_code=400, detail="timeframe must be 1, 5 or 15 minutes")
+    try:
+        return build_market_chart(
+            market_service,
+            timeframe=timeframe,
+            limit=min(max(limit, 40), 260),
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
