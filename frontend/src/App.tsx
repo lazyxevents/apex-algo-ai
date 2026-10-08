@@ -160,6 +160,150 @@ async function fetchJson(path: string, options?: RequestInit) {
   return data
 }
 
+
+function MarketChart({
+  data,
+  timeframe,
+  onTimeframe,
+  loading,
+  error,
+}: {
+  data: any
+  timeframe: number
+  onTimeframe: (value: number) => void
+  loading: boolean
+  error: string
+}) {
+  const candles = Array.isArray(data?.candles) ? data.candles : []
+  const latest = data?.latest || {}
+  const freshness = data?.freshness || {}
+  const structure = data?.structure || {}
+  const support = Number(structure?.levels?.support)
+  const resistance = Number(structure?.levels?.resistance)
+
+  const width = 1000
+  const height = 410
+  const pad = { left: 22, right: 72, top: 24, bottom: 30 }
+  const plotW = width - pad.left - pad.right
+  const plotH = height - pad.top - pad.bottom
+  const priceValues = candles.flatMap((row: any) => [Number(row.low), Number(row.high)]).filter(Number.isFinite)
+  if (Number.isFinite(support)) priceValues.push(support)
+  if (Number.isFinite(resistance)) priceValues.push(resistance)
+  const rawMin = priceValues.length ? Math.min(...priceValues) : 0
+  const rawMax = priceValues.length ? Math.max(...priceValues) : 1
+  const buffer = Math.max(5, (rawMax - rawMin) * 0.08)
+  const minPrice = rawMin - buffer
+  const maxPrice = rawMax + buffer
+  const range = Math.max(1, maxPrice - minPrice)
+  const step = candles.length ? plotW / candles.length : plotW
+  const candleW = Math.max(2, Math.min(9, step * 0.58))
+  const y = (price: number) => pad.top + (maxPrice - price) / range * plotH
+  const x = (index: number) => pad.left + index * step + step / 2
+  const linePoints = (key: string) => candles
+    .map((row: any, index: number) => {
+      const value = Number(row?.[key])
+      return Number.isFinite(value) ? `${x(index).toFixed(2)},${y(value).toFixed(2)}` : ''
+    })
+    .filter(Boolean)
+    .join(' ')
+
+  const grid = Array.from({ length: 5 }, (_, index) => {
+    const pct = index / 4
+    const price = maxPrice - range * pct
+    return { y: pad.top + plotH * pct, price }
+  })
+
+  return <section className="panel market-chart-panel">
+    <div className="chart-head">
+      <div>
+        <div className="eyebrow">DHAN REAL MARKET DATA</div>
+        <h2>SENSEX Native Candlestick Chart</h2>
+        <p>Broker candles directly from DhanHQ Data API • EMA 9 / EMA 21 • SMC support & resistance</p>
+      </div>
+      <div className="chart-head-right">
+        <span className={`provider-chip ${freshness.fresh ? 'live' : 'stale'}`}>
+          <i /> {freshness.fresh ? 'LIVE DATA' : freshness.state || 'WAITING'}
+        </span>
+        <div className="timeframe-tabs">
+          {[1, 5, 15].map(value => <button
+            key={value}
+            className={timeframe === value ? 'active' : ''}
+            onClick={() => onTimeframe(value)}
+            type="button"
+          >{value}m</button>)}
+        </div>
+      </div>
+    </div>
+
+    <div className="chart-stats">
+      <span><small>Provider</small><b>{data?.provider?.displayName || 'DhanHQ Data API'}</b></span>
+      <span><small>Last</small><b>{Number(latest.close || 0).toLocaleString('en-IN', {maximumFractionDigits:2})}</b></span>
+      <span><small>Open</small><b>{Number(latest.open || 0).toLocaleString('en-IN', {maximumFractionDigits:2})}</b></span>
+      <span><small>High</small><b>{Number(latest.high || 0).toLocaleString('en-IN', {maximumFractionDigits:2})}</b></span>
+      <span><small>Low</small><b>{Number(latest.low || 0).toLocaleString('en-IN', {maximumFractionDigits:2})}</b></span>
+      <span><small>Window</small><b className={Number(data?.changePct || 0) >= 0 ? 'positive' : 'negative'}>{Number(data?.changePct || 0) >= 0 ? '+' : ''}{Number(data?.changePct || 0).toFixed(2)}%</b></span>
+      <span><small>Latest candle</small><b>{formatDateTime(freshness.candleTime || latest.timestamp)}</b></span>
+    </div>
+
+    <div className="native-chart-wrap">
+      {loading && candles.length === 0 && <div className="chart-overlay">Loading Dhan candles…</div>}
+      {error && candles.length === 0 && <div className="chart-overlay error">{error}</div>}
+      {candles.length > 0 && <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="SENSEX candlestick chart">
+        <defs>
+          <linearGradient id="chartFade" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="rgba(29,207,156,.08)" />
+            <stop offset="100%" stopColor="rgba(29,207,156,0)" />
+          </linearGradient>
+        </defs>
+        {grid.map((row, index) => <g key={index}>
+          <line className="chart-grid-line" x1={pad.left} x2={width-pad.right} y1={row.y} y2={row.y} />
+          <text className="chart-axis-label" x={width-pad.right+8} y={row.y+4}>{row.price.toFixed(0)}</text>
+        </g>)}
+
+        {Number.isFinite(support) && <g>
+          <line className="level-line support" x1={pad.left} x2={width-pad.right} y1={y(support)} y2={y(support)} />
+          <text className="level-label support" x={width-pad.right-6} y={y(support)-5}>S {support.toFixed(0)}</text>
+        </g>}
+        {Number.isFinite(resistance) && <g>
+          <line className="level-line resistance" x1={pad.left} x2={width-pad.right} y1={y(resistance)} y2={y(resistance)} />
+          <text className="level-label resistance" x={width-pad.right-6} y={y(resistance)-5}>R {resistance.toFixed(0)}</text>
+        </g>}
+
+        {candles.map((row: any, index: number) => {
+          const open = Number(row.open), close = Number(row.close), high = Number(row.high), low = Number(row.low)
+          const bullish = close >= open
+          const cx = x(index)
+          const top = y(Math.max(open, close))
+          const bottom = y(Math.min(open, close))
+          const bodyH = Math.max(1.5, bottom - top)
+          return <g className={bullish ? 'candle bullish' : 'candle bearish'} key={`${row.timestamp}-${index}`}>
+            <line x1={cx} x2={cx} y1={y(high)} y2={y(low)} />
+            <rect x={cx-candleW/2} y={top} width={candleW} height={bodyH} rx="1" />
+          </g>
+        })}
+
+        <polyline className="ema-line ema9" points={linePoints('ema9')} />
+        <polyline className="ema-line ema21" points={linePoints('ema21')} />
+
+        {candles.filter((_: any, index: number) => index % Math.max(1, Math.floor(candles.length / 6)) === 0).map((row: any, index: number, arr: any[]) => {
+          const originalIndex = candles.indexOf(row)
+          const d = new Date(row.timestamp)
+          const label = Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'})
+          return <text key={index} className="chart-time-label" x={x(originalIndex)} y={height-8} textAnchor={index === 0 ? 'start' : index === arr.length-1 ? 'end' : 'middle'}>{label}</text>
+        })}
+      </svg>}
+    </div>
+
+    <div className="chart-legend">
+      <span><i className="legend-candle up" /> Bull candle</span>
+      <span><i className="legend-candle down" /> Bear candle</span>
+      <span><i className="legend-line-ui ema9" /> EMA 9</span>
+      <span><i className="legend-line-ui ema21" /> EMA 21</span>
+      <span className="chart-source-note">Execution remains APEX PAPER • no Dhan exchange order is sent</span>
+    </div>
+  </section>
+}
+
 export default function App() {
   const [status, setStatus] = useState<Status>(null)
   const [trades, setTrades] = useState<Trade[]>([])
@@ -175,6 +319,10 @@ export default function App() {
   const [pushSubscribed, setPushSubscribed] = useState(false)
   const [pushBusy, setPushBusy] = useState(false)
   const [pushError, setPushError] = useState('')
+  const [chartTimeframe, setChartTimeframe] = useState(1)
+  const [chartData, setChartData] = useState<any>(null)
+  const [chartError, setChartError] = useState('')
+  const [chartLoading, setChartLoading] = useState(true)
   const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
 
   const loadStatus = useCallback(async (silent = false) => {
@@ -198,21 +346,36 @@ export default function App() {
     }
   }, [])
 
+  const loadChart = useCallback(async (silent = false) => {
+    if (!silent) setChartLoading(true)
+    try {
+      const data = await fetchJson(`/api/market/chart?timeframe=${chartTimeframe}&limit=160`)
+      setChartData(data)
+      setChartError('')
+    } catch (e: any) {
+      setChartError(e?.message || 'Could not load Dhan chart data')
+    } finally {
+      if (!silent) setChartLoading(false)
+    }
+  }, [chartTimeframe])
+
   const loadAll = useCallback(async () => {
-    await Promise.all([loadStatus(), loadTrades()])
-  }, [loadStatus, loadTrades])
+    await Promise.all([loadStatus(), loadTrades(), loadChart()])
+  }, [loadStatus, loadTrades, loadChart])
 
   useEffect(() => {
     void loadAll()
     const tradePoll = window.setInterval(() => void loadTrades(true), 1000)
     const statusPoll = window.setInterval(() => void loadStatus(true), 3000)
+    const chartPoll = window.setInterval(() => void loadChart(true), 5000)
     const clockPoll = window.setInterval(() => setClock(new Date()), 1000)
     return () => {
       window.clearInterval(tradePoll)
       window.clearInterval(statusPoll)
+      window.clearInterval(chartPoll)
       window.clearInterval(clockPoll)
     }
-  }, [loadAll, loadStatus, loadTrades])
+  }, [loadAll, loadStatus, loadTrades, loadChart])
 
   useEffect(() => {
     let cancelled = false
@@ -444,6 +607,7 @@ export default function App() {
   const learning = status.learning || {}
   const mt = r.monthlyTarget || {}
   const market = status.market || {}
+  const broker = status.broker || {}
   const automation = status.automation || {}
   const marketResearch = status.marketResearch || {}
   const researchMarkets = marketResearch.analytics?.markets || {}
@@ -532,15 +696,22 @@ export default function App() {
     {error && <div className="notice error">Connection issue: {error}</div>}
     {notice && <div className={`notice ${notice.kind === 'ok' ? 'ok' : 'error'}`} aria-live="polite">{notice.text}</div>}
 
-    {market.syntheticPaper && <section className="demo-banner">
-      <div>
-        <b>Testing / Synthetic Paper Mode</b>
-        <span>Yahoo supplies index data; option premium and execution are simulated. Live entries now require a fresh candle; stale Yahoo data is blocked from trading.</span>
+    <section className="provider-banner">
+      <div className="provider-main">
+        <span className="provider-logo">D</span>
+        <div>
+          <small>MARKET DATA PROVIDER</small>
+          <b>{market.displayName || 'DhanHQ Data API'}</b>
+          <span>{market.realMarketData ? 'Real broker market data' : 'Provider connected'} • SENSEX • Option chain enabled</span>
+        </div>
       </div>
-      <span className={`badge ${!marketResearchOnly && feedStale ? 'freshness-bad' : !marketResearchOnly && feedDelayed ? 'freshness-warn' : ''}`}>
-        {marketResearchOnly ? 'MARKET CLOSED • RESEARCH MODE' : feedStale ? 'STALE FEED • NO ENTRY' : feedDelayed ? 'DELAYED FEED • PAPER' : 'FRESHNESS GUARD ON • PAPER'}
-      </span>
-    </section>}
+      <div className="provider-status-grid">
+        <span><small>Data</small><b className={providerReady ? 'positive' : 'negative'}>{providerReady ? 'CONNECTED' : 'OFFLINE'}</b></span>
+        <span><small>Execution</small><b>{broker.paperExecution ? 'APEX PAPER' : (broker.mode || status.mode)}</b></span>
+        <span><small>Dhan orders</small><b className={broker.liveOrdersAllowed ? 'negative' : 'positive'}>{broker.liveOrdersAllowed ? 'LIVE ENABLED' : 'BLOCKED'}</b></span>
+        <span><small>Last provider success</small><b>{formatDateTime(market.lastSuccessAt)}</b></span>
+      </div>
+    </section>
 
     {showFeedWarning && <section className={`freshness-banner ${feedStale ? 'stale' : 'delayed'}`}>
       <div className="freshness-icon">{feedStale ? '!' : '◷'}</div>
@@ -555,6 +726,14 @@ export default function App() {
       </div>
       <strong>{freshnessState}</strong>
     </section>}
+
+    <MarketChart
+      data={chartData}
+      timeframe={chartTimeframe}
+      onTimeframe={setChartTimeframe}
+      loading={chartLoading}
+      error={chartError}
+    />
 
     <section className="summary-grid">
       <Metric title="Running P&L" value={money(runningPnl)} sub={openTrades.length ? `${runningPnlPct >= 0 ? '+' : ''}${percent(runningPnlPct)} on open positions` : 'No open position'} tone={pnlClass(runningPnl)} />
