@@ -1043,7 +1043,7 @@ class TradingEngine:
                 "underlyingEntry": float(option["underlyingEntry"]),
                 "syntheticEntryPremium": entry,
                 "syntheticModel": "entryPremium + directional underlying move × fixed delta",
-                "syntheticWarning": "Paper demo only; Yahoo does not provide the real SENSEX option chain here.",
+                "syntheticWarning": "Synthetic fallback only; this path is not used by the Dhan production market-data provider.",
             })
 
         sandbox = provider.place_sandbox_order(
@@ -1378,7 +1378,7 @@ class TradingEngine:
                 "meta": meta,
             })
             if synthetic_demo:
-                decision["warning"] = "Yahoo demo uses synthetic option premium and unit sizing; do not interpret as real options execution."
+                decision["warning"] = "Synthetic fallback pricing is not real exchange option execution."
             self._audit("automation.trade_decision", decision)
         except ValueError as exc:
             decision["reason"] = str(exc)
