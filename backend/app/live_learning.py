@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -105,6 +105,35 @@ class LiveLearningService:
                 row.trade_id = trade_id
                 db.commit()
 
+    def mark_execution_block(
+        self,
+        observation_id: int,
+        *,
+        stage: str,
+        reason: str,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        """Mark a directional signal that did not become a paper position."""
+        with SessionLocal() as db:
+            row = db.get(LiveMarketObservation, observation_id)
+            if not row or row.trade_id is not None:
+                return
+            try:
+                decision = json.loads(row.decision_json or "{}")
+            except json.JSONDecodeError:
+                decision = {}
+            decision["executionBlock"] = {
+                "stage": str(stage),
+                "reason": str(reason),
+                "details": details or {},
+                "at": datetime.now(timezone.utc).isoformat(),
+            }
+            row.decision_json = json.dumps(decision, default=str)
+            if row.action in {"CE", "PE"}:
+                row.outcome = "BLOCKED"
+                row.outcome_pnl = 0.0
+            db.commit()
+
     def label_trade(self, trade_id: int, outcome: str, pnl: float) -> int:
         with SessionLocal() as db:
             rows = list(db.execute(
@@ -130,6 +159,23 @@ class LiveLearningService:
             if repaired.rowcount:
                 db.commit()
 
+            # Old directional observations without an attached trade were signals only,
+            # not open outcomes. Repair them after a short grace period so PENDING means
+            # an actually attached/open paper trade.
+            stale_pending_before = datetime.now(timezone.utc) - timedelta(minutes=2)
+            orphaned = db.execute(
+                update(LiveMarketObservation)
+                .where(
+                    LiveMarketObservation.action.in_(["CE", "PE"]),
+                    LiveMarketObservation.outcome == "PENDING",
+                    LiveMarketObservation.trade_id.is_(None),
+                    LiveMarketObservation.observed_at < stale_pending_before,
+                )
+                .values(outcome="BLOCKED", outcome_pnl=0.0)
+            )
+            if orphaned.rowcount:
+                db.commit()
+
             valid_filter = LiveMarketObservation.market_price > 0
             total = db.scalar(select(func.count()).select_from(LiveMarketObservation).where(valid_filter)) or 0
             pending = db.scalar(select(func.count()).select_from(LiveMarketObservation).where(
@@ -146,6 +192,7 @@ class LiveLearningService:
                 "totalObservations": int(total),
                 "pendingOutcomes": int(pending),
                 "legacyNoTradeRowsRepaired": int(repaired.rowcount or 0),
+                "legacyUnattachedSignalsRepaired": int(orphaned.rowcount or 0),
                 "latest": [self._dict(row) for row in rows],
                 "note": "Raw candle/SMC observations are the primary learning evidence; Ollama review is auxiliary.",
             }
