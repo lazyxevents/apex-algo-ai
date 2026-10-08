@@ -1423,6 +1423,7 @@ class TradingEngine:
                 lots_risk = floor(per_trade_budget / max(stop_distance * lot_size, 0.01))
                 qty = max(0, min(lots_cash, lots_risk)) * lot_size
                 risk_limit = per_trade_budget
+                sizing_details = {"cashLots": max(0, lots_cash), "riskLots": max(0, lots_risk), "selectedLots": qty // lot_size, "cashBudget": round(deployable, 2), "riskBudget": round(per_trade_budget, 2)}
             if qty <= 0:
                 one_lot_risk = round(max(0.0, entry - stop) * lot_size, 2)
                 one_lot_cost = round(entry * lot_size, 2)
@@ -1490,6 +1491,9 @@ class TradingEngine:
                 "previousCandleHigh": previous_high,
                 "structureStopDistance": round(stop_distance, 2),
                 "optionFilterTier": option.get("filterTier", "STRICT"),
+                "moneyness": option.get("moneyness", "UNKNOWN"),
+                "atmStrike": option.get("atmStrike"),
+                "lotSizing": sizing_details,
                 "paperRiskPctOfDeployed": settings.paper_trade_risk_pct_of_deployed,
                 "paperStopBufferPoints": buffer_points,
                 "remainingLossHeadroomAtEntry": round(hard_headroom, 2),

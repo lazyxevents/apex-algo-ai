@@ -101,3 +101,29 @@ def test_dhan_instrument_master_handles_compact_csv_fields():
     result = DhanService._normalize_instrument_master(rows, "BSE_FNO")
     assert len(result) == 1
     assert result[0]["instrument_key"] == "BSE_FNO|23456|OPTIDX"
+
+
+def test_option_selector_prefers_atm_then_nearest_otm():
+    from app.strategy import select_option
+    from app.core import settings
+
+    def row(strike, volume=2000):
+        return {
+            "strike_price": strike,
+            "call_options": {
+                "instrument_key": f"BSE_FNO|{int(strike)}|OPTIDX",
+                "market_data": {"ltp": 120, "bid_price": 119, "ask_price": 121, "volume": volume},
+                "option_greeks": {"delta": 0.45},
+            },
+        }
+
+    reference = [71500, 71600, 71700, 71800]
+    selected = select_option([row(71600), row(71700)], "CE", 71605, 24000, reference_strikes=reference)
+    assert selected is not None
+    assert selected["strike"] == 71600
+    assert selected["moneyness"] == "ATM"
+
+    selected = select_option([row(71700), row(71800)], "CE", 71605, 24000, reference_strikes=reference)
+    assert selected is not None
+    assert selected["strike"] == 71700
+    assert selected["moneyness"] == "OTM"

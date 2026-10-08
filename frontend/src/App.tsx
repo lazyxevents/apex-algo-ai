@@ -1062,12 +1062,15 @@ export default function App() {
       {liveMoments.length === 0 ? <div className="empty-line">Waiting for the next live SENSEX scan.</div> :
       <div className="table-scroll">
         <table className="trade-table">
-          <thead><tr><th>Time</th><th>Market</th><th>Action</th><th>Score</th><th>Strategy</th><th>SMC / Context</th><th>Blocked By</th><th>Execution</th><th>Ollama</th><th>Outcome</th></tr></thead>
+          <thead><tr><th>Time</th><th>Market</th><th>Action</th><th>Executed Score</th><th>Strategy</th><th>SMC / Context</th><th>Blocked By</th><th>Execution</th><th>Ollama</th><th>Outcome</th></tr></thead>
           <tbody>{liveMoments.slice(0,10).map((m:any) => <tr key={m.id}>
             <td className="time-cell">{formatDateTime(m.observedAt)}</td>
             <td>{m.instrument}<br/><small>{Number(m.marketPrice || 0).toFixed(2)}</small></td>
             <td><span className={`side ${m.action}`}>{m.action}</span></td>
-            <td>{Number(m.signalScore || 0).toFixed(2)}</td>
+            <td>{m.tradeId
+              ? <b>{Number(m.signalScore || 0).toFixed(2)}</b>
+              : <small title={`Signal score ${Number(m.signalScore || 0).toFixed(2)} was observed, but no paper order executed`}>— <span style={{opacity:0.7}}>Not executed</span></small>}
+            </td>
             <td><small>{m.strategy || '—'}</small></td>
             <td><small>
               {m.context?.key || '—'}<br/>
@@ -1102,7 +1105,7 @@ export default function App() {
           </tr>)}</tbody>
         </table>
       </div>}
-      <p className="panel-note">A qualified signal is not a filled trade. PAPER option selection tries strict liquidity first, then a bounded fallback; risk and capital locks may still reject a contract. Max deployed capital {r.capitalUsagePct || 0}%, planned option premium risk cap {r.paperTradeRiskPctOfDeployed ?? 15}%, plus daily/weekly/monthly loss locks. The SL uses previous-candle structure and a {r.paperStopBufferPoints ?? 2}-point index buffer mapped to option premium.</p>
+      <p className="panel-note">Option selection prefers an affordable valid ATM contract, then the nearest valid OTM fallback. Position quantity is capped by cash-affordable lots and remaining hard-risk-budget lots. Executed Score only appears for positions actually opened. Unfilled signal scores remain stored for learning and are available in cell tooltips. A qualified signal is not a filled trade. PAPER option selection tries strict liquidity first, then a bounded fallback; risk and capital locks may still reject a contract. Max deployed capital {r.capitalUsagePct || 0}%, planned option premium risk cap {r.paperTradeRiskPctOfDeployed ?? 15}%, plus daily/weekly/monthly loss locks. The SL uses previous-candle structure and a {r.paperStopBufferPoints ?? 2}-point index buffer mapped to option premium.</p>
     </section>
 
     <section className="panel positions-panel">
@@ -1131,10 +1134,10 @@ export default function App() {
           <tbody>{openTrades.map(t => <tr key={t.id}>
             <td>
               <div className="instrument">{t.displayName || instrumentName(t.symbol)}</div>
-              <small>{t.expiry ? `Exp ${t.expiry}` : 'Expiry —'} • Strike {t.strike ?? '—'} • #{t.id}</small>
+              <small>{t.expiry ? `Exp ${t.expiry}` : 'Expiry —'} • Strike {t.strike ?? '—'} • #{t.id}</small><br/><small>{t.meta?.moneyness || '—'} {t.meta?.atmStrike ? `(ATM ${t.meta.atmStrike})` : ''}</small>
             </td>
             <td><span className={`side ${t.direction}`}>{t.direction}</span></td>
-            <td><b>{t.quantity}</b><br/><small>lot {t.lotSize}</small></td>
+            <td><b>{t.quantity}</b><br/><small>lot {t.lotSize}</small>{t.meta?.lotSizing ? <><br/><small title="Affordable lots / risk-limited lots">Cash {t.meta.lotSizing.cashLots} · Risk {t.meta.lotSizing.riskLots}</small></> : null}</td>
             <td>{money(t.entry)}</td>
             <td className="ltp">{money(t.currentPrice)}</td>
             <td>{editingTradeId === t.id ? <input className="trade-edit-input" type="number" step="0.05" value={planDraft.stop} onChange={e=>setPlanDraft(v=>({...v,stop:e.target.value}))}/> : money(t.stop)}</td>

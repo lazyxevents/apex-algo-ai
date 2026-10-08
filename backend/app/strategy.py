@@ -565,7 +565,17 @@ def select_option(chain: list[dict], direction: str, spot: float, deployable_cap
     pool = candidates or relaxed_candidates
     if not pool:
         return None
-    return max(pool, key=lambda x: x["selectionScore"])
+    # Keep the ATM strike as the first choice when it is valid and affordable.
+    # Only fall back to the nearest OTM strike when the ATM contract fails.
+    atm_strike = strikes[atm_index]
+    atm_options = [candidate for candidate in pool if candidate["strike"] == atm_strike]
+    if atm_options:
+        selected = max(atm_options, key=lambda item: item["selectionScore"])
+    else:
+        selected = min(pool, key=lambda item: (abs(item["strike"] - atm_strike), -item["selectionScore"]))
+    selected["moneyness"] = "ATM" if selected["strike"] == atm_strike else "OTM"
+    selected["atmStrike"] = atm_strike
+    return selected
 
 
 def _simulate_arm(candles: list[dict], arm: StrategyArm) -> dict:
