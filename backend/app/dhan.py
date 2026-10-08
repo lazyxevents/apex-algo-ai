@@ -368,50 +368,81 @@ class DhanService:
                 return value
         return None
 
+    @classmethod
+    def _normalize_instrument_master(cls, rows: list[dict], segment: str) -> list[dict]:
+        normalized = []
+        seen = set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            clean = {str(k).strip().upper(): v for k, v in row.items() if k is not None}
+            sec = clean.get("SECURITY_ID") or clean.get("SEM_SMST_SECURITY_ID") or clean.get("SECURITYID")
+            instrument = str(clean.get("INSTRUMENT") or clean.get("SEM_INSTRUMENT_NAME") or "").strip().upper()
+            if not sec or instrument != "OPTIDX":
+                continue
+            exchange = str(clean.get("EXCH_ID") or clean.get("SEM_EXM_EXCH_ID") or "").strip().upper()
+            if exchange and exchange != ("BSE" if segment == "BSE_FNO" else "NSE"):
+                continue
+            segment_code = str(clean.get("SEGMENT") or clean.get("SEM_SEGMENT") or "").strip().upper()
+            if segment_code and segment_code != "D":
+                continue
+            try:
+                lot = int(float(clean.get("LOT_SIZE") or clean.get("SEM_LOT_UNITS") or 0))
+            except (ValueError, TypeError):
+                continue
+            if lot <= 0:
+                continue
+            sec = str(sec).strip()
+            if not sec or sec in seen:
+                continue
+            seen.add(sec)
+            name = clean.get("DISPLAY_NAME") or clean.get("SEM_CUSTOM_SYMBOL") or clean.get("SEM_TRADING_SYMBOL") or clean.get("SYMBOL_NAME") or sec
+            normalized.append({
+                "instrument_key": f"{segment}|{sec}|OPTIDX",
+                "lot_size": lot, "minimum_lot": lot,
+                "trading_symbol": str(name), "name": str(name),
+            })
+        return normalized
+
     def _instrument_rows(self, segment: str) -> list[dict]:
         cached = self._contracts_cache.get(segment)
         today = datetime.now(IST).date()
-        if cached and cached[0] == today:
+        if cached and cached[0] == today and cached[1]:
             return cached[1]
 
-        res = self._get(f"/instrument/{segment}", timeout=25)
-        content_type = str(res.headers.get("content-type") or "").lower()
-        if "json" in content_type:
-            body = res.json()
-            raw = body.get("data") if isinstance(body, dict) else body
-            rows = list(raw or [])
-        else:
-            rows = list(csv.DictReader(StringIO(res.text)))
+        errors = []
+        normalized = []
+        try:
+            res = self._get(f"/instrument/{segment}", timeout=25)
+            content_type = str(res.headers.get("content-type") or "").lower()
+            if "json" in content_type:
+                body = res.json()
+                raw = body.get("data") if isinstance(body, dict) else body
+                rows = raw if isinstance(raw, list) else []
+            else:
+                rows = list(csv.DictReader(StringIO(res.text.lstrip("\\ufeff"))))
+            normalized = self._normalize_instrument_master(rows, segment)
+            if not normalized:
+                errors.append(f"segment master returned {len(rows)} rows but zero valid OPTIDX lots")
+        except Exception as exc:
+            errors.append(f"segment instrument API: {exc}")
 
-        normalized: list[dict] = []
-        for row in rows:
-            sec = self._pick(row, "SECURITY_ID", "SEM_SMST_SECURITY_ID", "securityId")
-            if sec in (None, ""):
-                continue
-            lot_raw = self._pick(row, "LOT_SIZE", "SEM_LOT_UNITS", "lotSize")
+        if not normalized:
+            # Dhan's officially published detailed daily CSV is an independent
+            # source of exchange security IDs and actual lot sizes.
             try:
-                lot_size = int(float(lot_raw or 0))
-            except (TypeError, ValueError):
-                lot_size = 0
-            instrument = str(self._pick(row, "INSTRUMENT", "SEM_INSTRUMENT_NAME") or "")
-            if instrument and instrument not in {"OPTIDX", "OPTSTK"}:
-                continue
-            name = self._pick(
-                row,
-                "DISPLAY_NAME",
-                "SEM_CUSTOM_SYMBOL",
-                "SEM_TRADING_SYMBOL",
-                "SYMBOL_NAME",
-                "SM_SYMBOL_NAME",
-                "tradingSymbol",
-            )
-            normalized.append({
-                "instrument_key": f"{segment}|{sec}|OPTIDX",
-                "lot_size": lot_size,
-                "minimum_lot": lot_size,
-                "trading_symbol": str(name or sec),
-                "name": str(name or sec),
-            })
+                with httpx.Client(timeout=35, follow_redirects=True) as client:
+                    res = client.get("https://images.dhan.co/api-data/api-scrip-master-detailed.csv")
+                    res.raise_for_status()
+                rows = list(csv.DictReader(StringIO(res.text.lstrip("\\ufeff"))))
+                normalized = self._normalize_instrument_master(rows, segment)
+                if not normalized:
+                    errors.append("daily master CSV contains no valid OPTIDX contracts")
+            except Exception as exc:
+                errors.append(f"daily master CSV: {exc}")
+
+        if not normalized:
+            raise RuntimeError("Dhan contract master unavailable: " + "; ".join(errors))
         self._contracts_cache[segment] = (today, normalized)
         return normalized
 
