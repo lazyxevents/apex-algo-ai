@@ -890,38 +890,57 @@ class TradingEngine:
                 f"Do Trade blocked: SENSEX data is stale ({age_text}); fresh candle required"
             )
 
+        with SessionLocal() as db:
+            signal_capital = self._effective_capital(db)
+
+        live_signal = self._scan_one(provider, "SENSEX", underlying_key, signal_capital)
         analysis = evaluate_mtf_continuation(candles)
-        candidate = str(analysis.get("candidateAction") or analysis.get("action") or "NO_TRADE")
-        score = float(analysis.get("score") or 0.0)
-        frames = analysis.get("frames") or {}
-        structure = analysis.get("structure") or {}
-        smc = analysis.get("smc") or {}
-        if candidate not in {"CE", "PE"}:
-            raise ValueError("Do Trade found no directional momentum candidate")
+        live_action = str(live_signal.get("action") or "NO_TRADE")
+        signal_path = "AUTO_SIGNAL" if live_action in {"CE", "PE"} else "MTF_FALLBACK"
 
-        if candidate == "CE":
-            htf_aligned = any((frames.get(tf) or {}).get("trend") == "UP" for tf in ("5m", "15m"))
-            structure_ok = bool(
-                structure.get("higherHigh")
-                or structure.get("previousHighBreak")
-                or smc.get("bos") == "BULL"
-                or smc.get("choch") == "BULL"
-                or smc.get("liquiditySweep") == "BULL"
-            )
+        if live_action in {"CE", "PE"}:
+            candidate = live_action
+            score = float(live_signal.get("score") or 0.0)
+            mtf = live_signal.get("mtfContinuation") or {}
+            frames = mtf.get("frames") or {}
+            structure = mtf.get("structure") or {}
+            smc = live_signal.get("smc") or mtf.get("smc") or {}
+            underlying_price = float(live_signal.get("underlyingPrice") or analysis.get("underlyingPrice") or 0.0)
         else:
-            htf_aligned = any((frames.get(tf) or {}).get("trend") == "DOWN" for tf in ("5m", "15m"))
-            structure_ok = bool(
-                structure.get("lowerLow")
-                or structure.get("previousLowBreak")
-                or smc.get("bos") == "BEAR"
-                or smc.get("choch") == "BEAR"
-                or smc.get("liquiditySweep") == "BEAR"
-            )
+            candidate = str(analysis.get("candidateAction") or analysis.get("action") or "NO_TRADE")
+            score = float(analysis.get("score") or 0.0)
+            frames = analysis.get("frames") or {}
+            structure = analysis.get("structure") or {}
+            smc = analysis.get("smc") or {}
+            underlying_price = float(analysis.get("underlyingPrice") or 0.0)
+            if candidate not in {"CE", "PE"}:
+                raise ValueError(
+                    f"Do Trade found no directional candidate. Live gate: {live_signal.get('reason') or live_signal.get('blockedBy') or 'NO_TRADE'}"
+                )
 
-        if score < settings.manual_do_trade_min_mtf_score or not htf_aligned or not structure_ok:
-            raise ValueError(
-                f"Do Trade refused weak setup: {candidate} score {score:.2f}; needs fresh MTF + SMC/structure confirmation"
-            )
+            if candidate == "CE":
+                htf_aligned = any((frames.get(tf) or {}).get("trend") == "UP" for tf in ("5m", "15m"))
+                structure_ok = bool(
+                    structure.get("higherHigh")
+                    or structure.get("previousHighBreak")
+                    or smc.get("bos") == "BULL"
+                    or smc.get("choch") == "BULL"
+                    or smc.get("liquiditySweep") == "BULL"
+                )
+            else:
+                htf_aligned = any((frames.get(tf) or {}).get("trend") == "DOWN" for tf in ("5m", "15m"))
+                structure_ok = bool(
+                    structure.get("lowerLow")
+                    or structure.get("previousLowBreak")
+                    or smc.get("bos") == "BEAR"
+                    or smc.get("choch") == "BEAR"
+                    or smc.get("liquiditySweep") == "BEAR"
+                )
+
+            if score < settings.manual_do_trade_min_mtf_score or not htf_aligned or not structure_ok:
+                raise ValueError(
+                    f"Do Trade refused weak setup: {candidate} score {score:.2f}; needs fresh MTF + SMC/structure confirmation"
+                )
 
         with SessionLocal() as db:
             self._authorize(db)
@@ -936,7 +955,10 @@ class TradingEngine:
             "index": "SENSEX",
             "underlyingKey": underlying_key,
             "action": candidate,
-            "underlyingPrice": float(analysis["underlyingPrice"]),
+            "underlyingPrice": underlying_price,
+            "score": score,
+            "signalPath": signal_path,
+            "liveSignal": live_signal,
         }
         synthetic_demo = not bool(getattr(provider, "supports_option_chain", True))
         expiry = None
@@ -1064,7 +1086,7 @@ class TradingEngine:
                 "underlyingEntry": float(option["underlyingEntry"]),
                 "syntheticEntryPremium": entry,
                 "syntheticModel": "entryPremium + directional underlying move × fixed delta",
-                "syntheticWarning": "Paper demo only; Yahoo does not provide the real SENSEX option chain here.",
+                "syntheticWarning": "Synthetic fallback only; this path is not used by the Dhan production market-data provider.",
             })
 
         sandbox = provider.place_sandbox_order(
@@ -1310,7 +1332,7 @@ class TradingEngine:
             entry = float(option["ltp"])
             strategy_name = str(best.get("chosenStrategy") or best.get("strategy") or "")
             is_scalp = "SCALP" in strategy_name.upper()
-            delta = max(0.05, abs(float(option.get("delta") or settings.yfinance_synthetic_delta)))
+            delta = max(0.05, abs(float(option.get("delta") or settings.target_delta)))
             previous_low = float(best.get("previousLow") or best["underlyingPrice"])
             previous_high = float(best.get("previousHigh") or best["underlyingPrice"])
             spot = float(best["underlyingPrice"])
@@ -1494,13 +1516,25 @@ class TradingEngine:
                 },
             })
             if synthetic_demo:
-                decision["warning"] = "Yahoo demo uses synthetic option premium and unit sizing; do not interpret as real options execution."
+                decision["warning"] = "Synthetic fallback pricing is not real exchange option execution."
             self._audit("automation.trade_decision", decision)
         except ValueError as exc:
             decision["reason"] = str(exc)
         except Exception as exc:
             self.state.last_error = str(exc)
             decision["reason"] = f"safe failure: {exc}"
+            try:
+                current_best = locals().get("best")
+                current_observations = locals().get("live_observations") or []
+                if isinstance(current_best, dict) and current_best.get("action") in {"CE", "PE"}:
+                    decision["executionGate"] = self._mark_signal_block(
+                        current_observations,
+                        current_best,
+                        stage="EXECUTION_ERROR",
+                        reason=str(exc),
+                    )
+            except Exception:
+                pass
             self._audit("automation.error", {"error": str(exc)})
         self.state.last_decision = decision
         return decision
