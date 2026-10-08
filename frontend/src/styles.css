@@ -78,6 +78,8 @@ button,input{font:inherit}
 .trade-status.TARGET{background:rgba(34,199,138,.1);color:#50dfa9}
 .trade-status.STOPPED{background:rgba(229,79,79,.1);color:#ff7777}
 .trade-status.FORCED_EXIT{background:rgba(245,189,66,.1);color:#efc966}
+.trade-status.BLOCKED{background:rgba(229,79,79,.1);color:#ff8f8f}
+.trade-status.SIGNAL{background:rgba(86,201,255,.10);color:#78d8ff}
 .panel-note{font-size:10px;color:#66798d;margin:11px 0 0;line-height:1.5}
 .panel-note b{color:#9fb0c4}
 .two-col{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-bottom:14px}
