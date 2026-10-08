@@ -448,6 +448,7 @@ export default function App() {
   const marketResearch = status.marketResearch || {}
   const researchMarkets = marketResearch.analytics?.markets || {}
   const positionMonitor = automation.positionMonitor || {}
+  const scanLoop = automation.scanLoop || {}
   const worker = status.learningWorker || {}
   const ollama = status.ollama || {}
   const liveLearning = status.liveLearning || {}
@@ -549,7 +550,7 @@ export default function App() {
           SENSEX candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'}
           {' • '}age {sensexFreshness.ageSeconds != null ? `${Math.max(0, Number(sensexFreshness.ageSeconds)).toFixed(0)}s` : '—'}
           {' • '}max {sensexFreshness.maxAgeSeconds ?? '—'}s.
-          {feedStale ? ' APEX will not score or execute this candle.' : ''}
+          {feedStale ? ` APEX will not score/execute this candle; scan loop keeps retrying every ${scanLoop.intervalSeconds ?? 30}s.` : ''}
         </span>
       </div>
       <strong>{freshnessState}</strong>
@@ -856,11 +857,13 @@ export default function App() {
         <span className="badge subtle">{liveLearning.totalObservations ?? 0} OBSERVATIONS</span>
       </div>
       {feedStale && !marketResearchOnly && <div className="live-feed-freeze">
-        <b>Live moment memory paused — feed is stale</b>
-        <span>Last verified trend: <strong>{lastVerifiedTrend}</strong> • latest verified candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'} • no new market moment is stored until a fresh candle arrives.</span>
+        <b>Fresh-feed capture waiting — scan loop is still running</b>
+        <span>APEX is retrying the provider every {scanLoop.intervalSeconds ?? 30}s. Last scan attempt: <strong>{formatDateTime(scanLoop.lastAttemptAt || automation.lastCycleAt)}</strong> • last verified candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'} • no new learning moment or trade is allowed until a fresh candle arrives.</span>
       </div>}
       <div className="learning-grid">
-        <SystemItem label="Mode" value={marketResearchOnly ? 'MARKET_CLOSED_RESEARCH' : feedStale ? 'STALE_FEED_PAUSED' : (liveLearning.mode || 'waiting')} good={Boolean(liveLearning.enabled && !feedStale)} />
+        <SystemItem label="Mode" value={marketResearchOnly ? 'MARKET_CLOSED_RESEARCH' : feedStale ? 'STALE_FEED_RETRYING' : (liveLearning.mode || 'waiting')} good={Boolean(liveLearning.enabled && !feedStale)} />
+        <SystemItem label="Scan loop" value={scanLoop.state || (automation.running ? 'RUNNING' : 'STOPPED')} good={Boolean(scanLoop.running ?? automation.running)} />
+        <SystemItem label="Last scan attempt" value={formatDateTime(scanLoop.lastAttemptAt || automation.lastCycleAt)} />
         <SystemItem label="Moments stored" value={liveLearning.totalObservations ?? 0} />
         <SystemItem label="Pending outcomes" value={liveLearning.pendingOutcomes ?? 0} />
         <SystemItem label="LLM live review" value={ollama.configured ? `Active • ${ollama.provider || 'LLM'}` : 'Not configured'} good={ollama.configured} />
