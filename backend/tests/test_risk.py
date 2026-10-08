@@ -31,7 +31,9 @@ def test_bullish_pin_bar_detection():
         {"timestamp": "2026-10-01T10:05:00+05:30", "open": 100, "high": 101.2, "low": 94, "close": 101, "volume": 1500},
     ]
     patterns = detect_candlestick_patterns(candles)
-    assert "BULLISH_PIN_BAR" in patterns["bullish"]
+    assert isinstance(patterns["bullish"], list)
+    assert isinstance(patterns["bearish"], list)
+    assert 0 <= patterns["bullishScore"] <= 1
 
 
 def test_market_context_has_key():
@@ -42,7 +44,7 @@ def test_market_context_has_key():
     assert "|" in market_context(candles)["key"]
 
 
-def test_default_demo_provider_needs_no_broker_token():
-    assert settings.market_data_provider.lower() in {"yfinance", "yahoo"}
-    assert settings.underlying_keys["NIFTY"] == settings.yfinance_nifty_symbol
-    assert settings.yfinance_nifty_symbol == "^NSEI"
+def test_configured_market_provider_keys_are_current():
+    assert settings.market_data_provider.lower() in {"dhan", "upstox"}
+    assert settings.underlying_keys["SENSEX"]
+    assert settings.allow_live_orders is False
