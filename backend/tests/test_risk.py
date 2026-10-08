@@ -72,3 +72,32 @@ def test_option_selector_respects_exchange_atm_reference():
         assert result is None
     finally:
         settings.paper_fallback_min_volume = previous_min
+
+
+def test_dhan_instrument_master_handles_detailed_csv_fields():
+    from app.dhan import DhanService
+    rows = [
+        {"SECURITY_ID": "12345", "EXCH_ID": "BSE", "SEGMENT": "D",
+         "INSTRUMENT": "OPTIDX", "LOT_SIZE": "20", "DISPLAY_NAME": "SENSEX 71600 PE"},
+        {"SECURITY_ID": "99999", "EXCH_ID": "NSE", "SEGMENT": "D",
+         "INSTRUMENT": "OPTIDX", "LOT_SIZE": "75", "DISPLAY_NAME": "NIFTY PE"},
+    ]
+    result = DhanService._normalize_instrument_master(rows, "BSE_FNO")
+    assert len(result) == 1
+    assert result[0]["instrument_key"] == "BSE_FNO|12345|OPTIDX"
+    assert result[0]["lot_size"] == 20
+
+
+def test_dhan_instrument_master_handles_compact_csv_fields():
+    from app.dhan import DhanService
+    rows = [
+        {"SEM_SMST_SECURITY_ID": "23456", "SEM_EXM_EXCH_ID": "BSE",
+         "SEM_SEGMENT": "D", "SEM_INSTRUMENT_NAME": "OPTIDX",
+         "SEM_LOT_UNITS": "20", "SEM_CUSTOM_SYMBOL": "SENSEX CE"},
+        {"SEM_SMST_SECURITY_ID": "23457", "SEM_EXM_EXCH_ID": "BSE",
+         "SEM_SEGMENT": "D", "SEM_INSTRUMENT_NAME": "FUTIDX",
+         "SEM_LOT_UNITS": "20", "SEM_CUSTOM_SYMBOL": "SENSEX FUT"},
+    ]
+    result = DhanService._normalize_instrument_master(rows, "BSE_FNO")
+    assert len(result) == 1
+    assert result[0]["instrument_key"] == "BSE_FNO|23456|OPTIDX"
