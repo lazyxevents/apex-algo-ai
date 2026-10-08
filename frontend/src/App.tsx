@@ -535,18 +535,27 @@ export default function App() {
 
     setBusy('do-trade')
     setNotice(null)
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), 12000)
     try {
-      const result = await fetchJson('/api/paper/do-trade', { method: 'POST' })
+      const result = await fetchJson('/api/paper/do-trade', { method: 'POST', signal: controller.signal })
       const trade = result?.trade || {}
       const danger = result?.danger || {}
+      setBusy('')
       setNotice({
         kind: 'ok',
         text: `DO TRADE executed #${trade.id ?? '—'} ${trade.direction ?? ''} • Qty ${trade.quantity ?? '—'} • deployed ${money(danger.deployedCapital)} • risk ${money(danger.initialRisk)}`,
       })
-      await loadAll()
+      await Promise.all([loadStatus(true), loadTrades(true)])
     } catch (e: any) {
-      setNotice({ kind: 'error', text: e?.message || 'Do Trade was refused by safety/market gates' })
+      const message = e?.name === 'AbortError'
+        ? 'DO TRADE scan timed out after 12s. No order was opened; try again on the next fresh candle.'
+        : (e?.message || 'Do Trade was refused by safety/market gates')
+      setBusy('')
+      setNotice({ kind: 'error', text: message })
+      try { await loadStatus(true) } catch { /* keep the refusal message visible */ }
     } finally {
+      window.clearTimeout(timeoutId)
       setBusy('')
     }
   }
@@ -1044,7 +1053,7 @@ export default function App() {
         <SystemItem label="Scan loop" value={scanLoop.state || (automation.running ? 'RUNNING' : 'STOPPED')} good={Boolean(scanLoop.running ?? automation.running)} />
         <SystemItem label="Last scan attempt" value={formatDateTime(scanLoop.lastAttemptAt || automation.lastCycleAt)} />
         <SystemItem label="Moments stored" value={liveLearning.totalObservations ?? 0} />
-        <SystemItem label="Pending outcomes" value={liveLearning.pendingOutcomes ?? 0} />
+        <SystemItem label="Open trade outcomes" value={liveLearning.pendingOutcomes ?? 0} />
         <SystemItem label="LLM live review" value={ollama.configured ? `Active • ${ollama.provider || 'LLM'}` : 'Not configured'} good={ollama.configured} />
         <SystemItem label="Standard entry" value={automation.entryPolicy?.standardMinScore != null ? `≥ ${Number(automation.entryPolicy.standardMinScore).toFixed(2)}` : '—'} />
         <SystemItem label="Strong SMC entry" value={automation.entryPolicy?.smcOverrideMinScore != null ? `≥ ${Number(automation.entryPolicy.smcOverrideMinScore).toFixed(2)}` : '—'} />
@@ -1073,8 +1082,21 @@ export default function App() {
                   : 'PASSED'}
               {m.decision?.directionCandidate && m.action === 'NO_TRADE' ? <><br/>Candidate {m.decision.directionCandidate}</> : null}
             </small></td>
-            <td><small>{m.ollama?.status || (ollama.configured ? 'waiting' : 'not configured')}<br/>{m.ollama?.bias || '—'} {m.ollama?.confidence != null ? `${Math.round(Number(m.ollama.confidence)*100)}%` : ''}</small></td>
-            <td><span className={`trade-status ${m.outcome}`}>{m.outcome || 'PENDING'}</span>{m.tradeId ? <small> #T{m.tradeId}</small> : null}</td>
+            <td><small>{m.ollama?.status || (ollama.configured ? 'waiting' : 'not configured')}<br/>{m.ollama?.bias || '—'} {Number.isFinite(Number(m.ollama?.confidence)) ? `${Math.round(Number(m.ollama.confidence)*100)}%` : ''}</small></td>
+            <td><small>
+              {m.decision?.executionBlock
+                ? <><b>{m.decision.executionBlock.stage || 'BLOCKED'}</b><br/>{m.decision.executionBlock.reason || 'Execution gate refused signal'}</>
+                : Array.isArray(m.decision?.blockedBy) && m.decision.blockedBy.length
+                  ? <>{m.decision.blockedBy.join(' • ')}</>
+                  : m.tradeId
+                    ? <>EXECUTED #T{m.tradeId}</>
+                    : m.action === 'CE' || m.action === 'PE'
+                      ? <>SIGNAL — awaiting execution gate</>
+                      : <>{m.decision?.reason || '—'}</>}
+            </small></td>
+            <td><span className={`trade-status ${m.decision?.executionBlock ? 'BLOCKED' : m.tradeId ? m.outcome : (m.action === 'CE' || m.action === 'PE') ? 'SIGNAL' : m.outcome}`}>
+              {m.decision?.executionBlock ? 'BLOCKED' : m.tradeId ? (m.outcome || 'PENDING') : (m.action === 'CE' || m.action === 'PE') ? 'SIGNAL' : (m.outcome || 'OBSERVED')}
+            </span>{m.tradeId ? <small> #T{m.tradeId}</small> : null}</td>
           </tr>)}</tbody>
         </table>
       </div>}
@@ -1146,6 +1168,15 @@ export default function App() {
           <SystemItem label="Provider" value={market.provider || 'unknown'} />
           <SystemItem label="Paper broker" value={market.paperBroker || 'internal'} />
           <SystemItem label="Phase" value={phase.reason || 'Waiting'} />
+          <SystemItem
+            label="Last execution gate"
+            value={automation.lastDecision?.executionGate?.status === 'BLOCKED'
+              ? `${automation.lastDecision.executionGate.stage}: ${automation.lastDecision.executionGate.reason}`
+              : automation.lastDecision?.action === 'CE' || automation.lastDecision?.action === 'PE'
+                ? 'EXECUTED'
+                : (automation.lastDecision?.reason || 'Waiting')}
+            good={automation.lastDecision?.action === 'CE' || automation.lastDecision?.action === 'PE'}
+          />
         </div>
 
         <div className="do-trade-card">
