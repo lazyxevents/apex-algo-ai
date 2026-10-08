@@ -818,23 +818,73 @@ class TradingEngine:
         return ranked, observations
 
     def _real_option_candidate(self, provider, best: dict, deployable: float) -> tuple[dict | None, int, str | None]:
+        """Select an exchange-listed, affordable whole-lot PAPER option with diagnostics."""
+        self._last_option_filter_diagnostics = {
+            "reason": "UNKNOWN", "index": best.get("index"),
+            "direction": best.get("action"), "deployableCapital": round(deployable, 2),
+        }
         expiry = provider.nearest_expiry(best["underlyingKey"])
         if not expiry:
+            self._last_option_filter_diagnostics["reason"] = "NO_VALID_EXPIRY"
             return None, 0, None
+
         chain = provider.option_chain(best["underlyingKey"], expiry)
-        option = select_option(chain, best["action"], best["underlyingPrice"], deployable)
-        if not option:
+        self._last_option_filter_diagnostics.update(expiry=expiry, chainStrikes=len(chain))
+        if not chain:
+            self._last_option_filter_diagnostics["reason"] = "EMPTY_OPTION_CHAIN"
             return None, 0, expiry
+
         contracts = provider.option_contracts(best["underlyingKey"])
-        contract = next((x for x in contracts if x.get("instrument_key") == option["instrumentKey"]), None)
-        if not contract:
+        contract_map = {str(row.get("instrument_key")): row for row in contracts if row.get("instrument_key")}
+        self._last_option_filter_diagnostics["contractsAvailable"] = len(contract_map)
+        affordable_chain = []
+        counts = {"missingContract": 0, "invalidLot": 0, "unaffordableLot": 0, "eligible": 0}
+        for row in chain:
+            candidate = dict(row)
+            side_name = "call_options" if best["action"] == "CE" else "put_options"
+            side = row.get(side_name)
+            if not side:
+                continue
+            key = str(side.get("instrument_key") or "")
+            contract = contract_map.get(key)
+            if contract is None:
+                counts["missingContract"] += 1
+                continue
+            lot_size = int(contract.get("lot_size") or contract.get("minimum_lot") or 0)
+            if lot_size <= 0:
+                counts["invalidLot"] += 1
+                continue
+            premium = float((side.get("market_data") or {}).get("ltp") or 0)
+            if premium <= 0 or premium * lot_size > deployable:
+                counts["unaffordableLot"] += 1
+                continue
+            counts["eligible"] += 1
+            affordable_chain.append(candidate)
+        self._last_option_filter_diagnostics.update(counts)
+        if not affordable_chain:
+            self._last_option_filter_diagnostics["reason"] = "NO_AFFORDABLE_LISTED_LOT"
             return None, 0, expiry
+
+        option = select_option(affordable_chain, best["action"], best["underlyingPrice"], deployable, reference_strikes=[float(x.get("strike_price") or 0) for x in chain])
+        if not option:
+            self._last_option_filter_diagnostics["reason"] = "SPREAD_VOLUME_OR_STRIKE_FILTER"
+            self._last_option_filter_diagnostics.update(
+                maxStrictSpreadPct=settings.max_option_spread_pct,
+                minStrictVolume=settings.min_option_volume,
+                maxFallbackSpreadPct=settings.paper_fallback_max_spread_pct,
+                minFallbackVolume=settings.paper_fallback_min_volume,
+                maxOtmSteps=settings.max_otm_steps,
+            )
+            return None, 0, expiry
+        contract = contract_map[option["instrumentKey"]]
         lot_size = int(contract.get("lot_size") or contract.get("minimum_lot") or 0)
         option["displayName"] = contract.get("trading_symbol") or contract.get("name") or option["instrumentKey"]
         option["expiry"] = expiry
         option["lotSize"] = lot_size
         option["priceSource"] = "exchange_option_chain"
         option["quoteTime"] = datetime.now(IST).isoformat()
+        self._last_option_filter_diagnostics["reason"] = "SELECTED"
+        self._last_option_filter_diagnostics["filterTier"] = option.get("filterTier")
         return option, lot_size, expiry
 
     def manual_do_trade_status(self) -> dict:
@@ -1312,6 +1362,7 @@ class TradingEngine:
                             "maxOtmSteps": settings.max_otm_steps,
                             "deployableCapital": round(deployable, 2),
                             "expiry": expiry,
+                            "diagnostics": getattr(self, "_last_option_filter_diagnostics", {}),
                         },
                     )
                     self.state.last_decision = decision

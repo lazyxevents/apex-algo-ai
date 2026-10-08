@@ -511,10 +511,12 @@ def evaluate_mtf_continuation(candles: list[dict]) -> dict:
     }
 
 
-def select_option(chain: list[dict], direction: str, spot: float, deployable_capital: float) -> dict | None:
+def select_option(chain: list[dict], direction: str, spot: float, deployable_capital: float, reference_strikes: list[float] | None = None) -> dict | None:
     candidates: list[dict] = []
     relaxed_candidates: list[dict] = []
     strikes = sorted({float(row.get("strike_price") or 0) for row in chain if float(row.get("strike_price") or 0) > 0})
+    if reference_strikes is not None:
+        strikes = sorted({float(x) for x in reference_strikes if float(x) > 0})
     if not strikes:
         return None
     atm_index = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot))
