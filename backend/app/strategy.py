@@ -513,6 +513,7 @@ def evaluate_mtf_continuation(candles: list[dict]) -> dict:
 
 def select_option(chain: list[dict], direction: str, spot: float, deployable_capital: float) -> dict | None:
     candidates: list[dict] = []
+    relaxed_candidates: list[dict] = []
     strikes = sorted({float(row.get("strike_price") or 0) for row in chain if float(row.get("strike_price") or 0) > 0})
     if not strikes:
         return None
@@ -538,7 +539,9 @@ def select_option(chain: list[dict], direction: str, spot: float, deployable_cap
         if not instrument_key or ltp <= 0:
             continue
         spread_pct = ((ask - bid) / ltp * 100) if ask > 0 and bid > 0 and ask >= bid else 999.0
-        if spread_pct > settings.max_option_spread_pct or volume < settings.min_option_volume:
+        strict = spread_pct <= settings.max_option_spread_pct and volume >= settings.min_option_volume
+        relaxed = spread_pct <= settings.paper_fallback_max_spread_pct and volume >= settings.paper_fallback_min_volume
+        if not relaxed:
             continue
         distance_pct = abs(strike - spot) / max(spot, 1) * 100
         affordable = deployable_capital / ltp
@@ -548,16 +551,19 @@ def select_option(chain: list[dict], direction: str, spot: float, deployable_cap
         distance_score = max(0.0, 1 - distance_pct / 2.0)
         affordability_score = min(1.0, affordable / 100.0)
         score = 0.35 * delta_score + 0.25 * spread_score + 0.20 * liquidity_score + 0.10 * distance_score + 0.10 * affordability_score
-        candidates.append({
+        candidate = {
             "instrumentKey": instrument_key, "strike": strike, "ltp": ltp, "bid": bid, "ask": ask,
             "volume": volume, "oi": int(market.get("oi") or 0), "delta": delta,
             "gamma": float(greeks.get("gamma") or 0), "theta": float(greeks.get("theta") or 0),
             "vega": float(greeks.get("vega") or 0), "iv": float(greeks.get("iv") or 0),
             "spreadPct": round(spread_pct, 3), "selectionScore": round(score, 4),
-        })
-    if not candidates:
+            "filterTier": "STRICT" if strict else "PAPER_FALLBACK",
+        }
+        (candidates if strict else relaxed_candidates).append(candidate)
+    pool = candidates or relaxed_candidates
+    if not pool:
         return None
-    return max(candidates, key=lambda x: x["selectionScore"])
+    return max(pool, key=lambda x: x["selectionScore"])
 
 
 def _simulate_arm(candles: list[dict], arm: StrategyArm) -> dict:
