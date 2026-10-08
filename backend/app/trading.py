@@ -1438,7 +1438,7 @@ class TradingEngine:
                 "entryPolicy": {
                     "standardMinScore": settings.signal_min_score,
                     "smcOverrideMinScore": settings.smc_override_min_score,
-                    "smcOverrideRule": "CHOCH or liquidity sweep, or BOS with directional candle confirmation",
+                    "smcOverrideRule": "CHOCH or liquidity sweep, or BOS with directional candle/momentum confirmation",
                     "maxLiveCandleAgeSeconds": settings.live_trade_candle_max_age_seconds,
                     "staleDataPolicy": "NO_TRADE; stale candles never reach score/SMC execution gates",
                 },
