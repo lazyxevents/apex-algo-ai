@@ -11,7 +11,6 @@ from urllib.parse import quote_plus
 from xml.etree import ElementTree
 
 import httpx
-import yfinance as yf
 from sqlalchemy import func, select
 
 from .core import SessionLocal, settings
@@ -41,18 +40,6 @@ NEWS_QUERIES = [
     "FII DII flows Indian stock market today",
     "Sensex gap up gap down global cues",
 ]
-
-SECTOR_SYMBOLS = {
-    "BANK": "^NSEBANK",
-    "IT": "^CNXIT",
-    "AUTO": "^CNXAUTO",
-    "PHARMA": "^CNXPHARMA",
-    "FMCG": "^CNXFMCG",
-    "METAL": "^CNXMETAL",
-    "REALTY": "^CNXREALTY",
-    "ENERGY": "^CNXENERGY",
-    "PSU_BANK": "^CNXPSUBANK",
-}
 
 HYPOTHESES = [
     {
@@ -349,23 +336,12 @@ class ResearchIntelligenceEngine:
         return results
 
     def sector_snapshot(self) -> list[dict]:
-        rows: list[dict] = []
-        for name, symbol in SECTOR_SYMBOLS.items():
-            try:
-                frame = yf.Ticker(symbol).history(period="5d", interval="1d", auto_adjust=False, actions=False)
-                if frame is None or frame.empty or len(frame) < 2:
-                    continue
-                prev = float(frame["Close"].iloc[-2])
-                last = float(frame["Close"].iloc[-1])
-                if not (isfinite(prev) and isfinite(last)) or prev <= 0:
-                    continue
-                pct = (last - prev) / prev * 100
-                if not isfinite(pct):
-                    continue
-                rows.append({"sector": name, "symbol": symbol, "last": round(last, 2), "changePct": round(pct, 3)})
-            except Exception:
-                continue
-        return sorted(rows, key=lambda x: x["changePct"], reverse=True)
+        """Dhan-only policy: never mix Yahoo/free price feeds into broker-backed research.
+
+        Sector breadth stays empty until explicit Dhan sector instrument mappings
+        are configured. Returning no data is safer than guessing Dhan security IDs.
+        """
+        return []
 
     def seed_hypotheses(self) -> int:
         touched = 0
@@ -607,7 +583,9 @@ class ResearchIntelligenceEngine:
                 "createdAt": r.created_at.isoformat() if r.created_at else None,
             } for r in activity_rows],
             "latestPlan": _parse_json(plan_row.plan_json, {}) if plan_row else {},
-            "latestSectors": _parse_json(plan_row.sectors_json, []) if plan_row else [],
+            # Do not surface historical Yahoo-derived sector rows after the Dhan-only cutover.
+            "latestSectors": [],
+            "sectorDataSource": "DHAN_ONLY_NOT_CONFIGURED",
             "snapshotAt": now_utc.isoformat(),
         })
 
