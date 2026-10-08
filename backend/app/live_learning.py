@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from .core import SessionLocal
 from .llm_advisor import ollama_advisor
@@ -112,6 +112,18 @@ class LiveLearningService:
 
     def snapshot(self, limit: int = 12) -> dict[str, Any]:
         with SessionLocal() as db:
+            # One-time/idempotent cleanup for rows created before NO_TRADE was classified as OBSERVED.
+            repaired = db.execute(
+                update(LiveMarketObservation)
+                .where(
+                    LiveMarketObservation.action == "NO_TRADE",
+                    LiveMarketObservation.outcome == "PENDING",
+                )
+                .values(outcome="OBSERVED", outcome_pnl=0.0)
+            )
+            if repaired.rowcount:
+                db.commit()
+
             valid_filter = LiveMarketObservation.market_price > 0
             total = db.scalar(select(func.count()).select_from(LiveMarketObservation).where(valid_filter)) or 0
             pending = db.scalar(select(func.count()).select_from(LiveMarketObservation).where(
@@ -127,6 +139,7 @@ class LiveLearningService:
                 "mode": "LIVE_MARKET_OBSERVATION",
                 "totalObservations": int(total),
                 "pendingOutcomes": int(pending),
+                "legacyNoTradeRowsRepaired": int(repaired.rowcount or 0),
                 "latest": [self._dict(row) for row in rows],
                 "note": "Raw candle/SMC observations are the primary learning evidence; Ollama review is auxiliary.",
             }
