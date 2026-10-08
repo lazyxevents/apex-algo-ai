@@ -23,6 +23,9 @@ class LiveLearningService:
             "smcOverride": bool(signal.get("smcOverride")),
             "entryReason": signal.get("entryReason"),
             "entryThreshold": signal.get("entryThreshold"),
+            "directionCandidate": signal.get("directionCandidate"),
+            "blockedBy": signal.get("blockedBy") or [],
+            "confirmations": signal.get("confirmations") or {},
         }
         patterns = signal.get("patterns") or {}
         now = datetime.now(timezone.utc)
@@ -84,6 +87,9 @@ class LiveLearningService:
                     "entryReason": signal.get("entryReason"),
                     "entryThreshold": signal.get("entryThreshold"),
                     "smcOverride": bool(signal.get("smcOverride")),
+                    "directionCandidate": signal.get("directionCandidate"),
+                    "blockedBy": signal.get("blockedBy") or [],
+                    "confirmations": signal.get("confirmations") or {},
                 }, default=str),
                 outcome="OBSERVED" if str(signal.get("action") or "NO_TRADE") == "NO_TRADE" else "PENDING",
             )
