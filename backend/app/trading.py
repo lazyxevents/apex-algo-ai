@@ -810,6 +810,14 @@ class TradingEngine:
             signal["rawSignalScore"] = round(base_score, 4)
             signal["score"] = round(base_score * (1.0 - weight) + probability * weight, 4)
             signal["neuralBlendWeight"] = weight
+        # A visually strong score is not sufficient: no entry below the
+        # configured standard threshold, even after neural-score blending.
+        if signal.get("action") in {"CE", "PE"} and float(signal.get("score") or 0) < max(0.65, float(settings.signal_min_score)):
+            signal["directionCandidate"] = signal["action"]
+            signal["action"] = "NO_TRADE"
+            signal["blockedBy"] = list(signal.get("blockedBy") or []) + ["BELOW_EXECUTION_QUALITY_THRESHOLD"]
+            signal["entryReason"] = "QUALITY_GATE"
+            signal["reason"] = "BELOW_EXECUTION_QUALITY_THRESHOLD"
         latest_candle_time = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date") if candles else None
         signal["candleTime"] = latest_candle_time
         signal["dataFreshness"] = freshness
