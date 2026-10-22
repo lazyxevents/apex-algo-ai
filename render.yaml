@@ -1,0 +1,32 @@
+# Render Blueprint for APEX API. Import from the GitHub repository.
+# Initial deployment is safe/idle. Enable PAPER automation only after
+# the old Railway worker is OFF, the external Postgres URL is configured,
+# and the health / data continuity checks have passed.
+services:
+  - type: web
+    name: apex-algo-backend
+    runtime: docker
+    plan: free
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DHAN_CLIENT_ID
+        sync: false
+      - key: DHAN_ACCESS_TOKEN
+        sync: false
+      - key: CORS_ORIGINS_RAW
+        value: https://apexalgoai.vercel.app
+      - key: MARKET_DATA_PROVIDER
+        value: dhan
+      - key: APP_ENV
+        value: production
+      - key: TRADING_MODE
+        value: OFF
+      - key: AUTO_TRADING_ENABLED
+        value: "false"
+      - key: ALLOW_LIVE_ORDERS
+        value: "false"
