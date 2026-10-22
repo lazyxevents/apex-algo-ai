@@ -26,7 +26,7 @@ type Trade = {
   quoteTime?: string | null
 }
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? 'https://apex-algo-backend.onrender.com' : 'http://localhost:8000')
 const INR = new Intl.NumberFormat('en-IN', {
   style: 'currency',
   currency: 'INR',
