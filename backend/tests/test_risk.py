@@ -127,3 +127,33 @@ def test_option_selector_prefers_atm_then_nearest_otm():
     assert selected is not None
     assert selected["strike"] == 71700
     assert selected["moneyness"] == "OTM"
+
+
+def test_live_scan_rejects_countertrend_signal(monkeypatch):
+    import app.trading as trading
+    engine = TradingEngine()
+
+    class Provider:
+        def intraday_candles(self, key):
+            return [{"timestamp": "2026-10-08T14:20:00+05:30", "close": 71500}]
+
+    signal = {
+        "action": "PE", "score": 0.91, "emaFast": 100, "emaSlow": 101, "rsi": 40,
+        "underlyingPrice": 71500, "confirmations": {"bearBreakdown": True},
+        "smc": {"bos": "BEAR"}, "blockedBy": [],
+    }
+    continuation = {
+        "qualified": False,
+        "frames": {"5m": {"trend": "UP"}, "15m": {"trend": "UP"}},
+        "structure": {"previousLowBreak": True},
+    }
+    monkeypatch.setattr(engine, "_candle_freshness", lambda candles: {"fresh": True})
+    monkeypatch.setattr(trading, "market_context", lambda candles: {})
+    monkeypatch.setattr(trading.adaptive_learner, "choose_arm", lambda context, capital: ARMS[0])
+    monkeypatch.setattr(trading, "evaluate_signal", lambda candles, arm: dict(signal))
+    monkeypatch.setattr(trading, "evaluate_mtf_continuation", lambda candles: continuation)
+    monkeypatch.setattr(trading.neural_model_service, "predict_signal", lambda signal: {"status": "insufficient_data"})
+    result = engine._scan_one(Provider(), "SENSEX", "BSE_INDEX|SENSEX", 30000)
+    assert result["action"] == "NO_TRADE"
+    assert "5M_TREND_NOT_ALIGNED" in result["blockedBy"]
+    assert "15M_TREND_OPPOSES" in result["blockedBy"]

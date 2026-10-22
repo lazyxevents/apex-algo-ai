@@ -729,6 +729,40 @@ class TradingEngine:
         signal = evaluate_signal(candles, arm)
         continuation = evaluate_mtf_continuation(candles)
         signal["mtfContinuation"] = continuation
+        # Quality gate: reject contradictory higher-timeframe trends and weak
+        # one-minute entries; preserve the original signal for audit/learning.
+        def quality_reasons(candidate: dict) -> list[str]:
+            side = candidate.get("action")
+            if side not in {"CE", "PE"}:
+                return []
+            frames = continuation.get("frames") or {}
+            d5 = (frames.get("5m") or {}).get("trend")
+            d15 = (frames.get("15m") or {}).get("trend")
+            desired = "UP" if side == "CE" else "DOWN"
+            opposite = "DOWN" if side == "CE" else "UP"
+            reasons: list[str] = []
+            if d5 != desired:
+                reasons.append("5M_TREND_NOT_ALIGNED")
+            if d15 == opposite:
+                reasons.append("15M_TREND_OPPOSES")
+            confirmations = candidate.get("confirmations") or {}
+            structure = continuation.get("structure") or {}
+            smc = candidate.get("smc") or {}
+            structural = (
+                side == "CE" and (confirmations.get("bullBreakout") or structure.get("previousHighBreak") or smc.get("bos") == "BULL")
+            ) or (
+                side == "PE" and (confirmations.get("bearBreakdown") or structure.get("previousLowBreak") or smc.get("bos") == "BEAR")
+            )
+            if not structural:
+                reasons.append("STRUCTURE_CONFIRMATION_MISSING")
+            momentum = (
+                side == "CE" and float(candidate.get("emaFast") or 0) > float(candidate.get("emaSlow") or 0) and float(candidate.get("rsi") or 50) >= 50
+            ) or (
+                side == "PE" and float(candidate.get("emaFast") or 0) < float(candidate.get("emaSlow") or 0) and float(candidate.get("rsi") or 50) <= 50
+            )
+            if not momentum:
+                reasons.append("MOMENTUM_NOT_ALIGNED")
+            return reasons
         if signal.get("action") == "NO_TRADE" and continuation.get("qualified"):
             signal.update({
                 "action": continuation["action"],
@@ -736,6 +770,7 @@ class TradingEngine:
                 "underlyingPrice": continuation["underlyingPrice"],
                 "emaFast": continuation["emaFast"],
                 "emaSlow": continuation["emaSlow"],
+                "confirmations": {"bullBreakout": continuation.get("structure", {}).get("previousHighBreak", False), "bearBreakdown": continuation.get("structure", {}).get("previousLowBreak", False)},
                 "rsi": continuation["rsi"],
                 "previousHigh": continuation["previousHigh"],
                 "previousLow": continuation["previousLow"],
@@ -753,6 +788,13 @@ class TradingEngine:
             chosen_strategy = "APEX_MTF_SMC_SCALP"
         else:
             chosen_strategy = arm.name
+        rejected = quality_reasons(signal)
+        if rejected:
+            signal["directionCandidate"] = signal.get("action")
+            signal["action"] = "NO_TRADE"
+            signal["blockedBy"] = list(signal.get("blockedBy") or []) + rejected
+            signal["entryReason"] = "QUALITY_GATE"
+            signal["reason"] = " | ".join(rejected)
         signal.update({
             "index": name,
             "underlyingKey": key,
@@ -768,6 +810,14 @@ class TradingEngine:
             signal["rawSignalScore"] = round(base_score, 4)
             signal["score"] = round(base_score * (1.0 - weight) + probability * weight, 4)
             signal["neuralBlendWeight"] = weight
+        # A visually strong score is not sufficient: no entry below the
+        # configured standard threshold, even after neural-score blending.
+        if signal.get("action") in {"CE", "PE"} and float(signal.get("score") or 0) < max(0.65, float(settings.signal_min_score)):
+            signal["directionCandidate"] = signal["action"]
+            signal["action"] = "NO_TRADE"
+            signal["blockedBy"] = list(signal.get("blockedBy") or []) + ["BELOW_EXECUTION_QUALITY_THRESHOLD"]
+            signal["entryReason"] = "QUALITY_GATE"
+            signal["reason"] = "BELOW_EXECUTION_QUALITY_THRESHOLD"
         latest_candle_time = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date") if candles else None
         signal["candleTime"] = latest_candle_time
         signal["dataFreshness"] = freshness
