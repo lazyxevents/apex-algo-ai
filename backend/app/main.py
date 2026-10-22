@@ -19,6 +19,7 @@ from .neural_model import neural_model_service
 from .notifications import push_notification_service
 from .research_engine import research_engine
 from .strategy import adaptive_learner
+from .strategy_lab import LAB_STRATEGIES, strategy_lab
 from .trading import trading_engine
 from .upstox import upstox_service
 
@@ -298,6 +299,21 @@ def neural_learning_train():
 @app.get("/api/research/intelligence")
 def research_intelligence():
     return research_engine.snapshot()
+
+
+@app.get("/api/research/strategy-lab/catalog")
+def strategy_lab_catalog():
+    return {"strategies": LAB_STRATEGIES, "researchOnly": True, "autoPromotion": False}
+
+
+@app.post("/api/research/strategy-lab/run-once")
+def strategy_lab_run_once():
+    if not market_service.market_ready:
+        raise HTTPException(status_code=503, detail="Market data provider is not configured")
+    try:
+        return strategy_lab.run(market_service)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)[:300]) from exc
 
 
 @app.post("/api/research/run-once")
