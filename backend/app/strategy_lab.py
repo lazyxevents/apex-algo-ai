@@ -113,7 +113,10 @@ def _setup_candidates(prefix: list[dict]) -> list[tuple[str, str]]:
 def _evaluate_trade(candles: list[dict], i: int, direction: str, horizon: int = 10, rr: float = 1.5) -> dict:
     prefix = candles[: i + 1]
     atr = _atr(prefix)
-    entry = float(candles[i]["close"])
+    # Signal is only known after candle i closes; fill at next open.
+    if i + 1 >= len(candles):
+        return {"outcome": "SKIP", "r": 0.0, "mfeR": 0.0, "maeR": 0.0}
+    entry = float(candles[i + 1]["open"])
     if atr <= 0:
         return {"outcome": "SKIP", "r": 0.0, "mfeR": 0.0, "maeR": 0.0}
     stop = entry - atr if direction == "CE" else entry + atr
@@ -143,6 +146,8 @@ def _evaluate_trade(candles: list[dict], i: int, direction: str, horizon: int = 
         last = float(future[-1]["close"])
         raw = (last - entry) / atr if direction == "CE" else (entry - last) / atr
         final_r = max(-1.0, min(rr, raw))
+    # Round-trip transaction-cost proxy, in underlying price units.
+    final_r -= (entry * 20.0 / 10000.0) / atr
     return {
         "outcome": outcome,
         "r": round(final_r, 4),
@@ -172,6 +177,7 @@ class StrategyLab:
                 continue
 
             buckets: dict[str, list[dict]] = {k: [] for k in LAB_STRATEGIES}
+            split_index = int(len(candles) * 0.7)
             # Sample every second bar to keep repeated nightly research bounded.
             for i in range(60, len(candles) - 12, 2):
                 for strategy_name, direction in _setup_candidates(candles[: i + 1]):
@@ -181,6 +187,7 @@ class StrategyLab:
                     buckets[strategy_name].append({
                         "time": candles[i].get("timestamp"),
                         "direction": direction,
+                        "set": "TRAIN" if i + 10 < split_index else "HOLDOUT" if i >= split_index else "BOUNDARY",
                         **outcome,
                     })
 
@@ -195,8 +202,20 @@ class StrategyLab:
                 avg_mae = sum(float(x["maeR"]) for x in rows) / max(1, trades)
                 win_rate = wins / max(1, wins + losses) * 100 if wins + losses else 0.0
                 score = expectancy * min(1.0, trades / 30.0)
-                status = "PROMISING" if trades >= 12 and expectancy > 0.12 and win_rate >= 48 else "WATCH" if trades >= 6 else "LOW_SAMPLE"
+                holdout = [x for x in rows if x["set"] == "HOLDOUT"]
+                holdout_expectancy = sum(x["r"] for x in holdout) / len(holdout) if holdout else 0.0
+                status = "RESEARCH_CANDIDATE" if len(holdout) >= 12 and holdout_expectancy > 0.12 else "WATCH" if trades >= 6 else "LOW_SAMPLE"
+                train_rows = [x for x in rows if x["set"] == "TRAIN"]
+                holdout_rows = [x for x in rows if x["set"] == "HOLDOUT"]
                 metrics = {
+                    "researchOnly": True,
+                    "usesOptionPremium": False,
+                    "costBpsRoundTrip": 20.0,
+                    "entryFill": "NEXT_CANDLE_OPEN",
+                    "trainSamples": len(train_rows),
+                    "holdoutSamples": len(holdout_rows),
+                    "trainExpectancyR": round(sum(x["r"] for x in train_rows) / len(train_rows), 4) if train_rows else None,
+                    "holdoutExpectancyR": round(sum(x["r"] for x in holdout_rows) / len(holdout_rows), 4) if holdout_rows else None,
                     "trades": trades,
                     "wins": wins,
                     "losses": losses,
@@ -252,6 +271,9 @@ class StrategyLab:
             "status": "completed",
             "runAt": now.isoformat(),
             "totalSetupTests": total_tests,
+            "researchOnly": True,
+            "modelTrained": False,
+            "warning": "Underlying candles are not executable option premiums; no model promotion or orders.",
             "markets": results,
         }
 
