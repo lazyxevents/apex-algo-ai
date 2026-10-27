@@ -236,7 +236,7 @@ class TradingEngine:
         if settings.dynamic_risk_limits:
             return {
                 "perTrade": capital * settings.risk_per_trade_pct / 100,
-                "daily": capital * settings.max_daily_loss_pct / 100,
+                "daily": min(800.0, capital * settings.max_daily_loss_pct / 100),
                 "weekly": capital * settings.max_weekly_loss_pct / 100,
                 "monthly": capital * settings.max_monthly_drawdown_pct / 100,
             }
