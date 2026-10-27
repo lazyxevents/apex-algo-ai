@@ -702,6 +702,21 @@ export default function App() {
       </div>
     </header>
 
+    <section className="apex-v3-hero" aria-label="APEX scalping command center">
+      <div className="apex-v3-avatar" aria-hidden="true"><span className="apex-v3-orbit">✦</span><span className="apex-v3-face">◈</span><span className="apex-v3-core">AI</span></div>
+      <div className="apex-v3-message">
+        <small>APEX / INTELLIGENCE CORE / SENSEX 1M</small>
+        <h2>SCALP <em>COMMAND</em> CENTER</h2>
+        <p>SMC signals • 5m/15m confirmation • neural evidence • dynamic, cost-aware exits. No forced entries, no broker orders.</p>
+        <div className="apex-v3-tags"><span>● {automation.running ? 'SCANNER RUNNING' : 'SCANNER OFFLINE'}</span><span>{status.mode === 'PAPER' ? 'PAPER ACTIVE' : 'PAPER INACTIVE'}</span><span>{providerReady ? 'MARKET FEED READY' : 'CHECK DHAN FEED'}</span></div>
+      </div>
+      <div className="apex-v3-targets">
+        <div><small>DAILY NET PROFIT MILESTONE</small><strong>₹1,000</strong><span>Goal only · not guaranteed</span></div>
+        <div><small>DAILY LOSS SAFETY LOCK</small><strong className="apex-v3-red">₹800</strong><span>At ₹40k baseline · real fills may slip</span></div>
+        <div><small>CAPITAL / RISK / FREQUENCY</small><b>70% / 1% / 5</b><span>Max allocation / risk per trade / trades per day</span></div>
+      </div>
+    </section>
+
     {error && <div className="notice error">Connection issue: {error}</div>}
     {notice && <div className={`notice ${notice.kind === 'ok' ? 'ok' : 'error'}`} aria-live="polite">{notice.text}</div>}
 
