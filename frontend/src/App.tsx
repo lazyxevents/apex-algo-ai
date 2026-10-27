@@ -713,7 +713,7 @@ export default function App() {
     </nav>
 
     <section className="apex-robot-shell" aria-label="APEX interactive robot companion">
-      <ApexRobotCompanion mode={String(status.mode || 'OFF')} feedStale={feedStale} marketReady={providerReady} scanning={Boolean(automation.running)} openCount={openTrades.length} />
+      <ApexRobotCompanion mode={String(status.mode || 'OFF')} feedStale={feedStale} marketReady={providerReady} scanning={Boolean(automation.running)} openTrades={openTrades} trades={trades} dailyPnl={Number(r.dailyPnl || 0)} dailyLocked={Boolean(r.dailyLocked)} />
     </section>
 
     <section className="apex-v3-hero" aria-label="APEX scalping command center">
@@ -1454,76 +1454,77 @@ function LearningJar({readiness, model}:{readiness:any, model:any}) {
 }
 
 
-function ApexRobotCompanion({mode,feedStale,marketReady,scanning,openCount}:{mode:string,feedStale:boolean,marketReady:boolean,scanning:boolean,openCount:number}) {
-  const [gaze,setGaze] = useState({x:0,y:0})
+function ApexRobotCompanion({mode,feedStale,marketReady,scanning,openTrades,trades,dailyPnl,dailyLocked}:{mode:string,feedStale:boolean,marketReady:boolean,scanning:boolean,openTrades:Trade[],trades:Trade[],dailyPnl:number,dailyLocked:boolean}) {
+  const [muted,setMuted] = useState(true)
   const [speaking,setSpeaking] = useState(false)
-  const [listening,setListening] = useState(false)
-  const [heard,setHeard] = useState('')
-  const [reply,setReply] = useState('')
-  const mood = feedStale || !marketReady ? 'alert' : openCount > 0 ? 'focused' : mode !== 'PAPER' || !scanning ? 'sleepy' : 'happy'
-  const messages: Record<string,string> = {
-    alert: 'मार्केट डेटा पुराना या अनुपलब्ध है। नई ट्रेड एंट्री रोकना सुरक्षित है।',
-    focused: 'अभी '+openCount+' पेपर पोज़िशन खुली है। स्टॉप लॉस और रिस्क पर ध्यान दें।',
-    sleepy: 'पेपर स्कैनर सक्रिय नहीं है। पहले सिस्टम स्टेटस चेक करें।',
-    happy: 'मैं सेंसेक्स में अच्छे स्कैल्प सेटअप का इंतजार कर रही हूँ। कोई जबरदस्ती ट्रेड नहीं।'
-  }
-  const statusMessage = messages[mood]
-  const speechRef = useRef<{stop?:()=>void}|null>(null)
-  useEffect(()=>()=>{speechRef.current?.stop?.();if('speechSynthesis' in window)window.speechSynthesis.cancel()},[])
-  const say = (text:string) => {
-    if (!('speechSynthesis' in window)) return
+  const [announcement,setAnnouncement] = useState('AXI तैयार है। आवाज़ सुनने के लिए Unmute करें।')
+  const [gaze,setGaze] = useState({x:0,y:0})
+  const initialized = useRef(false)
+  const previous = useRef({mode:'',feedStale:false,scanning:false,dailyLocked:false,openIds:new Set<number>(),closedIds:new Set<number>()})
+  const mood = dailyLocked || feedStale || !marketReady ? 'alert' : openTrades.length ? 'focused' : mode !== 'PAPER' || !scanning ? 'sleepy' : 'happy'
+  const say = useCallback((message:string)=>{
+    setAnnouncement(message)
+    if(muted || !('speechSynthesis' in window))return
     window.speechSynthesis.cancel()
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang='hi-IN'; utterance.rate=.96; utterance.pitch=1.09
-    const voices=window.speechSynthesis.getVoices()
-    const hindiVoice=voices.find(v=>v.lang.toLowerCase().startsWith('hi'))
-    if(hindiVoice)utterance.voice=hindiVoice
-    utterance.onstart=()=>setSpeaking(true)
-    utterance.onend=()=>setSpeaking(false)
-    utterance.onerror=()=>setSpeaking(false)
-    window.speechSynthesis.speak(utterance)
+    const voice = new SpeechSynthesisUtterance(message)
+    voice.lang='hi-IN';voice.rate=.96;voice.pitch=1.04
+    const hindi=window.speechSynthesis.getVoices().find(v=>v.lang.toLowerCase().startsWith('hi'))
+    if(hindi)voice.voice=hindi
+    voice.onstart=()=>setSpeaking(true)
+    voice.onend=()=>setSpeaking(false)
+    voice.onerror=()=>setSpeaking(false)
+    window.speechSynthesis.speak(voice)
+  },[muted])
+  useEffect(()=>{
+    if(muted && 'speechSynthesis' in window){window.speechSynthesis.cancel();setSpeaking(false)}
+  },[muted])
+  useEffect(()=>()=>{if('speechSynthesis' in window)window.speechSynthesis.cancel()},[])
+  useEffect(()=>{
+    const openIds=new Set(openTrades.map(t=>t.id))
+    const closed=trades.filter(t=>t.status!=='OPEN')
+    const closedIds=new Set(closed.map(t=>t.id))
+    const old=previous.current
+    if(!initialized.current){
+      initialized.current=true
+      previous.current={mode,feedStale,scanning,dailyLocked,openIds,closedIds}
+      return
+    }
+    let message=''
+    const entered=openTrades.find(t=>!old.openIds.has(t.id))
+    const exited=closed.find(t=>!old.closedIds.has(t.id) && old.openIds.has(t.id))
+    if(entered) message='नया पेपर ट्रेड खुला है। '+entered.symbol+' '+entered.direction+'। एंट्री '+entered.entry+' रुपये। स्टॉप लॉस '+entered.stop+'। टारगेट '+entered.target+'।'
+    else if(exited)message='पेपर ट्रेड बंद हुआ। '+exited.symbol+'। दर्ज पी एंड एल '+Number(exited.pnl || 0).toFixed(0)+' रुपये।'
+    else if(dailyLocked&&!old.dailyLocked)message='सावधान। दैनिक लॉस लिमिट लग चुकी है। नई पेपर एंट्री बंद रहेंगी।'
+    else if(feedStale&&!old.feedStale)message='सावधान। सेंसेक्स मार्केट डेटा स्टेल है। नई ट्रेड एंट्री नहीं लेनी चाहिए।'
+    else if(!feedStale&&old.feedStale&&marketReady)message='सेंसेक्स मार्केट डेटा फिर से उपलब्ध है। रिस्क और सिग्नल चेक जारी हैं।'
+    else if(mode!==old.mode)message=mode==='PAPER'?'पेपर ट्रेडिंग मोड सक्रिय हुआ। वास्तविक ब्रोकर ऑर्डर बंद हैं।':'ट्रेडिंग मोड बदलकर '+mode+' हो गया है।'
+    else if(scanning!==old.scanning)message=scanning?'एपेक्स स्कैनर चालू है। सेंसेक्स स्कैल्प सेटअप मॉनिटर किए जा रहे हैं।':'एपेक्स स्कैनर फिलहाल बंद है।'
+    previous.current={mode,feedStale,scanning,dailyLocked,openIds,closedIds}
+    if(message)say(message)
+  },[mode,feedStale,marketReady,scanning,openTrades,trades,dailyLocked,say])
+  const toggleMute=()=>{
+    if(!muted){window.speechSynthesis?.cancel();setSpeaking(false)}
+    setMuted(v=>!v)
   }
-  const respond = (spoken:string) => {
-    const q=spoken.toLowerCase()
-    let answer=statusMessage
-    if(/नमस्ते|hello|हेलो|कैसी|कैसे हो/.test(q))answer='नमस्ते! मैं ए.एक्स.आई. हूँ, आपका सेंसेक्स पेपर ट्रेडिंग असिस्टेंट।'
-    else if(/ट्रेड|trade|position|पोजिशन/.test(q))answer=openCount>0?'अभी '+openCount+' पेपर ट्रेड खुली हैं। वास्तविक ऑर्डर बंद हैं।':'इस समय कोई खुली पेपर पोज़िशन नहीं है। सिग्नल मिलने से ट्रेड की गारंटी नहीं होती।'
-    else if(/मार्केट|market|डाटा|डेटा|feed/.test(q))answer=feedStale||!marketReady?'फीड तैयार नहीं है या डेटा स्टेल है। नई एंट्री से बचें।':'मार्केट डेटा कॉन्फ़िगर दिखाई दे रहा है। ताज़ा कैंडल की जाँच आवश्यक है।'
-    else if(/प्रॉफिट|profit|नुकसान|loss|रिस्क|risk/.test(q))answer='दैनिक लक्ष्य एक हज़ार रुपये है, गारंटी नहीं। पेपर डेली लॉस गार्ड आठ सौ रुपये है और प्रति ट्रेड नियोजित रिस्क चार सौ रुपये है।'
-    else if(/न्यूरल|neural|learning|सीख/.test(q))answer='न्यूरल मॉडल की प्रगति लेबल्ड डेटा और वैलिडेशन पर निर्भर है। केवल दिन बीतने से मॉडल प्रशिक्षित नहीं होता।'
-    else if(/सुन|बोल|आवाज|voice/.test(q))answer='मैं हिन्दी में जवाब दे सकती हूँ। माइक्रोफोन की अनुमति ब्राउज़र से देनी होगी।'
-    setHeard(spoken);setReply(answer);say(answer)
-  }
-  const listen=()=>{
-    const w=window as unknown as {SpeechRecognition?:new()=>any;webkitSpeechRecognition?:new()=>any}
-    const Recognition=w.SpeechRecognition||w.webkitSpeechRecognition
-    if(!Recognition){setReply('इस ब्राउज़र में स्पीच रिकग्निशन उपलब्ध नहीं है। Chrome में माइक्रोफोन आज़माएँ।');return}
-    if(listening){speechRef.current?.stop?.();setListening(false);return}
-    try{
-      const rec=new Recognition();rec.lang='hi-IN';rec.interimResults=false;rec.maxAlternatives=1
-      rec.onresult=(event:any)=>{const transcript=String(event.results?.[0]?.[0]?.transcript||'');if(transcript)respond(transcript)}
-      rec.onerror=()=>{setListening(false);setReply('माइक्रोफोन सुन नहीं पाया। अनुमति और ब्राउज़र सेटिंग जाँचें।')}
-      rec.onend=()=>setListening(false)
-      speechRef.current=rec;rec.start();setListening(true)
-    }catch{setListening(false);setReply('माइक्रोफोन शुरू नहीं हो पाया।')}
-  }
-  const followPointer=(event: MouseEvent<HTMLDivElement>)=>{
+  const followPointer=(event:MouseEvent<HTMLDivElement>)=>{
     const r=event.currentTarget.getBoundingClientRect()
     setGaze({x:Math.max(-6,Math.min(6,(event.clientX-r.left-r.width/2)/15)),y:Math.max(-4,Math.min(4,(event.clientY-r.top-r.height/2)/18))})
   }
   return <div className={`apex-robot-console mood-${mood} ${speaking?'robot-talking':''}`}>
-    <div className="apex-robot-stage" onMouseMove={followPointer} onMouseLeave={()=>setGaze({x:0,y:0})} role="img" aria-label="AXI humanoid assistant with market-reactive expressions and pointer-following eyes">
+    <div className="apex-robot-stage" onMouseMove={followPointer} onMouseLeave={()=>setGaze({x:0,y:0})} role="img" aria-label="AXI हिन्दी status robot">
       <div className="robot-halo"/><div className="robot-aura"/>
       <div className="robot-head"><div className="robot-antenna"><span/></div><div className="robot-ear left"/><div className="robot-ear right"/><div className="robot-visor"><span className="robot-eye" style={{transform:`translate(${gaze.x}px,${gaze.y}px)`}}/><span className="robot-eye" style={{transform:`translate(${gaze.x}px,${gaze.y}px)`}}/><span className="robot-mouth"/></div></div>
       <div className="robot-neck"/><div className="robot-torso"><div className="robot-reactor">✧</div></div>
     </div>
     <div className="apex-robot-dialog">
-      <div className="robot-title"><span className="robot-live-dot"/><b>AXI // हिन्दी AI सहायक</b><small>{listening?'● LISTENING':speaking?'● SPEAKING':'● READY'}</small></div>
-      <h3>{mood==='alert'?'⚠ डेटा अलर्ट':mood==='focused'?'◉ ट्रेड वॉच':mood==='sleepy'?'◌ स्टैंडबाय':'✦ मार्केट स्कैन'}</h3>
-      <p>{reply||statusMessage}</p>
-      {heard&&<div className="axi-transcript">आपने कहा: {heard}</div>}
-      <div className="robot-actions"><button type="button" className="robot-voice-button" onClick={listen}>{listening?'■ सुनना बंद करें':'🎙 हिन्दी में बोलें'}</button><button type="button" className="robot-greet-button" onClick={()=>say(reply||statusMessage)} disabled={speaking}>♫ जवाब सुनें</button><span>{mood.toUpperCase()} • PAPER COPILOT</span></div>
-      <small className="robot-hint">ब्राउज़र माइक्रोफोन/हिन्दी TTS पर निर्भर। जवाब तय नियमों और लाइव dashboard state पर आधारित हैं; यह स्वतंत्र LLM chat नहीं है।</small>
+      <div className="robot-title"><span className="robot-live-dot"/><b>AXI // हिन्दी स्टेटस सहायक</b><small>{muted?'MUTED':speaking?'SPEAKING':'WATCHING'}</small></div>
+      <h3>{mood==='alert'?'⚠ रिस्क / डेटा अलर्ट':mood==='focused'?'◉ ट्रेड वॉच':mood==='sleepy'?'◌ स्टैंडबाय':'✦ मार्केट स्कैन'}</h3>
+      <p aria-live="polite">{announcement}</p>
+      <div className="robot-actions">
+        <button type="button" className={muted?'robot-greet-button':'robot-voice-button'} onClick={toggleMute} aria-pressed={!muted}>{muted?'🔇 Unmute AXI':'🔊 Mute AXI'}</button>
+        <span>{mood.toUpperCase()} • {dailyPnl>=0?'आज का P&L +':'आज का P&L '}{dailyPnl.toFixed(0)} ₹</span>
+      </div>
+      <small className="robot-hint">AXI केवल status बदलाव पर हिन्दी में बोलेगी। Mute तुरंत आवाज़ रोकेगा। Browser background speech की अनुमति सीमित कर सकता है।</small>
     </div>
   </div>
 }
