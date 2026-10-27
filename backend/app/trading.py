@@ -956,7 +956,7 @@ class TradingEngine:
             "cutoffTime": settings.manual_do_trade_cutoff_time,
             "targetPoints": settings.manual_do_trade_target_points,
             "stopPoints": settings.manual_do_trade_stop_points,
-            "capitalUsagePct": settings.manual_do_trade_capital_usage_pct,
+            "capitalUsagePct": min(70.0, settings.capital_usage_pct, settings.manual_do_trade_capital_usage_pct),
             "minMtfScore": settings.manual_do_trade_min_mtf_score,
             "carryForward": bool(settings.manual_do_trade_carry_forward),
             "requiresFreshData": True,
@@ -1051,7 +1051,7 @@ class TradingEngine:
             week_pnl = self._period_pnl(db, "week")
             month_pnl = self._period_pnl(db, "month")
 
-        deployable = capital * max(0.0, min(100.0, settings.manual_do_trade_capital_usage_pct)) / 100.0
+        deployable = capital * max(0.0, min(70.0, settings.capital_usage_pct, settings.manual_do_trade_capital_usage_pct)) / 100.0
         best = {
             "index": "SENSEX",
             "underlyingKey": underlying_key,
