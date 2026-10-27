@@ -983,3 +983,32 @@ footer{font-size:11px}
   .provider-main span{line-height:1.45}
   .market-chart-panel{padding:13px 10px 10px}
 }
+
+
+/* APEX V3: AI-forward SENSEX scalp console */
+.shell{max-width:1660px}
+.topbar{background:linear-gradient(110deg,rgba(15,38,58,.94),rgba(9,20,38,.65));border:1px solid rgba(93,216,205,.18);border-radius:20px;padding:18px 22px;margin-bottom:16px}
+.brand-mark{background:linear-gradient(145deg,#33f2c4,#3886fd)!important;box-shadow:0 0 34px rgba(29,232,186,.35);color:#061321!important}
+.apex-v3-hero{display:grid;grid-template-columns:130px minmax(0,1fr) 286px;gap:22px;align-items:center;padding:25px;margin-bottom:20px;position:relative;overflow:hidden;border:1px solid rgba(75,223,199,.35);border-radius:24px;background:radial-gradient(circle at 17% 22%,rgba(28,165,160,.19),transparent 38%),linear-gradient(116deg,#0c2734 0%,#101c35 48%,#171b35 100%);box-shadow:0 22px 55px rgba(0,0,0,.25)}
+.apex-v3-hero:after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(110deg,transparent 58%,rgba(109,85,250,.065));}
+.apex-v3-avatar{position:relative;width:118px;height:118px;display:flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid rgba(82,245,210,.52);background:radial-gradient(circle at 50% 42%,rgba(39,225,187,.4),rgba(22,60,88,.72) 48%,#0a192b 70%);box-shadow:0 0 0 9px rgba(56,205,187,.045),0 0 55px rgba(38,235,184,.22)}
+.apex-v3-face{font-size:64px;color:#65f9d8;text-shadow:0 0 22px rgba(99,255,208,.8)}
+.apex-v3-orbit{position:absolute;top:4px;right:9px;font-size:22px;color:#b9fdf0;animation:apexSpin 8s linear infinite}
+.apex-v3-core{position:absolute;bottom:15px;font-size:12px;letter-spacing:.25em;color:white;font-weight:800}
+@keyframes apexSpin{50%{transform:rotate(180deg)}100%{transform:rotate(360deg)}}
+.apex-v3-message{position:relative;z-index:1;min-width:0}
+.apex-v3-message small{font-size:10px;letter-spacing:.18em;color:#69f5d2;font-weight:800}
+.apex-v3-message h2{font-size:clamp(25px,3vw,43px);letter-spacing:-.045em;line-height:1.1;margin:9px 0 11px;color:#fff}
+.apex-v3-message h2 em{font-style:normal;color:#60f0cd}
+.apex-v3-message p{color:#a9bfd0;font-size:13px;line-height:1.7;max-width:640px}
+.apex-v3-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.apex-v3-tags span{font-size:10px;font-weight:800;letter-spacing:.045em;color:#c7fef2;background:rgba(66,214,183,.1);border:1px solid rgba(86,226,200,.22);padding:8px 10px;border-radius:9px}
+.apex-v3-targets{display:grid;gap:10px;position:relative;z-index:1}
+.apex-v3-targets>div{display:flex;flex-direction:column;gap:3px;background:rgba(5,17,34,.6);border:1px solid rgba(140,198,231,.13);padding:12px 14px;border-radius:13px}
+.apex-v3-targets small{font-size:9px;letter-spacing:.08em;color:#91aec1;font-weight:800}
+.apex-v3-targets strong{font-size:27px;color:#68ffd1;font-variant-numeric:tabular-nums}
+.apex-v3-targets strong.apex-v3-red{color:#ff8993}
+.apex-v3-targets b{font-size:19px;color:white}
+.apex-v3-targets span{color:#94abbc;font-size:10px}
+@media(max-width:1040px){.apex-v3-hero{grid-template-columns:110px 1fr}.apex-v3-targets{grid-column:1/-1;grid-template-columns:repeat(3,1fr)}}
+@media(max-width:640px){.apex-v3-hero{grid-template-columns:1fr;padding:18px;gap:12px}.apex-v3-avatar{width:86px;height:86px}.apex-v3-face{font-size:48px}.apex-v3-targets{grid-template-columns:1fr;gap:8px}.apex-v3-message h2{font-size:29px}.topbar{padding:12px}}
