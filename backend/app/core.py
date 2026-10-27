@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     capital: float = 40000
     min_trading_capital: float = 5000
-    capital_usage_pct: float = 80.0
+    capital_usage_pct: float = 70.0
     auto_compound_profits: bool = True
     max_deployable_capital: float = 0.0
     dynamic_risk_limits: bool = True
@@ -33,9 +33,9 @@ class Settings(BaseSettings):
     max_daily_loss_pct: float = 2.0
     max_weekly_loss_pct: float = 4.0
     max_monthly_drawdown_pct: float = 10.0
-    monthly_profit_target_pct: float = 20.0
+    monthly_profit_target_pct: float = 10.0
     monthly_target_lock: bool = True
-    max_risk_per_trade: float = 200
+    max_risk_per_trade: float = 400
     max_daily_loss: float = 400
     max_weekly_loss: float = 800
     max_monthly_drawdown: float = 2000
@@ -58,9 +58,9 @@ class Settings(BaseSettings):
     manual_do_trade_cutoff_time: str = "15:20"
     manual_do_trade_target_points: float = 30.0
     manual_do_trade_stop_points: float = 15.0
-    manual_do_trade_capital_usage_pct: float = 100.0
+    manual_do_trade_capital_usage_pct: float = 70.0
     manual_do_trade_min_mtf_score: float = 0.50
-    manual_do_trade_carry_forward: bool = True
+    manual_do_trade_carry_forward: bool = False
     swing_first_target_points: float = 55.0
     swing_runner_target_points: float = 150.0
     swing_partial_pct: float = 50.0
