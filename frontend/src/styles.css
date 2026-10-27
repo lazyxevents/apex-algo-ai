@@ -1012,3 +1012,32 @@ footer{font-size:11px}
 .apex-v3-targets span{color:#94abbc;font-size:10px}
 @media(max-width:1040px){.apex-v3-hero{grid-template-columns:110px 1fr}.apex-v3-targets{grid-column:1/-1;grid-template-columns:repeat(3,1fr)}}
 @media(max-width:640px){.apex-v3-hero{grid-template-columns:1fr;padding:18px;gap:12px}.apex-v3-avatar{width:86px;height:86px}.apex-v3-face{font-size:48px}.apex-v3-targets{grid-template-columns:1fr;gap:8px}.apex-v3-message h2{font-size:29px}.topbar{padding:12px}}
+
+/* NEURAL SCALP OS V4 — complete visual skin; graph components retained */
+:root{font-family:"Inter","Space Grotesk",ui-sans-serif,system-ui,sans-serif;color:#e9faff;background:#050916}
+html,body,#root{min-height:100%;background:#050916}
+body{background:radial-gradient(ellipse at 15% 5%,rgba(54,220,206,.12),transparent 34%),radial-gradient(ellipse at 92% 18%,rgba(116,76,245,.16),transparent 31%),#050916}
+.shell{width:min(100% - 32px,1740px);max-width:1740px}
+.topbar{position:relative;border:1px solid rgba(95,238,215,.23);border-radius:26px;background:linear-gradient(115deg,rgba(13,22,42,.97),rgba(12,14,34,.89));box-shadow:0 18px 60px rgba(0,0,0,.3);backdrop-filter:blur(18px)}
+.brand h1{letter-spacing:-.055em;font-weight:850}
+.brand-mark{border-radius:17px!important;transform:rotate(-9deg)}
+.apex-v3-hero{grid-template-columns:175px minmax(0,1fr) 300px;min-height:294px;border-radius:30px;border-color:rgba(105,252,225,.33);padding:30px;background:radial-gradient(circle at 12% 48%,rgba(39,255,218,.19),transparent 30%),radial-gradient(circle at 70% -8%,rgba(128,71,254,.2),transparent 45%),linear-gradient(127deg,#081727,#101b35 52%,#15142d 100%);box-shadow:0 20px 70px rgba(0,0,0,.4),inset 0 1px rgba(255,255,255,.08)}
+.apex-v3-avatar{width:156px;height:156px;isolation:isolate;background:radial-gradient(circle at 42% 36%,#1aaac4,#173764 55%,#060f26 80%);border:1px solid #5ce9ea;box-shadow:0 0 0 16px rgba(38,218,227,.045),0 0 80px rgba(40,232,224,.26),inset 0 0 35px rgba(91,226,245,.2)}
+.apex-v3-face{font-size:83px;color:#b0faff;text-shadow:0 0 30px #3af4e2;animation:neuralFace 3.6s ease-in-out infinite}
+.apex-v3-core{background:#071a29;border:1px solid #4cddd3;border-radius:7px;padding:3px 6px;bottom:21px;box-shadow:0 0 17px #19c2aa}
+.neural-avatar-ring{position:absolute;inset:-19px;border-radius:50%;border:1px dashed rgba(111,254,226,.35);animation:neuralOrbit 20s linear infinite;pointer-events:none}
+.neural-avatar-ring.ring-two{inset:-31px;border-color:rgba(154,121,255,.3);animation-direction:reverse;animation-duration:34s}
+.neural-avatar-spark{position:absolute;width:8px;height:8px;border-radius:50%;background:#affff6;box-shadow:0 0 16px #3bfff1;top:0;left:20px}
+.neural-avatar-spark.s2{top:auto;bottom:7px;left:auto;right:15px;background:#ae8fff}
+.neural-os-version{font-size:13px;letter-spacing:.07em;color:#a5a4ca;vertical-align:middle}
+.apex-v3-message h2{font-size:clamp(28px,3.3vw,51px);letter-spacing:-.06em}
+.apex-v3-message h2 em{background:linear-gradient(90deg,#83ffea,#8aabff);background-clip:text;-webkit-background-clip:text;color:transparent}
+.apex-v3-tags span{border-radius:999px;background:rgba(28,161,151,.12)}
+.apex-v3-targets>div{border-radius:17px;background:rgba(4,13,28,.68);border-color:rgba(106,211,233,.16)}
+.provider-banner,.summary-grid>*,.learning-core-card,.panel,.knowledge-graph{box-shadow:0 12px 35px rgba(0,0,0,.16);border-radius:20px}
+.neural-graph{border:1px solid rgba(81,243,214,.24);background:radial-gradient(circle at 50% 50%,rgba(41,221,210,.07),transparent 65%),rgba(6,13,28,.9)}
+@keyframes neuralFace{0%,100%{opacity:.88;transform:scale(.96)}50%{opacity:1;transform:scale(1.08)}}
+@keyframes neuralOrbit{to{transform:rotate(360deg)}}
+@media(max-width:1100px){.apex-v3-hero{grid-template-columns:155px 1fr}.apex-v3-targets{grid-column:1/-1}.apex-v3-avatar{width:128px;height:128px}}
+@media(max-width:650px){.shell{width:calc(100% - 20px)}.apex-v3-hero{grid-template-columns:1fr;padding:23px;min-height:0}.apex-v3-avatar{width:112px;height:112px;margin:8px 0 15px 15px}.apex-v3-face{font-size:65px}.apex-v3-targets{grid-template-columns:1fr}.apex-v3-message h2{font-size:34px}}
+@media(prefers-reduced-motion:reduce){.apex-v3-face,.neural-avatar-ring,.apex-v3-orbit{animation:none!important}}
