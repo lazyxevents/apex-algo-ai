@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     monthly_profit_target_pct: float = 10.0
     monthly_target_lock: bool = True
     max_risk_per_trade: float = 400
-    max_daily_loss: float = 400
+    max_daily_loss: float = 800
     max_weekly_loss: float = 800
     max_monthly_drawdown: float = 2000
     max_trades_per_day: int = 5
