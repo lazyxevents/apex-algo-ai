@@ -683,7 +683,7 @@ export default function App() {
   const killDisabled = Boolean(busy || killed)
   const resetDisabled = Boolean(busy || !killed)
 
-  return <main className="shell">
+  return <main className="shell apex-reference-shell">
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">A</span>
@@ -701,6 +701,16 @@ export default function App() {
         </div>
       </div>
     </header>
+
+    <nav className="ref-ticker-strip" aria-label="APEX market command ribbon">
+      <div className="ref-ticker-item ref-ticker-primary"><span className="ref-ticker-symbol">◈ SENSEX</span><b>{Number(marketResearch?.analytics?.markets?.SENSEX?.lastPrice || 0) > 0 ? Number(marketResearch.analytics.markets.SENSEX.lastPrice).toLocaleString('en-IN') : '—'}</b><small>LIVE MARKET</small></div>
+      <div className="ref-ticker-item"><small>ENGINE</small><b>{automation.running?'SCANNING':'STANDBY'}</b><span className={automation.running?'positive':'negative'}>●</span></div>
+      <div className="ref-ticker-item"><small>DATA FEED</small><b>{providerReady&&!feedStale?'FRESH':'CHECK FEED'}</b></div>
+      <div className="ref-ticker-item"><small>POSITIONS</small><b>{openTrades.length} / {r.maxConcurrentPositions ?? 1}</b></div>
+      <div className="ref-ticker-item"><small>DAILY NET</small><b className={pnlClass(r.dailyPnl)}>{money(r.dailyPnl)}</b></div>
+      <div className="ref-ticker-item ref-ticker-date"><small>LOCAL IST</small><b>{formatClock(clock)}</b></div>
+      <div className="ref-ticker-item ref-ticker-paper"><b>◉ {status.mode}</b><small>SIMULATION ONLY</small></div>
+    </nav>
 
     <section className="apex-robot-shell" aria-label="APEX interactive robot companion">
       <ApexRobotCompanion mode={String(status.mode || 'OFF')} feedStale={feedStale} marketReady={providerReady} scanning={Boolean(automation.running)} openCount={openTrades.length} />
@@ -762,6 +772,15 @@ export default function App() {
       loading={chartLoading}
       error={chartError}
     />
+
+    <section className="ref-compact-strip" aria-label="APEX risk and neural indicators">
+      <div className="ref-mini-card"><small>◉ TRADE RADAR</small><strong>{automation.running?'ACTIVE':'PAUSED'}</strong><span>SENSEX • 1M / 5M / 15M</span></div>
+      <div className="ref-mini-card"><small>◇ PAPER EXPOSURE</small><strong>{money(runningDeployed)}</strong><span>70% cash ceiling</span></div>
+      <div className="ref-mini-card"><small>◈ RISK METER</small><strong>{money(r.riskPerTrade)}</strong><span>Planned per trade</span></div>
+      <div className="ref-mini-card"><small>⊞ SCALPS TODAY</small><strong>{r.tradesToday || 0} / 5</strong><span>Never force entries</span></div>
+      <div className="ref-mini-card"><small>♢ DAILY SAFETY</small><strong>₹800</strong><span>Loss guardrail, not guaranteed</span></div>
+      <div className="ref-mini-card"><small>✦ NEURAL CORE</small><strong>{status.neuralModel?.production?.version || 'SHADOW'}</strong><span>Validation before promotion</span></div>
+    </section>
 
     <section className="summary-grid">
       <Metric title="Running P&L" value={money(runningPnl)} sub={openTrades.length ? `${runningPnlPct >= 0 ? '+' : ''}${percent(runningPnlPct)} on open positions` : 'No open position'} tone={pnlClass(runningPnl)} />
