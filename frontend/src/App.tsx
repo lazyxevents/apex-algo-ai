@@ -702,6 +702,10 @@ export default function App() {
       </div>
     </header>
 
+    <section className="apex-robot-shell" aria-label="APEX interactive robot companion">
+      <ApexRobotCompanion mode={String(status.mode || 'OFF')} feedStale={feedStale} marketReady={providerReady} scanning={Boolean(automation.running)} openCount={openTrades.length} />
+    </section>
+
     <section className="apex-v3-hero" aria-label="APEX scalping command center">
       <div className="apex-v3-avatar" aria-hidden="true"><span className="apex-v3-orbit">✦</span><span className="apex-v3-face">◈</span><span className="apex-v3-core">AI</span><span className="neural-avatar-ring ring-one"/><span className="neural-avatar-ring ring-two"/><span className="neural-avatar-spark s1"/><span className="neural-avatar-spark s2"/></div>
       <div className="apex-v3-message">
@@ -1426,6 +1430,62 @@ function LearningJar({readiness, model}:{readiness:any, model:any}) {
         <span><b>{readiness?.classBalanceReady ? 'YES' : 'NO'}</b> class balance</span>
       </div>
       <small>This jar measures first-training readiness from clean labeled SMC V2 outcomes; it is not a promise of model accuracy or profit.</small>
+    </div>
+  </div>
+}
+
+
+function ApexRobotCompanion({mode,feedStale,marketReady,scanning,openCount}:{mode:string,feedStale:boolean,marketReady:boolean,scanning:boolean,openCount:number}) {
+  const [gaze,setGaze] = useState({x:0,y:0})
+  const [speaking,setSpeaking] = useState(false)
+  const [greeting,setGreeting] = useState(false)
+  const mood = feedStale || !marketReady ? 'alert' : openCount > 0 ? 'focused' : mode !== 'PAPER' || !scanning ? 'sleepy' : 'happy'
+  const lines:Record<string,string> = {
+    alert:'Market feed needs attention. I will not suggest entries on stale data.',
+    focused:'A paper position is active. Risk limits and stop loss remain the priority.',
+    sleepy:'Paper scanner is not active. Review readiness before enabling it.',
+    happy:'I am scanning SENSEX for qualified scalping setups. No forced entries.'
+  }
+  const message = lines[mood]
+  const speak = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(message)
+    utterance.rate = 0.94
+    utterance.pitch = 1.08
+    utterance.onstart = () => setSpeaking(true)
+    utterance.onend = () => setSpeaking(false)
+    utterance.onerror = () => setSpeaking(false)
+    window.speechSynthesis.speak(utterance)
+  }
+  const followPointer = (event: React.MouseEvent<HTMLDivElement>) => {
+    const r = event.currentTarget.getBoundingClientRect()
+    setGaze({x:Math.max(-6,Math.min(6,(event.clientX-r.left-r.width/2)/15)),y:Math.max(-4,Math.min(4,(event.clientY-r.top-r.height/2)/18))})
+  }
+  return <div className={`apex-robot-console mood-${mood} ${speaking?'robot-talking':''}`}>
+    <div className="apex-robot-stage" onMouseMove={followPointer} onMouseLeave={()=>setGaze({x:0,y:0})} role="img" aria-label={`Animated humanoid robot with ${mood} expression, eyes follow mouse movement`}>
+      <div className="robot-halo"/><div className="robot-aura"/>
+      <div className="robot-head">
+        <div className="robot-antenna"><span/></div>
+        <div className="robot-ear left"/><div className="robot-ear right"/>
+        <div className="robot-visor">
+          <span className="robot-eye" style={{transform:`translate(${gaze.x}px,${gaze.y}px)`}}/>
+          <span className="robot-eye" style={{transform:`translate(${gaze.x}px,${gaze.y}px)`}}/>
+          <span className="robot-mouth"/>
+        </div>
+      </div>
+      <div className="robot-neck"/><div className="robot-torso"><div className="robot-reactor">✧</div></div>
+    </div>
+    <div className="apex-robot-dialog">
+      <div className="robot-title"><span className="robot-live-dot"/> <b>AXI // NEURAL COPILOT</b><small>REACTIVE AVATAR</small></div>
+      <h3>{mood==='alert'?'DATA ALERT':mood==='focused'?'TRADE WATCH':mood==='sleepy'?'STANDBY':'MARKET SCAN ACTIVE'}</h3>
+      <p>{greeting?'Hello! I am AXI, your paper trading research companion. I respond to market states; I cannot predict guaranteed profits.':message}</p>
+      <div className="robot-actions">
+        <button type="button" onClick={speak} disabled={speaking} className="robot-voice-button">{speaking?'◉ Speaking…':'◉ Hear AXI'}</button>
+        <button type="button" className="robot-greet-button" onClick={()=>setGreeting(x=>!x)}>{greeting?'Show status':'Talk to AXI'}</button>
+        <span>{mood.toUpperCase()} EXPRESSION</span>
+      </div>
+      <small className="robot-hint">Robot eyes track pointer movement; voice uses your browser. No camera or microphone access.</small>
     </div>
   </div>
 }
