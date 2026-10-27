@@ -1041,3 +1041,57 @@ body{background:radial-gradient(ellipse at 15% 5%,rgba(54,220,206,.12),transpare
 @media(max-width:1100px){.apex-v3-hero{grid-template-columns:155px 1fr}.apex-v3-targets{grid-column:1/-1}.apex-v3-avatar{width:128px;height:128px}}
 @media(max-width:650px){.shell{width:calc(100% - 20px)}.apex-v3-hero{grid-template-columns:1fr;padding:23px;min-height:0}.apex-v3-avatar{width:112px;height:112px;margin:8px 0 15px 15px}.apex-v3-face{font-size:65px}.apex-v3-targets{grid-template-columns:1fr}.apex-v3-message h2{font-size:34px}}
 @media(prefers-reduced-motion:reduce){.apex-v3-face,.neural-avatar-ring,.apex-v3-orbit{animation:none!important}}
+
+/* AXI V5: all-dashboard surfaces, reactive humanoid robot */
+body{background:radial-gradient(circle at 8% 12%,rgba(51,237,198,.12),transparent 27%),radial-gradient(circle at 93% 32%,rgba(108,78,255,.13),transparent 39%),#070b1c!important}
+.shell{max-width:1760px}
+.shell>section:not(.apex-robot-shell):not(.apex-v3-hero),.shell>.two-col,.shell>.details-grid{position:relative}
+.panel,.provider-banner,.freshness-banner,.market-chart-panel,.positions-panel,.research-ops-panel,.intelligence-panel,.learning-panel,.live-learning-panel,.summary-grid>*{background:linear-gradient(145deg,rgba(15,29,51,.98),rgba(10,16,37,.97))!important;border:1px solid rgba(120,174,221,.19)!important;border-radius:23px!important;box-shadow:inset 0 1px rgba(255,255,255,.035),0 20px 42px rgba(0,0,0,.18)!important}
+.panel:hover,.summary-grid>*:hover{border-color:rgba(86,228,201,.35)!important}
+.panel h2,.panel h3,.section-title{letter-spacing:-.035em}
+.panel table{border-collapse:separate;border-spacing:0 5px}
+.panel table thead th{color:#8edecf!important;letter-spacing:.08em;text-transform:uppercase;font-size:10px!important}
+.panel table tbody tr{background:rgba(19,39,63,.44);transition:background .22s}
+.panel table tbody tr:hover{background:rgba(40,97,116,.3)}
+.panel table tbody td{border-bottom:1px solid rgba(114,179,205,.12)}
+.action-btn,.panel button:not(.robot-voice-button){border-radius:12px;transition:transform .18s,box-shadow .18s,border-color .18s}
+.action-btn:hover:not(:disabled),.panel button:hover:not(:disabled){transform:translateY(-1px)}
+.knowledge-graph,.neural-graph{background:radial-gradient(circle at 50% 46%,rgba(23,192,215,.14),transparent 58%),#080f23!important;border:1px solid rgba(45,222,198,.32)!important}
+.learning-core-card{background:linear-gradient(150deg,rgba(12,39,57,.96),rgba(15,17,43,.97))!important}
+.apex-robot-shell{margin:16px 0 22px}
+.apex-robot-console{--bot-glow:#62ffdf;display:grid;grid-template-columns:220px minmax(0,1fr);align-items:center;gap:24px;min-height:260px;border:1px solid rgba(84,234,211,.38);border-radius:28px;padding:24px 30px;background:radial-gradient(circle at 13% 48%,rgba(24,200,185,.2),transparent 33%),linear-gradient(118deg,#0b1e32,#101a36 58%,#171632);box-shadow:0 20px 70px rgba(0,0,0,.28);overflow:hidden}
+.apex-robot-console.mood-alert{--bot-glow:#ff9d73}.apex-robot-console.mood-sleepy{--bot-glow:#94a9eb}.apex-robot-console.mood-focused{--bot-glow:#f9cf69}
+.apex-robot-stage{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;height:220px;transform-style:preserve-3d;cursor:crosshair}
+.robot-halo{position:absolute;width:210px;height:210px;border-radius:50%;border:1px dashed color-mix(in srgb,var(--bot-glow),transparent 50%);box-shadow:0 0 50px color-mix(in srgb,var(--bot-glow),transparent 85%);animation:axiOrbit 19s linear infinite}
+.robot-aura{position:absolute;width:145px;height:145px;border-radius:50%;background:var(--bot-glow);filter:blur(60px);opacity:.13}
+.robot-head{width:122px;height:113px;position:relative;z-index:3;border-radius:38px 38px 42px 42px;background:linear-gradient(145deg,#c6ecfa,#719fbe 42%,#29567d 85%);border:3px solid #bddce9;box-shadow:inset -15px -8px 22px rgba(13,30,63,.55),0 13px 22px rgba(0,0,0,.36);animation:axiBob 3.7s ease-in-out infinite}
+.robot-antenna{position:absolute;left:50%;top:-24px;width:5px;height:23px;border-radius:5px;background:#a4dcf3;transform:translateX(-50%)}
+.robot-antenna span{position:absolute;left:-5px;top:-10px;width:15px;height:15px;border-radius:50%;background:var(--bot-glow);box-shadow:0 0 18px var(--bot-glow)}
+.robot-ear{position:absolute;top:41px;width:14px;height:35px;border-radius:8px;background:linear-gradient(#aed9ec,#386986);border:2px solid #c7e9f8}
+.robot-ear.left{left:-14px}.robot-ear.right{right:-14px}
+.robot-visor{position:absolute;top:25px;left:12px;right:12px;height:64px;background:linear-gradient(180deg,#07182b,#122c45);border-radius:24px;border:2px solid #4d748c;display:flex;align-items:flex-start;justify-content:center;gap:26px;padding-top:16px;overflow:hidden;box-shadow:inset 0 0 24px rgba(0,0,0,.6)}
+.robot-eye{width:16px;height:18px;border-radius:9px;background:var(--bot-glow);box-shadow:0 0 17px var(--bot-glow);transition:transform .12s}
+.mood-happy .robot-eye{border-radius:12px 12px 4px 4px;transform:rotate(9deg)}
+.mood-sleepy .robot-eye{height:5px;margin-top:9px}.mood-alert .robot-eye{transform:skewY(-13deg)}
+.robot-mouth{position:absolute;bottom:9px;left:50%;transform:translateX(-50%);width:29px;height:9px;border-bottom:3px solid var(--bot-glow);border-radius:0 0 50% 50%}
+.mood-alert .robot-mouth{width:10px;height:10px;border:2px solid var(--bot-glow);border-radius:50%}
+.mood-focused .robot-mouth{width:24px;height:2px;border-radius:0}
+.robot-talking .robot-mouth{animation:axiTalk .19s ease-in-out infinite alternate}
+.robot-neck{height:13px;width:31px;background:linear-gradient(90deg,#315f81,#8dbcd1);z-index:2}
+.robot-torso{width:124px;height:68px;border-radius:40px 40px 20px 20px;background:linear-gradient(135deg,#b3e1ed,#4a759a 64%,#294362);border:3px solid #94c5da;box-shadow:inset -12px -9px 16px rgba(0,0,0,.3);display:flex;justify-content:center;align-items:center}
+.robot-reactor{font-size:36px;line-height:1;color:var(--bot-glow);text-shadow:0 0 20px var(--bot-glow)}
+.apex-robot-dialog{min-width:0;z-index:2}
+.robot-title{display:flex;align-items:center;flex-wrap:wrap;gap:11px;color:#80ffdf;font-size:12px;letter-spacing:.15em}
+.robot-title small{color:#91a3cb}
+.robot-live-dot{width:9px;height:9px;border-radius:50%;background:var(--bot-glow);box-shadow:0 0 13px var(--bot-glow)}
+.apex-robot-dialog h3{font-size:clamp(25px,3.1vw,44px);margin:9px 0;color:white;letter-spacing:-.055em}
+.apex-robot-dialog p{font-size:14px;color:#bbd2e1;line-height:1.75;max-width:670px}
+.robot-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:18px 0 12px}
+.robot-actions button{cursor:pointer;border-radius:11px;padding:10px 15px;font-weight:800;font-size:12px}
+.robot-voice-button{color:#041929;background:#8cf8df;border:1px solid #9df9e3}
+.robot-greet-button{color:#a9fff1;background:rgba(63,210,191,.13);border:1px solid rgba(100,244,212,.35)}
+.robot-actions span{font-size:10px;color:var(--bot-glow);letter-spacing:.08em}
+.robot-hint{color:#8299ab;font-size:10px}
+@keyframes axiOrbit{to{transform:rotate(360deg)}}@keyframes axiBob{50%{transform:translateY(-6px)}}@keyframes axiTalk{to{height:18px;border-radius:30%}}
+@media(max-width:700px){.apex-robot-console{grid-template-columns:1fr;gap:8px;padding:18px}.apex-robot-stage{height:218px}.robot-actions{gap:8px}}
+@media(prefers-reduced-motion:reduce){.robot-halo,.robot-head,.robot-talking .robot-mouth{animation:none!important}}
