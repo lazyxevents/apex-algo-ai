@@ -1442,6 +1442,15 @@ class TradingEngine:
             entry = float(option["ltp"])
             strategy_name = str(best.get("chosenStrategy") or best.get("strategy") or "")
             is_scalp = "SCALP" in strategy_name.upper()
+            if not is_scalp:
+                decision.update({
+                    "action": "NO_TRADE",
+                    "reason": "SCALPING_ONLY_POLICY",
+                    "blockedBy": ["SWING_STRATEGY_DISABLED"],
+                    "strategy": strategy_name,
+                })
+                self.state.last_decision = decision
+                return decision
             delta = max(0.05, abs(float(option.get("delta") or settings.target_delta)))
             previous_low = float(best.get("previousLow") or best["underlyingPrice"])
             previous_high = float(best.get("previousHigh") or best["underlyingPrice"])
