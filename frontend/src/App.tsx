@@ -703,11 +703,11 @@ export default function App() {
     </header>
 
     <section className="apex-v3-hero" aria-label="APEX scalping command center">
-      <div className="apex-v3-avatar" aria-hidden="true"><span className="apex-v3-orbit">✦</span><span className="apex-v3-face">◈</span><span className="apex-v3-core">AI</span></div>
+      <div className="apex-v3-avatar" aria-hidden="true"><span className="apex-v3-orbit">✦</span><span className="apex-v3-face">◈</span><span className="apex-v3-core">AI</span><span className="neural-avatar-ring ring-one"/><span className="neural-avatar-ring ring-two"/><span className="neural-avatar-spark s1"/><span className="neural-avatar-spark s2"/></div>
       <div className="apex-v3-message">
         <small>APEX / INTELLIGENCE CORE / SENSEX 1M</small>
-        <h2>SCALP <em>COMMAND</em> CENTER</h2>
-        <p>SMC signals • 5m/15m confirmation • neural evidence • dynamic, cost-aware exits. No forced entries, no broker orders.</p>
+        <h2>NEURAL <em>SCALP OS</em><span className="neural-os-version"> / V4</span></h2>
+        <p>Autonomous-looking intelligence workspace, deterministic PAPER decisions. SMC structure + 1m execution, 5m/15m confirmation, neural shadow evaluation and cost-aware exits.</p>
         <div className="apex-v3-tags"><span>● {automation.running ? 'SCANNER RUNNING' : 'SCANNER OFFLINE'}</span><span>{status.mode === 'PAPER' ? 'PAPER ACTIVE' : 'PAPER INACTIVE'}</span><span>{providerReady ? 'MARKET FEED READY' : 'CHECK DHAN FEED'}</span></div>
       </div>
       <div className="apex-v3-targets">
@@ -1111,7 +1111,7 @@ export default function App() {
                 ? m.decision.blockedBy.join(' • ')
                 : m.action === 'NO_TRADE'
                   ? (m.decision?.reason || 'NO_TRADE')
-                  : 'PASSED'}
+                  : m.tradeId ? 'EXECUTED' : (m.action === 'CE' || m.action === 'PE') ? 'SIGNAL QUALIFIED · ORDER NOT FILLED' : 'NOT APPLICABLE'}
               {m.decision?.directionCandidate && m.action === 'NO_TRADE' ? <><br/>Candidate {m.decision.directionCandidate}</> : null}
             </small></td>
             <td><small>
@@ -1124,7 +1124,7 @@ export default function App() {
                       <small>{m.decision.executionBlock.details.diagnostics.reason || 'UNKNOWN'}</small>
                       <pre style={{whiteSpace:'pre-wrap',fontSize:'11px'}}>{JSON.stringify(m.decision.executionBlock.details.diagnostics, null, 2)}</pre>
                     </details> : null}</>
-                  : (m.action === 'NO_TRADE' ? '—' : 'SIGNAL ONLY')}
+                  : (m.action === 'NO_TRADE' ? (m.decision?.reason || 'NO SIGNAL') : (String(m.strategy || '').toUpperCase().includes('SCALP') ? 'SIGNAL ONLY · NO PAPER FILL' : 'SCALP-ONLY POLICY · NO FILL'))}
             </small></td>
             <td><small>{m.ollama?.status || (ollama.configured ? 'waiting' : 'not configured')}<br/>{m.ollama?.bias || '—'} {Number.isFinite(Number(m.ollama?.confidence)) ? `${Math.round(Number(m.ollama.confidence)*100)}%` : ''}</small></td>
             <td><span className={`trade-status ${m.decision?.executionBlock ? 'BLOCKED' : m.tradeId ? m.outcome : (m.action === 'CE' || m.action === 'PE') ? 'SIGNAL' : m.outcome}`}>
