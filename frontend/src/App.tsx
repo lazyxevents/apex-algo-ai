@@ -988,6 +988,19 @@ export default function App() {
         <SystemItem label="LLM model" value={ollama.model || '—'} />
       </div>
 
+      <section style={{border:'1px solid rgba(62,180,150,.45)',background:'rgba(25,125,105,.08)',borderRadius:16,padding:'16px 18px',marginBottom:18}} aria-label="APEX SENSEX scalping policy">
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
+          <div><small style={{letterSpacing:'.12em',opacity:.8}}>PAPER MODE · SENSEX</small><h3 style={{margin:'4px 0'}}>Scalping Risk Desk</h3></div>
+          <strong style={{fontSize:12,border:'1px solid currentColor',padding:'5px 10px',borderRadius:20}}>NO LIVE ORDERS</strong>
+        </div>
+        <div className="core-stat-grid" style={{marginTop:12}}>
+          <span><small>Allocation ceiling</small><b>70% capital</b></span>
+          <span><small>Planned risk ceiling</small><b>1% / ₹400 baseline</b></span>
+          <span><small>Daily trades</small><b>Max 5</b></span>
+          <span><small>Exit logic</small><b>Dynamic SL / cost-adjusted TP</b></span>
+        </div>
+        <p style={{margin:'10px 0 0',fontSize:12,opacity:.8}}>Only qualified SMC scalps. Actual quantity follows exchange lot size, spread, loss headroom and available capital. Configuration is not a guaranteed profit or daily trade. Deployment environment can override shown baseline limits.</p>
+      </section>
       <div className="auto-learning-core">
         <div className="learning-core-card neural-core-card">
           <div className="core-card-head">
