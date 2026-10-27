@@ -1145,3 +1145,53 @@ body,html,#root{background:#040615!important}
 @media(max-width:1300px){.shell>.apex-v3-hero,.shell>.provider-banner,.shell>.market-chart-panel,.shell>.intelligence-panel,.shell>.learning-panel{grid-column:1/8}.shell>.apex-robot-shell,.shell>.research-ops-panel,.shell>.live-learning-panel{grid-column:8/-1}.shell>.apex-v3-hero{grid-template-columns:110px 1fr}.shell>.apex-v3-hero .apex-v3-targets{grid-column:1/-1;grid-template-columns:repeat(3,1fr)}}
 @media(max-width:930px){.shell{display:block!important;width:calc(100% - 20px)}.shell>.apex-v3-hero,.shell>.apex-robot-shell,.shell>.provider-banner,.shell>.summary-grid,.shell>.panel,.shell>.two-col,.shell>.details-grid{margin-bottom:14px}.apex-robot-console{min-height:0;grid-template-columns:180px 1fr!important;text-align:left}.shell .summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:620px){.apex-robot-console{grid-template-columns:1fr!important}.shell .summary-grid{grid-template-columns:1fr}.shell>.apex-v3-hero{grid-template-columns:1fr}.shell .apex-v3-hero .apex-v3-targets{grid-template-columns:1fr}.shell .apex-v3-avatar{width:100px;height:100px}}
+
+/* Screenshot-accurate cockpit composition: chart | HUD | Hindi copilot */
+@media(min-width:1251px){
+.shell{grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-flow:row dense;gap:10px;padding:10px!important}
+.shell>.topbar{grid-column:1/-1;grid-row:1;min-height:62px}
+.shell>.market-chart-panel{grid-column:1/7!important;grid-row:2!important;margin:0!important;min-height:455px}
+.shell>.apex-v3-hero{grid-column:7/10!important;grid-row:2!important;min-height:455px!important;height:100%;margin:0!important;display:flex!important;flex-direction:column;align-items:center;justify-content:space-between;padding:15px!important;text-align:center}
+.shell>.apex-v3-hero .apex-v3-avatar{height:145px;width:145px;flex-shrink:0}
+.shell>.apex-v3-hero .apex-v3-message h2{font-size:22px;line-height:1.15}
+.shell>.apex-v3-hero .apex-v3-message p{font-size:11px;line-height:1.45}
+.shell>.apex-v3-hero .apex-v3-tags{justify-content:center;margin-top:8px;gap:4px}
+.shell>.apex-v3-hero .apex-v3-tags span{font-size:9px;padding:5px 7px}
+.shell>.apex-v3-hero .apex-v3-targets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))!important;grid-column:auto!important;gap:5px;width:100%}
+.shell>.apex-v3-hero .apex-v3-targets>div{padding:7px 3px!important}
+.shell>.apex-v3-hero .apex-v3-targets small{font-size:7px;line-height:1.3}
+.shell>.apex-v3-hero .apex-v3-targets strong{font-size:17px}
+.shell>.apex-v3-hero .apex-v3-targets b{font-size:13px}
+.shell>.apex-v3-hero .apex-v3-targets span{font-size:8px}
+.shell>.apex-robot-shell{grid-column:10/-1!important;grid-row:2!important;margin:0!important;min-height:455px}
+.shell>.apex-robot-shell .apex-robot-console{height:100%;min-height:455px!important;padding:12px!important;gap:0!important;display:flex!important;flex-direction:column;justify-content:space-between}
+.shell>.apex-robot-shell .apex-robot-stage{height:205px;flex:0 0 205px}
+.shell>.apex-robot-shell .apex-robot-dialog{width:100%}
+.shell>.apex-robot-shell .apex-robot-dialog h3{font-size:18px!important}
+.shell>.apex-robot-shell .apex-robot-dialog p{font-size:11px;line-height:1.5}
+.shell>.apex-robot-shell .robot-hint{font-size:9px}
+.shell>.provider-banner{grid-column:1/-1!important;grid-row:3!important}
+.shell>.summary-grid{grid-column:1/-1!important;grid-row:4!important}
+.shell>.intelligence-panel{grid-column:1/7!important;grid-row:5!important}
+.shell>.research-ops-panel{grid-column:7/-1!important;grid-row:5!important}
+.shell>.learning-panel{grid-column:1/9!important;grid-row:6!important}
+.shell>.live-learning-panel{grid-column:9/-1!important;grid-row:6!important}
+.shell>.positions-panel{grid-column:1/-1!important;grid-row:7!important}
+.shell>.two-col{grid-column:1/-1!important;grid-row:8!important}
+.shell>.details-grid{grid-column:1/-1!important;grid-row:9!important}
+.shell>.freshness-banner{grid-column:1/-1!important;grid-row:auto!important}
+}
+@media(min-width:1251px) and (max-width:1540px){
+.shell>.apex-v3-hero .apex-v3-avatar{height:110px;width:110px}
+.shell>.apex-robot-shell .apex-robot-stage{height:170px;flex-basis:170px}
+.shell>.apex-v3-hero .apex-v3-message h2{font-size:18px}
+}
+@media(max-width:1250px) and (min-width:931px){
+.shell{display:grid;grid-template-columns:repeat(12,minmax(0,1fr))}
+.shell>.topbar{grid-column:1/-1}
+.shell>.market-chart-panel{grid-column:1/8!important;grid-row:2}
+.shell>.apex-v3-hero{grid-column:8/-1!important;grid-row:2}
+.shell>.apex-robot-shell{grid-column:1/-1!important;grid-row:3}
+.shell>.apex-robot-shell .apex-robot-console{min-height:260px;grid-template-columns:200px 1fr!important}
+.shell>.provider-banner,.shell>.summary-grid,.shell>.positions-panel,.shell>.two-col,.shell>.details-grid{grid-column:1/-1!important}
+}
