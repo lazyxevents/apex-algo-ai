@@ -145,6 +145,46 @@ def health():
     }
 
 
+@app.get("/healthz")
+def uptime_health():
+    """UptimeRobot-friendly readiness check; no external Dhan calls."""
+    database = db_health()
+    if database != "connected":
+        raise HTTPException(status_code=503, detail="database_unavailable")
+    return {"status": "ok", "database": "connected", "service": "apex-backend"}
+
+
+@app.get("/api/diagnostics/readiness")
+def readiness_diagnostics():
+    """Read-only reason codes for no trades and neural training progress."""
+    mode = trading_engine.state.mode
+    provider = market_service.status()
+    db_ok = db_health() == "connected"
+    gates = {
+        "paperMode": mode == "PAPER",
+        "autoTradingEnabled": bool(settings.auto_trading_enabled),
+        "automationLoopRunning": bool(trading_engine.state.automation_running),
+        "databaseConnected": db_ok,
+        "marketDataConfigured": bool(market_service.market_ready),
+        "liveOrdersDisabled": not bool(settings.allow_live_orders),
+    }
+    result = {
+        "readyForPaperScans": all(gates.values()),
+        "gates": gates,
+        "blockedBy": [key for key, ok in gates.items() if not ok],
+        "lastAutomationError": trading_engine.state.last_error,
+        "lastMarketError": provider.get("lastError"),
+        "lastCandleTime": provider.get("latestCandleTime"),
+        "note": "No-trade reasons are readiness checks only; signal quality and risk gates apply independently.",
+    }
+    if db_ok:
+        try:
+            result["neural"] = neural_model_service.snapshot().get("trainingReadiness")
+        except Exception:
+            result["neural"] = {"state": "unavailable"}
+    return result
+
+
 @app.get("/api/system/status")
 def system_status():
     execution = (
