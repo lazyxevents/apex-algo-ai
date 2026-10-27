@@ -1091,7 +1091,14 @@ class TradingEngine:
             max(0.0, float(limits["weekly"]) + float(week_pnl)),
             max(0.0, float(limits["monthly"]) + float(month_pnl)),
         )
-        lots_by_loss_lock = floor(hard_headroom / max(stop_distance * lot_size, 0.01))
+        # Whole-lot sizing includes the estimated stop exit cost and slippage.
+        estimated_stop_fees = float(estimate_paper_costs(
+            entry, stop, lot_size, exchange="BSE", synthetic=synthetic_demo,
+        )["total"]) / max(1, lot_size)
+        slippage_per_unit = max(0.05, entry * max(0.0, float(option.get("spreadPct") or 0)) / 100.0)
+        effective_risk_per_unit = stop_distance + estimated_stop_fees + slippage_per_unit
+        risk_budget = min(hard_headroom, min(capital, 40000.0) * 0.01)
+        lots_by_loss_lock = floor(risk_budget / max(effective_risk_per_unit * lot_size, 0.01))
         lots = max(0, min(lots_by_cash, lots_by_loss_lock))
         qty = lots * lot_size
         if qty <= 0:
