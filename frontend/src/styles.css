@@ -1095,3 +1095,53 @@ body{background:radial-gradient(circle at 8% 12%,rgba(51,237,198,.12),transparen
 @keyframes axiOrbit{to{transform:rotate(360deg)}}@keyframes axiBob{50%{transform:translateY(-6px)}}@keyframes axiTalk{to{height:18px;border-radius:30%}}
 @media(max-width:700px){.apex-robot-console{grid-template-columns:1fr;gap:8px;padding:18px}.apex-robot-stage{height:218px}.robot-actions{gap:8px}}
 @media(prefers-reduced-motion:reduce){.robot-halo,.robot-head,.robot-talking .robot-mouth{animation:none!important}}
+
+/* APEX CYBER-DECK V6: dense neon desktop cockpit, all panels reorganized */
+:root{--apex-cyan:#26eaff;--apex-pink:#fa40fa;--apex-purple:#864dff;--apex-deck:#080d27}
+body,html,#root{background:#040615!important}
+.shell{max-width:1900px;width:calc(100% - 26px);padding:8px!important;display:grid;grid-template-columns:repeat(12,minmax(0,1fr));column-gap:11px;row-gap:12px;align-items:start}
+.shell>.topbar,.shell>.notice,.shell>.freshness-banner{grid-column:1/-1}
+.shell>.topbar{background:linear-gradient(90deg,#0e0a31,#101039 50%,#080b2c)!important;border:1px solid rgba(225,51,255,.65)!important;box-shadow:0 0 18px rgba(207,41,255,.18),inset 0 0 0 1px rgba(31,217,255,.19)!important;padding:12px 19px!important;border-radius:12px!important}
+.shell>.apex-v3-hero{grid-column:1/9;grid-row:auto;background:linear-gradient(125deg,#091333,#140e40 72%,#200e41)!important;min-height:240px;padding:19px 22px!important;border-radius:13px!important;border:1px solid #3a8aff!important;box-shadow:inset 0 1px rgba(22,246,255,.22),0 0 20px rgba(71,61,255,.15)!important}
+.shell>.apex-robot-shell{grid-column:9/-1;grid-row:span 2;margin:0;align-self:stretch}
+.shell>.provider-banner{grid-column:1/9}
+.shell>.market-chart-panel{grid-column:1/9}
+.shell>.summary-grid{grid-column:1/-1}
+.shell>.intelligence-panel{grid-column:1/9}
+.shell>.research-ops-panel{grid-column:9/-1}
+.shell>.learning-panel{grid-column:1/9}
+.shell>.live-learning-panel{grid-column:9/-1}
+.shell>.positions-panel{grid-column:1/-1}
+.shell>.two-col,.shell>.details-grid{grid-column:1/-1}
+.shell>.panel:not(.market-chart-panel):not(.intelligence-panel):not(.research-ops-panel):not(.learning-panel):not(.live-learning-panel):not(.positions-panel){grid-column:1/-1}
+.shell>.apex-v3-hero,.shell>.apex-robot-shell,.shell>.provider-banner,.shell>.summary-grid,.shell>.panel,.shell>.two-col,.shell>.details-grid{min-width:0}
+.apex-robot-console{height:100%;min-height:525px;grid-template-columns:1fr!important;align-content:center;gap:5px!important;text-align:center;background:radial-gradient(circle at 50% 30%,rgba(42,231,248,.18),transparent 41%),linear-gradient(145deg,#0c0d31,#180e40)!important;border:1px solid rgba(230,60,255,.7)!important;border-radius:14px!important;box-shadow:0 0 24px rgba(228,32,255,.13)!important;padding:16px 18px!important}
+.apex-robot-stage{height:225px}
+.apex-robot-dialog{text-align:left}
+.apex-robot-dialog h3{font-size:23px!important;margin:8px 0!important}
+.apex-robot-dialog p{font-size:13px}
+.axi-transcript{font-size:12px;color:#a7e9ff;padding:8px 10px;margin:8px 0;border-left:2px solid #25eaff;background:rgba(26,162,233,.08)}
+.robot-actions{justify-content:flex-start;margin:11px 0!important}
+.robot-actions button{padding:9px 11px!important}
+.shell .panel,.shell .provider-banner,.shell .summary-grid>*,.shell .learning-core-card,.shell .freshness-banner{border-radius:12px!important;border:1px solid rgba(70,118,249,.55)!important;background:linear-gradient(150deg,#090f2b,#101037 70%,#130d2c)!important;box-shadow:inset 0 1px 0 rgba(24,230,247,.12),0 0 17px rgba(63,69,221,.09)!important}
+.shell .panel:hover,.shell .summary-grid>*:hover{border-color:rgba(34,233,249,.78)!important}
+.shell .panel h2,.shell .panel h3{font-size:clamp(14px,1.35vw,19px);text-transform:uppercase;letter-spacing:.075em}
+.shell .panel h2:before,.shell .panel h3:before{content:'▰ ';color:#3aecff}
+.shell .summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.shell .summary-grid>*{min-height:125px;border-top:2px solid #843afa!important}
+.shell .topbar .brand-mark{box-shadow:0 0 23px #a32eff!important}
+.shell .topbar h1{color:#f2f5ff}
+.shell .provider-banner{border-left:3px solid #28f9d2!important}
+.shell .apex-v3-hero h2{font-size:clamp(25px,2.9vw,42px)}
+.shell .apex-v3-avatar{width:125px;height:125px}
+.shell .apex-v3-hero{grid-template-columns:135px minmax(0,1fr) 195px;gap:14px}
+.shell .apex-v3-targets{grid-template-columns:1fr}
+.shell .apex-v3-targets>div{padding:8px!important}
+.shell .apex-v3-targets strong{font-size:22px}
+.shell .panel table tbody tr{background:rgba(21,20,66,.45)}
+.shell .panel table tbody tr:hover{background:rgba(46,44,105,.75)}
+.shell .panel button,.shell .action-btn{border-color:rgba(106,79,255,.65);box-shadow:0 0 8px rgba(68,46,226,.12)}
+.shell .panel button.primary,.shell .action-btn.primary{background:linear-gradient(110deg,#13c7e7,#6c40fa)!important;color:#fff}
+@media(max-width:1300px){.shell>.apex-v3-hero,.shell>.provider-banner,.shell>.market-chart-panel,.shell>.intelligence-panel,.shell>.learning-panel{grid-column:1/8}.shell>.apex-robot-shell,.shell>.research-ops-panel,.shell>.live-learning-panel{grid-column:8/-1}.shell>.apex-v3-hero{grid-template-columns:110px 1fr}.shell>.apex-v3-hero .apex-v3-targets{grid-column:1/-1;grid-template-columns:repeat(3,1fr)}}
+@media(max-width:930px){.shell{display:block!important;width:calc(100% - 20px)}.shell>.apex-v3-hero,.shell>.apex-robot-shell,.shell>.provider-banner,.shell>.summary-grid,.shell>.panel,.shell>.two-col,.shell>.details-grid{margin-bottom:14px}.apex-robot-console{min-height:0;grid-template-columns:180px 1fr!important;text-align:left}.shell .summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.apex-robot-console{grid-template-columns:1fr!important}.shell .summary-grid{grid-template-columns:1fr}.shell>.apex-v3-hero{grid-template-columns:1fr}.shell .apex-v3-hero .apex-v3-targets{grid-template-columns:1fr}.shell .apex-v3-avatar{width:100px;height:100px}}
