@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent } from 'react'
 
 type Status = any
 
@@ -1458,7 +1458,7 @@ function ApexRobotCompanion({mode,feedStale,marketReady,scanning,openCount}:{mod
     utterance.onerror = () => setSpeaking(false)
     window.speechSynthesis.speak(utterance)
   }
-  const followPointer = (event: React.MouseEvent<HTMLDivElement>) => {
+  const followPointer = (event: MouseEvent<HTMLDivElement>) => {
     const r = event.currentTarget.getBoundingClientRect()
     setGaze({x:Math.max(-6,Math.min(6,(event.clientX-r.left-r.width/2)/15)),y:Math.max(-4,Math.min(4,(event.clientY-r.top-r.height/2)/18))})
   }
