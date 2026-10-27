@@ -1195,3 +1195,51 @@ body,html,#root{background:#040615!important}
 .shell>.apex-robot-shell .apex-robot-console{min-height:260px;grid-template-columns:200px 1fr!important}
 .shell>.provider-banner,.shell>.summary-grid,.shell>.positions-panel,.shell>.two-col,.shell>.details-grid{grid-column:1/-1!important}
 }
+
+/* REF-2026: high density four-zone trading terminal inspired by supplied screenshot */
+.apex-reference-shell{--ref-bg:#070823;--ref-border:#4140a5;--ref-cyan:#19eaff;--ref-pink:#ea3bea;--ref-violet:#a043fa;background:radial-gradient(ellipse at 50% 0%,rgba(70,21,151,.24),transparent 52%),#070720!important;border:2px solid #9436de;border-radius:18px;box-shadow:0 0 0 4px rgba(13,244,252,.07),inset 0 0 38px rgba(45,24,115,.16);padding:12px!important;gap:9px!important}
+.apex-reference-shell>.topbar{border-radius:10px!important;margin:0!important;padding:8px 13px!important;min-height:54px!important}
+.apex-reference-shell>.topbar .brand h1{font-size:19px!important;letter-spacing:.1em}
+.apex-reference-shell>.topbar .brand p{font-size:9px;letter-spacing:.15em}
+.ref-ticker-strip{display:grid;grid-template-columns:1.35fr repeat(5,1fr) 1.25fr;grid-column:1/-1;gap:4px;min-width:0;border:1px solid #4b2b99;border-radius:8px;padding:5px;background:#080a2b;box-shadow:inset 0 1px 7px rgba(188,62,249,.14)}
+.ref-ticker-item{min-width:0;display:flex;align-items:center;gap:7px;padding:8px 10px;border:1px solid #232967;border-radius:6px;background:linear-gradient(115deg,#131038,#100f30);white-space:nowrap;overflow:hidden}
+.ref-ticker-item b{font-size:11px;overflow:hidden;text-overflow:ellipsis;color:#eef5ff}
+.ref-ticker-item small,.ref-ticker-item span{font-size:9px;color:#83a9cb;letter-spacing:.07em}
+.ref-ticker-primary{border-color:#307dc3}.ref-ticker-symbol{color:#65eaff!important;font-weight:900}.ref-ticker-paper{border-color:#9b3fd4;background:linear-gradient(100deg,#25104c,#180c38)}.ref-ticker-paper b{color:#ffdf8c}
+.ref-compact-strip{display:grid;grid-column:1/-1;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.ref-mini-card{display:flex;flex-direction:column;gap:6px;min-height:91px;padding:11px 13px;border:1px solid rgba(37,211,243,.55);border-top:2px solid #a13bfc;border-radius:8px;background:radial-gradient(circle at 100% 5%,rgba(72,36,199,.22),transparent 60%),#100f34;box-shadow:inset 0 0 10px rgba(17,197,252,.035)}
+.ref-mini-card small{font-size:9px;color:#78bde5;letter-spacing:.09em;font-weight:800}
+.ref-mini-card strong{font-size:19px;line-height:1;color:#dcf8ff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ref-mini-card span{font-size:9px;color:#88a5c7}
+@media(min-width:1350px){
+.apex-reference-shell{grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-flow:row dense}
+.apex-reference-shell>.topbar{grid-column:1/-1!important;grid-row:1!important}
+.apex-reference-shell>.ref-ticker-strip{grid-column:1/-1!important;grid-row:2!important}
+.apex-reference-shell>.market-chart-panel{grid-column:1/6!important;grid-row:3!important;min-height:375px!important}
+.apex-reference-shell>.apex-v3-hero{grid-column:6/9!important;grid-row:3!important;min-height:375px!important}
+.apex-reference-shell>.apex-robot-shell{grid-column:9/-1!important;grid-row:3!important;min-height:375px!important}
+.apex-reference-shell>.provider-banner{grid-column:1/-1!important;grid-row:4!important}
+.apex-reference-shell>.ref-compact-strip{grid-column:1/-1!important;grid-row:5!important}
+.apex-reference-shell>.summary-grid{grid-column:1/-1!important;grid-row:6!important}
+.apex-reference-shell>.intelligence-panel{grid-column:1/8!important;grid-row:7!important}
+.apex-reference-shell>.research-ops-panel{grid-column:8/-1!important;grid-row:7!important}
+.apex-reference-shell>.learning-panel{grid-column:1/9!important;grid-row:8!important}
+.apex-reference-shell>.live-learning-panel{grid-column:9/-1!important;grid-row:8!important}
+.apex-reference-shell>.positions-panel{grid-column:1/-1!important;grid-row:9!important}
+.apex-reference-shell>.two-col{grid-column:1/-1!important;grid-row:10!important}
+.apex-reference-shell>.details-grid{grid-column:1/-1!important;grid-row:11!important}
+.apex-reference-shell>.apex-v3-hero{padding:11px!important}
+.apex-reference-shell>.apex-v3-hero .apex-v3-avatar{width:100px!important;height:100px!important}
+.apex-reference-shell>.apex-v3-hero .apex-v3-message h2{font-size:19px!important}
+.apex-reference-shell>.apex-v3-hero .apex-v3-message p{font-size:10px!important}
+.apex-reference-shell>.apex-robot-shell .apex-robot-console{min-height:375px!important}
+.apex-reference-shell>.apex-robot-shell .apex-robot-stage{height:140px!important;flex-basis:140px!important;transform:scale(.78);margin:-14px 0}
+.apex-reference-shell>.apex-robot-shell .apex-robot-dialog h3{font-size:16px!important}
+}
+.apex-reference-shell .panel,.apex-reference-shell .provider-banner,.apex-reference-shell .summary-grid>*,.apex-reference-shell .learning-core-card{border-radius:8px!important;border-color:rgba(72,104,222,.72)!important;box-shadow:inset 0 0 0 1px rgba(26,209,253,.05),0 0 0 1px rgba(25,12,101,.28)!important}
+.apex-reference-shell .panel h2,.apex-reference-shell .panel h3{color:#d9eefe}
+.apex-reference-shell .panel h2:before,.apex-reference-shell .panel h3:before{color:#0af8ef}
+.apex-reference-shell .summary-grid>*,.apex-reference-shell .ref-mini-card{transition:border-color .2s,box-shadow .2s}
+.apex-reference-shell .summary-grid>*:hover,.apex-reference-shell .ref-mini-card:hover{border-color:#2bf4fa!important;box-shadow:0 0 17px rgba(40,231,247,.16)!important}
+@media(max-width:1349px){.ref-ticker-strip{grid-template-columns:repeat(4,minmax(0,1fr))}.ref-compact-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:740px){.apex-reference-shell{width:calc(100% - 8px)!important;padding:6px!important;border-radius:10px}.ref-ticker-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.ref-compact-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.ref-mini-card{min-height:80px}.ref-mini-card strong{font-size:14px}}
