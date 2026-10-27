@@ -270,7 +270,7 @@ class TradingEngine:
                 return 0
             capital = self._effective_capital(db)
             limits = self._limits(db)
-            deployable = capital * settings.capital_usage_pct / 100
+            deployable = capital * min(70.0, max(0.0, settings.capital_usage_pct)) / 100
             lots_by_risk = floor(limits["perTrade"] / (risk_per_unit * lot_size))
             lots_by_cash = floor(deployable / (entry * lot_size))
             return max(0, min(lots_by_risk, lots_by_cash)) * lot_size
@@ -1363,7 +1363,15 @@ class TradingEngine:
                 ranked, live_observations = self._scan_and_observe(provider, capital)
                 decision["liveObservations"] = live_observations
                 decision["signals"] = ranked
+            # Automated entries are SENSEX scalp only. No forced trade.
+            ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
             best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
+            if best.get("action") in {"CE", "PE"} and "SCALP" not in str(
+                best.get("chosenStrategy") or best.get("strategy") or ""
+            ).upper():
+                decision["reason"] = "SENSEX scalp-only policy: no qualifying scalp setup"
+                self.state.last_decision = decision
+                return decision
             if best.get("action") not in {"CE", "PE"}:
                 decision["reason"] = best.get("reason") or "no strategy setup passed score + candlestick confirmation"
                 self.state.last_decision = decision
@@ -1451,10 +1459,17 @@ class TradingEngine:
             stop = round(max(0.05, entry - stop_distance), 2)
             stop_distance = round(entry - stop, 2)
             minimum_target = stop_distance * max(1.0, settings.reward_risk_ratio)
-            if is_scalp:
-                target = round(entry + max(settings.scalp_target_points, minimum_target), 2)
-            else:
-                target = round(entry + max(settings.swing_runner_target_points, minimum_target), 2)
+            # Dynamic target must clear execution costs/spread, not a fixed 3-point chase.
+            spread_pct = max(0.0, float(option.get("spreadPct") or 0.0))
+            spread_points = entry * spread_pct / 100.0
+            estimated_lot_fees = float(estimate_paper_costs(
+                entry, entry + minimum_target, lot_size, exchange="BSE",
+                synthetic=synthetic_demo,
+            )["total"]) / max(1, lot_size)
+            # Buffer includes spread and illustrative entry/exit slippage.
+            execution_buffer = 2.0 * spread_points + max(0.05, entry * 0.001)
+            target_distance = max(minimum_target, estimated_lot_fees + execution_buffer + 0.25 * stop_distance)
+            target = round(entry + target_distance, 2)
             with SessionLocal() as db:
                 limits = self._limits(db)
                 day_pnl = self._period_pnl(db, "day")
@@ -1467,13 +1482,18 @@ class TradingEngine:
                 )
                 per_trade_budget = min(
                     hard_headroom,
-                    max(0.0, capital * settings.paper_trade_risk_pct_of_deployed / 100),
+                    max(0.0, min(capital, 40000.0) * 0.01),
                 )
                 lots_cash = floor(deployable / max(entry * lot_size, 0.01))
-                lots_risk = floor(per_trade_budget / max(stop_distance * lot_size, 0.01))
+                estimated_stop_fees = float(estimate_paper_costs(
+                    entry, stop, lot_size, exchange="BSE", synthetic=synthetic_demo,
+                )["total"]) / max(1, lot_size)
+                slippage_per_unit = max(0.05, entry * max(0.0, float(option.get("spreadPct") or 0)) / 100.0)
+                effective_risk_per_unit = stop_distance + estimated_stop_fees + slippage_per_unit
+                lots_risk = floor(per_trade_budget / max(effective_risk_per_unit * lot_size, 0.01))
                 qty = max(0, min(lots_cash, lots_risk)) * lot_size
                 risk_limit = per_trade_budget
-                sizing_details = {"cashLots": max(0, lots_cash), "riskLots": max(0, lots_risk), "selectedLots": qty // lot_size, "cashBudget": round(deployable, 2), "riskBudget": round(per_trade_budget, 2)}
+                sizing_details = {"cashLots": max(0, lots_cash), "riskLots": max(0, lots_risk), "selectedLots": qty // lot_size, "cashBudget": round(deployable, 2), "riskBudget": round(per_trade_budget, 2), "slippagePerUnit": round(slippage_per_unit, 2), "feesPerUnit": round(estimated_stop_fees, 2), "targetPoints": round(target_distance, 2)}
             if qty <= 0:
                 one_lot_risk = round(max(0.0, entry - stop) * lot_size, 2)
                 one_lot_cost = round(entry * lot_size, 2)
@@ -1545,6 +1565,7 @@ class TradingEngine:
                 "atmStrike": option.get("atmStrike"),
                 "lotSizing": sizing_details,
                 "paperRiskPctOfDeployed": settings.paper_trade_risk_pct_of_deployed,
+                "paperScalpPolicy": {"maxAllocationPct": 70, "maxRiskRupees": round(min(capital, 40000.0) * 0.01, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "cost_spread_and_rr_adjusted"},
                 "paperStopBufferPoints": buffer_points,
                 "remainingLossHeadroomAtEntry": round(hard_headroom, 2),
                 "firstTarget": round(entry + (settings.scalp_target_points if is_scalp else settings.swing_first_target_points), 2),
