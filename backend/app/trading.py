@@ -271,7 +271,8 @@ class TradingEngine:
             capital = self._effective_capital(db)
             limits = self._limits(db)
             deployable = capital * min(70.0, max(0.0, settings.capital_usage_pct)) / 100
-            lots_by_risk = floor(limits["perTrade"] / (risk_per_unit * lot_size))
+            risk_cap = min(limits["perTrade"], min(capital, 40000.0) * 0.01)
+            lots_by_risk = floor(risk_cap / (risk_per_unit * lot_size))
             lots_by_cash = floor(deployable / (entry * lot_size))
             return max(0, min(lots_by_risk, lots_by_cash)) * lot_size
         finally:
@@ -1357,7 +1358,7 @@ class TradingEngine:
 
             with SessionLocal() as db:
                 capital = self._effective_capital(db)
-                deployable = capital * settings.capital_usage_pct / 100
+                deployable = capital * min(70.0, max(0.0, settings.capital_usage_pct)) / 100
 
             if not ranked:
                 ranked, live_observations = self._scan_and_observe(provider, capital)
