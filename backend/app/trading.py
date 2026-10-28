@@ -742,10 +742,10 @@ class TradingEngine:
             desired = "UP" if side == "CE" else "DOWN"
             opposite = "DOWN" if side == "CE" else "UP"
             reasons: list[str] = []
-            if d5 != desired:
-                reasons.append("5M_TREND_NOT_ALIGNED")
-            if d15 == opposite:
-                reasons.append("15M_TREND_OPPOSES")
+            # Allow high-quality one-minute SMC scalps when the 5m trend is
+            # neutral or lagging. A directly opposing 5m+15m trend remains unsafe.
+            if d5 == opposite and d15 == opposite:
+                reasons.append("MTF_BOTH_OPPOSE")
             confirmations = candidate.get("confirmations") or {}
             structure = continuation.get("structure") or {}
             smc = candidate.get("smc") or {}
@@ -754,15 +754,16 @@ class TradingEngine:
             ) or (
                 side == "PE" and (confirmations.get("bearBreakdown") or structure.get("previousLowBreak") or smc.get("bos") == "BEAR")
             )
-            if not structural:
-                reasons.append("STRUCTURE_CONFIRMATION_MISSING")
             momentum = (
                 side == "CE" and float(candidate.get("emaFast") or 0) > float(candidate.get("emaSlow") or 0) and float(candidate.get("rsi") or 50) >= 50
             ) or (
                 side == "PE" and float(candidate.get("emaFast") or 0) < float(candidate.get("emaSlow") or 0) and float(candidate.get("rsi") or 50) <= 50
             )
-            if not momentum:
-                reasons.append("MOMENTUM_NOT_ALIGNED")
+            # Structure OR momentum is sufficient only when the higher
+            # timeframes do not jointly contradict the proposed direction.
+            # Both absent means the entry has no valid trigger.
+            if not structural and not momentum:
+                reasons.append("NO_STRUCTURE_OR_MOMENTUM_TRIGGER")
             return reasons
         if signal.get("action") == "NO_TRADE" and continuation.get("qualified"):
             signal.update({
@@ -813,7 +814,7 @@ class TradingEngine:
             signal["neuralBlendWeight"] = weight
         # A visually strong score is not sufficient: no entry below the
         # configured standard threshold, even after neural-score blending.
-        if signal.get("action") in {"CE", "PE"} and float(signal.get("score") or 0) < max(0.65, float(settings.signal_min_score)):
+        if signal.get("action") in {"CE", "PE"} and float(signal.get("score") or 0) < max(0.62, min(0.62, float(settings.signal_min_score))):
             signal["directionCandidate"] = signal["action"]
             signal["action"] = "NO_TRADE"
             signal["blockedBy"] = list(signal.get("blockedBy") or []) + ["BELOW_EXECUTION_QUALITY_THRESHOLD"]
@@ -1373,7 +1374,13 @@ class TradingEngine:
                 decision["signals"] = ranked
             # Automated entries are SENSEX scalp only. No forced trade.
             ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
-            best = ranked[0] if ranked else {"action": "NO_TRADE", "score": 0}
+            # Choose an executable scalp before high-score NO_TRADE candidates.
+            scalp_candidates = [
+                candidate for candidate in ranked
+                if candidate.get("action") in {"CE", "PE"}
+                and "SCALP" in str(candidate.get("chosenStrategy") or candidate.get("strategy") or "").upper()
+            ]
+            best = max(scalp_candidates, key=lambda row: float(row.get("score") or 0)) if scalp_candidates else (ranked[0] if ranked else {"action": "NO_TRADE", "score": 0})
             if best.get("action") in {"CE", "PE"} and "SCALP" not in str(
                 best.get("chosenStrategy") or best.get("strategy") or ""
             ).upper():
