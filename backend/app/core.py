@@ -25,18 +25,18 @@ class Settings(BaseSettings):
 
     capital: float = 40000
     min_trading_capital: float = 5000
-    capital_usage_pct: float = 70.0
+    capital_usage_pct: float = 90.0
     auto_compound_profits: bool = True
     max_deployable_capital: float = 0.0
     dynamic_risk_limits: bool = True
     risk_per_trade_pct: float = 1.0
-    max_daily_loss_pct: float = 2.0
+    max_daily_loss_pct: float = 2.5
     max_weekly_loss_pct: float = 4.0
     max_monthly_drawdown_pct: float = 10.0
     monthly_profit_target_pct: float = 10.0
     monthly_target_lock: bool = True
     max_risk_per_trade: float = 400
-    max_daily_loss: float = 800
+    max_daily_loss: float = 1000
     max_weekly_loss: float = 800
     max_monthly_drawdown: float = 2000
     max_trades_per_day: int = 5
