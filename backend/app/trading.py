@@ -236,13 +236,13 @@ class TradingEngine:
         if settings.dynamic_risk_limits:
             return {
                 "perTrade": capital * settings.risk_per_trade_pct / 100,
-                "daily": min(800.0, capital * settings.max_daily_loss_pct / 100),
+                "daily": min(1000.0, capital * settings.max_daily_loss_pct / 100),
                 "weekly": capital * settings.max_weekly_loss_pct / 100,
                 "monthly": capital * settings.max_monthly_drawdown_pct / 100,
             }
         return {
             "perTrade": settings.max_risk_per_trade,
-            "daily": settings.max_daily_loss,
+            "daily": min(1000.0, settings.max_daily_loss),
             "weekly": settings.max_weekly_loss,
             "monthly": settings.max_monthly_drawdown,
         }
@@ -270,7 +270,7 @@ class TradingEngine:
                 return 0
             capital = self._effective_capital(db)
             limits = self._limits(db)
-            deployable = capital * min(70.0, max(0.0, settings.capital_usage_pct)) / 100
+            deployable = capital * min(90.0, max(0.0, settings.capital_usage_pct)) / 100
             risk_cap = min(limits["perTrade"], min(capital, 40000.0) * 0.01)
             lots_by_risk = floor(risk_cap / (risk_per_unit * lot_size))
             lots_by_cash = floor(deployable / (entry * lot_size))
@@ -1347,6 +1347,13 @@ class TradingEngine:
                 decision["reason"] = "monthly profit target reached; SAFE lock until next month"
                 self.state.last_decision = decision
                 return decision
+            with SessionLocal() as db:
+                day_realized_pnl = self._period_pnl(db, "day")
+            if day_realized_pnl >= 1500.0:
+                decision["reason"] = "daily ₹1500 realized profit target reached; no more entries today"
+                decision["dailyProfitTargetReached"] = True
+                self.state.last_decision = decision
+                return decision
             if self.state.killed:
                 decision["reason"] = "kill switch active"
                 self.state.last_decision = decision
@@ -1366,7 +1373,7 @@ class TradingEngine:
 
             with SessionLocal() as db:
                 capital = self._effective_capital(db)
-                deployable = capital * min(70.0, max(0.0, settings.capital_usage_pct)) / 100
+                deployable = capital * min(90.0, max(0.0, settings.capital_usage_pct)) / 100
 
             if not ranked:
                 ranked, live_observations = self._scan_and_observe(provider, capital)
