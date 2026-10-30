@@ -1368,6 +1368,7 @@ class TradingEngine:
                 return decision
             if not phase["newTrades"]:
                 decision["reason"] = phase["reason"]
+                decision["executionGate"] = {"status": "BLOCKED", "stage": "MARKET_PHASE", "reason": phase["reason"]}
                 self.state.last_decision = decision
                 return decision
 
@@ -1396,6 +1397,12 @@ class TradingEngine:
                 return decision
             if best.get("action") not in {"CE", "PE"}:
                 decision["reason"] = best.get("reason") or "no strategy setup passed score + candlestick confirmation"
+                decision["executionGate"] = {
+                    "status": "BLOCKED", "stage": "SIGNAL_QUALITY",
+                    "reason": decision["reason"],
+                    "details": {"score": best.get("score"), "blockedBy": best.get("blockedBy") or [],
+                                "directionCandidate": best.get("directionCandidate")},
+                }
                 self.state.last_decision = decision
                 return decision
 
@@ -1596,7 +1603,7 @@ class TradingEngine:
                 "atmStrike": option.get("atmStrike"),
                 "lotSizing": sizing_details,
                 "paperRiskPctOfDeployed": settings.paper_trade_risk_pct_of_deployed,
-                "paperScalpPolicy": {"maxAllocationPct": 70, "maxRiskRupees": round(min(capital, 40000.0) * 0.01, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "cost_spread_and_rr_adjusted"},
+                "paperScalpPolicy": {"maxAllocationPct": min(90.0, max(0.0, settings.capital_usage_pct)), "maxRiskRupees": round(min(capital, 40000.0) * 0.01, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "cost_spread_and_rr_adjusted"},
                 "paperStopBufferPoints": buffer_points,
                 "remainingLossHeadroomAtEntry": round(hard_headroom, 2),
                 "firstTarget": round(entry + (settings.scalp_target_points if is_scalp else settings.swing_first_target_points), 2),
@@ -1677,6 +1684,14 @@ class TradingEngine:
             self._audit("automation.trade_decision", decision)
         except ValueError as exc:
             decision["reason"] = str(exc)
+            if not decision.get("executionGate"):
+                best_signal = locals().get("best")
+                signal_rows = locals().get("live_observations") or []
+                if isinstance(best_signal, dict) and best_signal.get("action") in {"CE", "PE"}:
+                    decision["executionGate"] = self._mark_signal_block(
+                        signal_rows, best_signal, stage="ORDER_VALIDATION", reason=str(exc))
+                else:
+                    decision["executionGate"] = {"status": "BLOCKED", "stage": "ORDER_VALIDATION", "reason": str(exc)}
         except Exception as exc:
             self.state.last_error = str(exc)
             decision["reason"] = f"safe failure: {exc}"
