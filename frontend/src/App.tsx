@@ -712,8 +712,21 @@ export default function App() {
       <div className="ref-ticker-item ref-ticker-paper"><b>◉ {status.mode}</b><small>SIMULATION ONLY</small></div>
     </nav>
 
-    <section className="apex-robot-shell" aria-label="APEX interactive robot companion">
-      <ApexRobotCompanion mode={String(status.mode || 'OFF')} feedStale={feedStale} marketReady={providerReady} scanning={Boolean(automation.running)} openTrades={openTrades} trades={trades} dailyPnl={Number(r.dailyPnl || 0)} dailyLocked={Boolean(r.dailyLocked)} />
+    <section className="panel" aria-label="APEX live intelligence and execution status">
+      <h3>APEX Live Neural & Scalp Status <small>Auto-refresh every 3 seconds</small></h3>
+      <div className="detail-copy">
+        <span>Market / execution <b>{feedStale ? 'STALE FEED — ENTRIES BLOCKED' : providerReady ? 'FEED READY' : 'FEED UNAVAILABLE'} · {automation.running ? 'SCANNING' : 'SCAN IDLE'}</b></span>
+        <span>Latest scan <b>{formatDateTime(automation.lastDecision?.at || automation.lastDecision?.phase?.now || status.lastCycleAt)}</b></span>
+        <span>Neural model <b>{Object.keys(neuralProduction).length ? 'PRODUCTION' : 'RESEARCH / SHADOW'} · {String(activeNeural.status || activeNeural.role || 'collecting samples')}</b></span>
+        <span>Training labels <b>{Number(trainingReadiness.eligibleSamples || 0).toLocaleString('en-IN')} / {Number(trainingReadiness.minimumSamples || 0).toLocaleString('en-IN')}</b></span>
+        <span>Learning progress <b>{Number(trainingReadiness.jarLevelPct ?? trainingReadiness.sampleProgressPct ?? 0).toFixed(1)}%</b></span>
+        <span>Latest decision <b>{String(automation.lastDecision?.action || 'WAITING')} · {String(automation.lastDecision?.reason || automation.lastDecision?.executionGate?.reason || 'Awaiting next scan')}</b></span>
+        <span>Execution gate <b>{String(automation.lastDecision?.executionGate?.stage || 'NOT REPORTED')} · {String(automation.lastDecision?.executionGate?.status || 'NO FILL CONFIRMED')}</b></span>
+        <span>Today <b>{Number(r.tradesToday || 0)} / {Number(r.maxTradesPerDay || 5)} trades · {money(r.dailyPnl)} net</b></span>
+        <span>Observed moments <b>{Number(liveLearning.total ?? liveLearning.totalObservations ?? liveMoments.length).toLocaleString('en-IN')} · latest {formatDateTime(liveMoments[0]?.observedAt)}</b></span>
+        <span>What has it learned? <b>{String(learning.bestArm || 'No validated winning strategy yet')} · {Number(p.winRate || 0).toFixed(1)}% historical win rate over {Number(p.trades || 0)} closed trades</b></span>
+      </div>
+      <small>These are measured learning and order states, not guarantees of model accuracy, daily trades, or future returns.</small>
     </section>
 
     <section className="apex-v3-hero" aria-label="APEX scalping command center">
@@ -725,7 +738,7 @@ export default function App() {
         <div className="apex-v3-tags"><span>● {automation.running ? 'SCANNER RUNNING' : 'SCANNER OFFLINE'}</span><span>{status.mode === 'PAPER' ? 'PAPER ACTIVE' : 'PAPER INACTIVE'}</span><span>{providerReady ? 'MARKET FEED READY' : 'CHECK DHAN FEED'}</span></div>
       </div>
       <div className="apex-v3-targets">
-        <div><small>DAILY NET PROFIT MILESTONE</small><strong>₹1,000</strong><span>Goal only · not guaranteed</span></div>
+        <div><small>DAILY NET PROFIT MILESTONE</small><strong>₹1,500</strong><span>Goal only · not guaranteed</span></div>
         <div><small>DAILY LOSS SAFETY LOCK</small><strong className="apex-v3-red">₹800</strong><span>At ₹40k baseline · real fills may slip</span></div>
         <div><small>CAPITAL / RISK / FREQUENCY</small><b>70% / 1% / 5</b><span>Max allocation / risk per trade / trades per day</span></div>
       </div>
@@ -1453,81 +1466,6 @@ function LearningJar({readiness, model}:{readiness:any, model:any}) {
   </div>
 }
 
-
-function ApexRobotCompanion({mode,feedStale,marketReady,scanning,openTrades,trades,dailyPnl,dailyLocked}:{mode:string,feedStale:boolean,marketReady:boolean,scanning:boolean,openTrades:Trade[],trades:Trade[],dailyPnl:number,dailyLocked:boolean}) {
-  const [muted,setMuted] = useState(true)
-  const [speaking,setSpeaking] = useState(false)
-  const [announcement,setAnnouncement] = useState('AXI तैयार है। आवाज़ सुनने के लिए Unmute करें।')
-  const [gaze,setGaze] = useState({x:0,y:0})
-  const initialized = useRef(false)
-  const previous = useRef({mode:'',feedStale:false,scanning:false,dailyLocked:false,openIds:new Set<number>(),closedIds:new Set<number>()})
-  const mood = dailyLocked || feedStale || !marketReady ? 'alert' : openTrades.length ? 'focused' : mode !== 'PAPER' || !scanning ? 'sleepy' : 'happy'
-  const say = useCallback((message:string)=>{
-    setAnnouncement(message)
-    if(muted || !('speechSynthesis' in window))return
-    window.speechSynthesis.cancel()
-    const voice = new SpeechSynthesisUtterance(message)
-    voice.lang='hi-IN';voice.rate=.96;voice.pitch=1.04
-    const hindi=window.speechSynthesis.getVoices().find(v=>v.lang.toLowerCase().startsWith('hi'))
-    if(hindi)voice.voice=hindi
-    voice.onstart=()=>setSpeaking(true)
-    voice.onend=()=>setSpeaking(false)
-    voice.onerror=()=>setSpeaking(false)
-    window.speechSynthesis.speak(voice)
-  },[muted])
-  useEffect(()=>{
-    if(muted && 'speechSynthesis' in window){window.speechSynthesis.cancel();setSpeaking(false)}
-  },[muted])
-  useEffect(()=>()=>{if('speechSynthesis' in window)window.speechSynthesis.cancel()},[])
-  useEffect(()=>{
-    const openIds=new Set(openTrades.map(t=>t.id))
-    const closed=trades.filter(t=>t.status!=='OPEN')
-    const closedIds=new Set(closed.map(t=>t.id))
-    const old=previous.current
-    if(!initialized.current){
-      initialized.current=true
-      previous.current={mode,feedStale,scanning,dailyLocked,openIds,closedIds}
-      return
-    }
-    let message=''
-    const entered=openTrades.find(t=>!old.openIds.has(t.id))
-    const exited=closed.find(t=>!old.closedIds.has(t.id) && old.openIds.has(t.id))
-    if(entered) message='नया पेपर ट्रेड खुला है। '+entered.symbol+' '+entered.direction+'। एंट्री '+entered.entry+' रुपये। स्टॉप लॉस '+entered.stop+'। टारगेट '+entered.target+'।'
-    else if(exited)message='पेपर ट्रेड बंद हुआ। '+exited.symbol+'। दर्ज पी एंड एल '+Number(exited.pnl || 0).toFixed(0)+' रुपये।'
-    else if(dailyLocked&&!old.dailyLocked)message='सावधान। दैनिक लॉस लिमिट लग चुकी है। नई पेपर एंट्री बंद रहेंगी।'
-    else if(feedStale&&!old.feedStale)message='सावधान। सेंसेक्स मार्केट डेटा स्टेल है। नई ट्रेड एंट्री नहीं लेनी चाहिए।'
-    else if(!feedStale&&old.feedStale&&marketReady)message='सेंसेक्स मार्केट डेटा फिर से उपलब्ध है। रिस्क और सिग्नल चेक जारी हैं।'
-    else if(mode!==old.mode)message=mode==='PAPER'?'पेपर ट्रेडिंग मोड सक्रिय हुआ। वास्तविक ब्रोकर ऑर्डर बंद हैं।':'ट्रेडिंग मोड बदलकर '+mode+' हो गया है।'
-    else if(scanning!==old.scanning)message=scanning?'एपेक्स स्कैनर चालू है। सेंसेक्स स्कैल्प सेटअप मॉनिटर किए जा रहे हैं।':'एपेक्स स्कैनर फिलहाल बंद है।'
-    previous.current={mode,feedStale,scanning,dailyLocked,openIds,closedIds}
-    if(message)say(message)
-  },[mode,feedStale,marketReady,scanning,openTrades,trades,dailyLocked,say])
-  const toggleMute=()=>{
-    if(!muted){window.speechSynthesis?.cancel();setSpeaking(false)}
-    setMuted(v=>!v)
-  }
-  const followPointer=(event:MouseEvent<HTMLDivElement>)=>{
-    const r=event.currentTarget.getBoundingClientRect()
-    setGaze({x:Math.max(-6,Math.min(6,(event.clientX-r.left-r.width/2)/15)),y:Math.max(-4,Math.min(4,(event.clientY-r.top-r.height/2)/18))})
-  }
-  return <div className={`apex-robot-console mood-${mood} ${speaking?'robot-talking':''}`}>
-    <div className="apex-robot-stage" onMouseMove={followPointer} onMouseLeave={()=>setGaze({x:0,y:0})} role="img" aria-label="AXI हिन्दी status robot">
-      <div className="robot-halo"/><div className="robot-aura"/>
-      <div className="robot-head"><div className="robot-antenna"><span/></div><div className="robot-ear left"/><div className="robot-ear right"/><div className="robot-visor"><span className="robot-eye" style={{transform:`translate(${gaze.x}px,${gaze.y}px)`}}/><span className="robot-eye" style={{transform:`translate(${gaze.x}px,${gaze.y}px)`}}/><span className="robot-mouth"/></div></div>
-      <div className="robot-neck"/><div className="robot-torso"><div className="robot-reactor">✧</div></div>
-    </div>
-    <div className="apex-robot-dialog">
-      <div className="robot-title"><span className="robot-live-dot"/><b>AXI // हिन्दी स्टेटस सहायक</b><small>{muted?'MUTED':speaking?'SPEAKING':'WATCHING'}</small></div>
-      <h3>{mood==='alert'?'⚠ रिस्क / डेटा अलर्ट':mood==='focused'?'◉ ट्रेड वॉच':mood==='sleepy'?'◌ स्टैंडबाय':'✦ मार्केट स्कैन'}</h3>
-      <p aria-live="polite">{announcement}</p>
-      <div className="robot-actions">
-        <button type="button" className={muted?'robot-greet-button':'robot-voice-button'} onClick={toggleMute} aria-pressed={!muted}>{muted?'🔇 Unmute AXI':'🔊 Mute AXI'}</button>
-        <span>{mood.toUpperCase()} • {dailyPnl>=0?'आज का P&L +':'आज का P&L '}{dailyPnl.toFixed(0)} ₹</span>
-      </div>
-      <small className="robot-hint">AXI केवल status बदलाव पर हिन्दी में बोलेगी। Mute तुरंत आवाज़ रोकेगा। Browser background speech की अनुमति सीमित कर सकता है।</small>
-    </div>
-  </div>
-}
 
 function KnowledgeGraph({research, worker, marketResearch, neuralModel, learning}:{research:any, worker:any, marketResearch:any, neuralModel:any, learning:any}) {
   const sensex = marketResearch?.analytics?.markets?.SENSEX || {}
