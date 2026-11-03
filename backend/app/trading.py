@@ -22,7 +22,7 @@ from .notifications import push_notification_service
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
 from .research_engine import research_engine
-from .strategy import adaptive_learner, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
+from .strategy import ARMS, adaptive_learner, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
 
 IST = ZoneInfo(settings.timezone)
 
@@ -726,7 +726,9 @@ class TradingEngine:
                 "entryReason": "STALE_DATA",
             }
         context = market_context(candles)
-        arm = adaptive_learner.choose_arm(context, capital)
+        # Single deterministic execution strategy. Adaptive learner remains
+        # active for research, but cannot select a non-scalp execution arm.
+        arm = next(arm for arm in ARMS if arm.name == "APEX_SCALP_MOMENTUM")
         signal = evaluate_signal(candles, arm)
         continuation = evaluate_mtf_continuation(candles)
         signal["mtfContinuation"] = continuation
@@ -814,7 +816,7 @@ class TradingEngine:
             signal["neuralBlendWeight"] = weight
         # A visually strong score is not sufficient: no entry below the
         # configured standard threshold, even after neural-score blending.
-        if signal.get("action") in {"CE", "PE"} and float(signal.get("score") or 0) < max(0.62, min(0.62, float(settings.signal_min_score))):
+        if signal.get("action") in {"CE", "PE"} and float(signal.get("score") or 0) < 0.62:
             signal["directionCandidate"] = signal["action"]
             signal["action"] = "NO_TRADE"
             signal["blockedBy"] = list(signal.get("blockedBy") or []) + ["BELOW_EXECUTION_QUALITY_THRESHOLD"]
@@ -1382,6 +1384,7 @@ class TradingEngine:
                 decision["signals"] = ranked
             # Automated entries are SENSEX scalp only. No forced trade.
             ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
+            decision["executionStrategy"] = "APEX_SCALP_MOMENTUM"
             # Choose an executable scalp before high-score NO_TRADE candidates.
             scalp_candidates = [
                 candidate for candidate in ranked
@@ -1389,14 +1392,14 @@ class TradingEngine:
                 and "SCALP" in str(candidate.get("chosenStrategy") or candidate.get("strategy") or "").upper()
             ]
             best = max(scalp_candidates, key=lambda row: float(row.get("score") or 0)) if scalp_candidates else (ranked[0] if ranked else {"action": "NO_TRADE", "score": 0})
-            if best.get("action") in {"CE", "PE"} and "SCALP" not in str(
-                best.get("chosenStrategy") or best.get("strategy") or ""
-            ).upper():
-                decision["reason"] = "SENSEX scalp-only policy: no qualifying scalp setup"
-                self.state.last_decision = decision
-                return decision
             if best.get("action") not in {"CE", "PE"}:
                 decision["reason"] = best.get("reason") or "no strategy setup passed score + candlestick confirmation"
+                decision["scalpScan"] = {
+                    "status": "NO_ENTRY", "strategy": "APEX_SCALP_MOMENTUM",
+                    "directionCandidate": best.get("directionCandidate"),
+                    "score": best.get("score"),
+                    "blockedBy": best.get("blockedBy") or [],
+                }
                 decision["executionGate"] = {
                     "status": "BLOCKED", "stage": "SIGNAL_QUALITY",
                     "reason": decision["reason"],
