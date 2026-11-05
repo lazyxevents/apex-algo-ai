@@ -309,10 +309,6 @@ export default function App() {
     try { return window.localStorage.getItem('apex-theme') === 'light' ? 'light' : 'dark' }
     catch { return 'dark' }
   })
-  const [theme, setTheme] = useState<'dark'|'light'>(() => {
-    try { return window.localStorage.getItem('apex-theme') === 'light' ? 'light' : 'dark' }
-    catch { return 'dark' }
-  })
   const [status, setStatus] = useState<Status>(null)
   const [trades, setTrades] = useState<Trade[]>([])
   const [error, setError] = useState('')
@@ -337,11 +333,6 @@ export default function App() {
     try { window.localStorage.setItem('apex-theme', theme) } catch { /* private mode */ }
   }, [theme])
   const toggleTheme = () => setTheme(current => current === 'dark' ? 'light' : 'dark')
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme)
-    try { window.localStorage.setItem('apex-theme', theme) } catch {}
-  }, [theme])
-  const toggleTheme = () => setTheme(old => old === 'dark' ? 'light' : 'dark')
 
 
   const loadStatus = useCallback(async (silent = false) => {
@@ -625,7 +616,7 @@ export default function App() {
 
   if (!status) {
     return <main className="shell loading">
-      <div className="brand"><span className="brand-mark">A</span><div><h1>APEX Algo AI</h1><p>Connecting to trading engine…</p></div></div><button type="button" className="theme-toggle" onClick={toggleTheme}>{theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}</button><button type="button" className="theme-toggle" onClick={toggleTheme}>{theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}</button>
+      <div className="brand"><span className="brand-mark">A</span><div><h1>APEX Algo AI</h1><p>Connecting to trading engine…</p></div></div><button type="button" className="theme-toggle" onClick={toggleTheme}>{theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}</button>
     {error && <div className="notice error">{error}</div>}
     </main>
   }
@@ -640,12 +631,6 @@ export default function App() {
   const references = status.patternReferences || {}
   const latestDecision = automation.lastDecision || {}
   const setupState = openTrades.length > 0 ? 'TRADE ACTIVE'
-    : latestDecision.setupStatus === 'SETUP_FOUND' ? 'SETUP FOUND'
-    : latestDecision.setupStatus === 'NO_SETUP_FOUND' ? 'NO SETUP FOUND'
-    : automation.running ? 'SCANNING FOR SETUP' : 'SCANNER STOPPED'
-  const references = status.patternReferences || {}
-  const latestDecision = automation.lastDecision || {}
-  const setupState = openTrades.length ? 'TRADE ACTIVE'
     : latestDecision.setupStatus === 'SETUP_FOUND' ? 'SETUP FOUND'
     : latestDecision.setupStatus === 'NO_SETUP_FOUND' ? 'NO SETUP FOUND'
     : automation.running ? 'SCANNING FOR SETUP' : 'SCANNER STOPPED'
@@ -723,7 +708,7 @@ export default function App() {
           <p>SENSEX Scalping Intelligence • PAPER only</p>
         </div>
       </div>
-      <div className="top-meta"><button type="button" className="theme-toggle" aria-label="Toggle light and dark theme" onClick={toggleTheme}>{theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}</button><button type="button" className="theme-toggle" aria-label="Toggle light and dark theme" onClick={toggleTheme}>{theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}</button>
+      <div className="top-meta"><button type="button" className="theme-toggle" aria-label="Toggle light and dark theme" onClick={toggleTheme}>{theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}</button>
         <div className="clock">{formatClock(clock)} IST</div>
         <div className="status-line">
           <span className={`dot ${automation.running ? 'online' : 'offline'}`} />
@@ -770,34 +755,6 @@ export default function App() {
       <p className="panel-note">Count = real historical 1m OHLC examples with 3-future-bar labels, not neural accuracy or profitable option trades. Entry still follows EMA 9/200 + SMC liquidity.</p>
       {references.lastError && <p className="panel-note negative">Reference sync: {references.lastError}</p>}
     </section>
-    <section className="apex-setup-banner" aria-live="polite">
-      <div><small>DAILY SETUP STATUS • EMA 9/200 + LIQUIDITY SWEEP</small>
-        <strong>{setupState}</strong>
-        <span>{openTrades.length ? openTrades.length + ' open paper position(s)' :
-          latestDecision.setupStatus === 'NO_SETUP_FOUND'
-            ? 'Scanned: ' + String(latestDecision.reason || 'No qualifying EMA/liquidity setup')
-            : 'Entry only on a valid setup. Daily trade is not guaranteed.'}</span>
-      </div>
-      <div className="setup-side"><b>{r.tradesToday || 0} / {r.maxTradesPerDay || 5}</b><small>trades today</small></div>
-    </section>
-
-    <section className="apex-reference-training panel" aria-label="APEX candlestick reference learning status">
-      <div className="section-head compact">
-        <div><div className="eyebrow">APEX PATTERN REFERENCE LIBRARY</div>
-        <h2>Real candle examples • 1,000+ target</h2></div>
-        <strong className="reference-count">{Number(references.count || 0).toLocaleString('en-IN')} / {Number(references.goal || 1000).toLocaleString('en-IN')}</strong>
-      </div>
-      <div className="reference-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Number(references.progressPct || 0)}>
-        <span style={{width: Math.min(100, Number(references.progressPct || 0)) + '%'}} />
-      </div>
-      <div className="reference-patterns">
-        {(references.patterns || []).filter((pattern: any) => pattern.name !== 'NO_NAMED_PATTERN').map((pattern: any) =>
-          <span key={pattern.name}>{String(pattern.name).replace(/_/g, ' ')} <b>{pattern.count}</b></span>)}
-      </div>
-      <p className="panel-note">Real historical 1m candles with 3-bar outcome labels. This count is not neural accuracy or profitable options trades. Execution remains EMA 9/200 + SMC liquidity only.</p>
-      {references.lastError && <p className="panel-note negative">Reference sync: {references.lastError}</p>}
-    </section>
-
     <section className="panel" aria-label="APEX live intelligence and execution status">
       <h3>APEX • EMA 9/200 Liquidity Scalper <small>Auto-refresh every 3 seconds</small></h3>
       <div className="detail-copy">
