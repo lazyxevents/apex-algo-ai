@@ -713,18 +713,18 @@ export default function App() {
     </nav>
 
     <section className="panel" aria-label="APEX live intelligence and execution status">
-      <h3>APEX Live Neural & Scalp Status <small>Auto-refresh every 3 seconds</small></h3>
+      <h3>APEX • EMA 9/200 Liquidity Scalper <small>Auto-refresh every 3 seconds</small></h3>
       <div className="detail-copy">
         <span>Market / execution <b>{feedStale ? 'STALE FEED — ENTRIES BLOCKED' : providerReady ? 'FEED READY' : 'FEED UNAVAILABLE'} · {automation.running ? 'SCANNING' : 'SCAN IDLE'}</b></span>
         <span>Latest scan <b>{formatDateTime(automation.lastDecision?.at || automation.lastDecision?.phase?.now || status.lastCycleAt)}</b></span>
-        <span>Neural model <b>{Object.keys(neuralProduction).length ? 'PRODUCTION' : 'RESEARCH / SHADOW'} · {String(activeNeural.status || activeNeural.role || 'collecting samples')}</b></span>
+        <span>Execution strategy <b>EMA 9 / EMA 200 + SMC LIQUIDITY SWEEP</b></span>
         <span>Training labels <b>{Number(trainingReadiness.eligibleSamples || 0).toLocaleString('en-IN')} / {Number(trainingReadiness.minimumSamples || 0).toLocaleString('en-IN')}</b></span>
-        <span>Learning progress <b>{Number(trainingReadiness.jarLevelPct ?? trainingReadiness.sampleProgressPct ?? 0).toFixed(1)}%</b></span>
+        <span>Monthly guardrails <b>+{Number(mt.targetPct ?? 15)}% target · −10% drawdown limit</b></span>
         <span>Latest decision <b>{String(automation.lastDecision?.action || 'WAITING')} · {String(automation.lastDecision?.reason || automation.lastDecision?.executionGate?.reason || 'Awaiting next scan')}</b></span>
         <span>Execution gate <b>{String(automation.lastDecision?.executionGate?.stage || 'NOT REPORTED')} · {String(automation.lastDecision?.executionGate?.status || 'NO FILL CONFIRMED')}</b></span>
         <span>Today <b>{Number(r.tradesToday || 0)} / {Number(r.maxTradesPerDay || 5)} trades · {money(r.dailyPnl)} net</b></span>
         <span>Observed moments <b>{Number(liveLearning.total ?? liveLearning.totalObservations ?? liveMoments.length).toLocaleString('en-IN')} · latest {formatDateTime(liveMoments[0]?.observedAt)}</b></span>
-        <span>What has it learned? <b>{String(learning.bestArm || 'No validated winning strategy yet')} · {Number(p.winRate || 0).toFixed(1)}% historical win rate over {Number(p.trades || 0)} closed trades</b></span>
+        <span>Trade policy <b>10–15 option-premium points target · Dynamic stop · No forced entries</b></span>
       </div>
       <small>These are measured learning and order states, not guarantees of model accuracy, daily trades, or future returns.</small>
     </section>
@@ -803,12 +803,12 @@ export default function App() {
       <Metric title="Effective Capital" value={money(r.effectiveCapital)} sub={`Base ${money(r.configuredCapital)}`} />
       <Metric title="Open Positions" value={String(openTrades.length)} sub={`Max ${r.maxConcurrentPositions ?? 0}`} />
       <Metric title="Validated Today P&L" value={money(r.dailyPnl)} sub={`${r.tradesToday || 0} valid trade(s) today`} tone={pnlClass(r.dailyPnl)} />
-      <Metric title="Excluded / Invalid P&L" value={money(r.excludedInvalidTodayPnl)} sub={`${r.excludedInvalidTodayCount || 0} invalid trade(s) excluded today`} tone={pnlClass(r.excludedInvalidTodayPnl)} />
+      
       <Metric title="Win Rate" value={percent(p.winRate)} sub={`${p.wins || 0}W / ${p.losses || 0}L`} />
       <Metric title="Risk / Trade" value={money(r.riskPerTrade)} sub={`${r.dynamicLimits ? 'Dynamic' : 'Fixed'} risk limit`} />
-      <Metric title="Deployable Cap" value={money(Number(r.effectiveCapital || 0) * Number(r.capitalUsagePct || 0) / 100)} sub={`${r.capitalUsagePct || 0}% maximum usage`} />
-      <Metric title="PAPER Premium Risk Cap" value={`${Number(r.paperTradeRiskPctOfDeployed ?? 15).toFixed(0)}%`} sub="SL loss cap on deployed option premium; daily/weekly/monthly locks still apply" />
-      <Metric title="Max Drawdown" value={money(p.maxDrawdown)} sub={`Monthly cap ${money(r.maxMonthlyDrawdown)}`} tone={Number(p.maxDrawdown) > 0 ? 'negative' : 'neutral'} />
+      
+      
+      <Metric title="Monthly Risk Limit" value={money(r.maxMonthlyDrawdown)} sub="10% configured drawdown ceiling" />
     </section>
 
     <section className="panel intelligence-panel">
