@@ -155,5 +155,5 @@ def test_live_scan_rejects_countertrend_signal(monkeypatch):
     monkeypatch.setattr(trading.neural_model_service, "predict_signal", lambda signal: {"status": "insufficient_data"})
     result = engine._scan_one(Provider(), "SENSEX", "BSE_INDEX|SENSEX", 30000)
     assert result["action"] == "NO_TRADE"
-    assert "5M_TREND_NOT_ALIGNED" in result["blockedBy"]
+    assert "MTF_BOTH_OPPOSE" in result["blockedBy"]
     assert "15M_TREND_OPPOSES" in result["blockedBy"]
