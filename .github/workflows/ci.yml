@@ -21,7 +21,7 @@ jobs:
       - name: Run backend tests
         env:
           DATABASE_URL: sqlite:///./ci.db
-          MARKET_DATA_PROVIDER: yfinance
+          MARKET_DATA_PROVIDER: dhan
         run: pytest -q
 
   frontend:
