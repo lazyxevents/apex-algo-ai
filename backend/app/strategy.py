@@ -827,3 +827,63 @@ class AdaptiveLearner:
 
 
 adaptive_learner = AdaptiveLearner()
+
+
+def evaluate_ema_liquidity_scalp(candles: list[dict]) -> dict:
+    """One deterministic SENSEX scalp: EMA9/200 directional bias + swept local liquidity.
+
+    Uses only completed 1m candles. NO_TRADE is deliberate if direction or
+    the most recent liquidity rejection is unconfirmed; no score gambling.
+    """
+    name = "APEX_EMA9_200_LIQUIDITY_SCALP"
+    if len(candles) < 201:
+        return {
+            "action": "NO_TRADE", "score": 0.0, "strategy": name,
+            "reason": "INSUFFICIENT_EMA200_CANDLES",
+            "blockedBy": ["INSUFFICIENT_EMA200_CANDLES"],
+            "candlesAvailable": len(candles), "candlesRequired": 201,
+        }
+    ordered = sorted(candles, key=lambda c: c["timestamp"])
+    closes = [float(c["close"]) for c in ordered]
+    fast, slow = _ema(closes, 9), _ema(closes, 200)
+    last = ordered[-1]
+    close = float(last["close"])
+    low = float(last["low"])
+    high = float(last["high"])
+    op = float(last["open"])
+    if not all(isfinite(x) for x in (close, low, high, op, fast, slow)):
+        return {"action": "NO_TRADE", "score": 0.0, "strategy": name,
+                "reason": "INVALID_CANDLE", "blockedBy": ["INVALID_CANDLE"]}
+    prior = ordered[-9:-1]
+    pool_low = min(float(c["low"]) for c in prior)
+    pool_high = max(float(c["high"]) for c in prior)
+    # Sweeps must close back inside the prior range and confirm direction.
+    bull_sweep = low < pool_low and close > pool_low and close > op
+    bear_sweep = high > pool_high and close < pool_high and close < op
+    bull_trend = fast > slow and close > fast
+    bear_trend = fast < slow and close < fast
+    action = "CE" if bull_trend and bull_sweep else "PE" if bear_trend and bear_sweep else "NO_TRADE"
+    reason = ("EMA9_ABOVE_200_BULL_LIQUIDITY_SWEEP" if action == "CE"
+              else "EMA9_BELOW_200_BEAR_LIQUIDITY_SWEEP" if action == "PE"
+              else "EMA_TREND_NOT_ALIGNED" if not (bull_trend or bear_trend)
+              else "LIQUIDITY_SWEEP_NOT_CONFIRMED")
+    side = "BULL" if bull_sweep else "BEAR" if bear_sweep else "NONE"
+    return {
+        "action": action,
+        "score": 0.9 if action != "NO_TRADE" else 0.0,
+        "strategy": name,
+        "reason": reason, "entryReason": reason,
+        "entryThreshold": 0.9,
+        "blockedBy": [] if action != "NO_TRADE" else [reason],
+        "directionCandidate": "CE" if bull_trend else "PE" if bear_trend else "NO_TRADE",
+        "underlyingPrice": close,
+        "emaFast": round(fast, 2), "emaSlow": round(slow, 2),
+        "previousLow": round(low if action == "CE" else pool_low, 2),
+        "previousHigh": round(high if action == "PE" else pool_high, 2),
+        "smc": {"liquiditySweep": side if action != "NO_TRADE" else "NONE",
+                "sweptLow": round(pool_low, 2), "sweptHigh": round(pool_high, 2)},
+        "confirmations": {"bullBreakout": False, "bearBreakdown": False,
+                          "bullLiquiditySweep": bull_sweep, "bearLiquiditySweep": bear_sweep},
+        "context": {"key": "EMA9_200|LIQUIDITY_SWEEP|SCALP",
+                    "trend": "UP" if bull_trend else "DOWN" if bear_trend else "FLAT"},
+    }
