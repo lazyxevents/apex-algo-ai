@@ -1,4 +1,7 @@
 import csv
+import json
+import os
+from pathlib import Path
 from datetime import date, datetime, timedelta
 from io import StringIO
 from math import isfinite
@@ -33,10 +36,73 @@ class DhanService:
         self._last_success_at: str | None = None
         self._last_error: str | None = None
         self._latest_candle_time: str | None = None
+        self._renewed_at = None
+        self._runtime_token = ""
+        self._refresh_error = None
+        self._load_token()
+
+
+    def _load_token(self):
+        path = settings.dhan_access_token_file.strip()
+        if not path:
+            return
+        try:
+            data = json.loads(Path(path).read_text(encoding="utf-8"))
+            self._runtime_token = str(data.get("accessToken") or "")
+            if data.get("renewedAt"):
+                self._renewed_at = datetime.fromisoformat(data["renewedAt"])
+        except FileNotFoundError:
+            pass
+        except Exception:
+            self._refresh_error = "Unable to read persistent token file"
+
+    def _token(self) -> str:
+        return self._runtime_token or settings.dhan_access_token
+
+    def renew_token_if_due(self):
+        if not settings.dhan_auto_renew_enabled:
+            return {"status": "disabled"}
+        if not settings.dhan_access_token_file.strip():
+            return {"status": "not_configured", "reason": "Persistent DHAN_ACCESS_TOKEN_FILE required"}
+        if not self.market_ready:
+            return {"status": "not_configured", "reason": "Missing Dhan credentials"}
+        with self._lock:
+            now = datetime.now(IST)
+            if self._renewed_at and now - self._renewed_at < timedelta(hours=12):
+                return {"status": "current"}
+            try:
+                response = httpx.get(
+                    f"{self.api_v2}/RenewToken",
+                    headers={"access-token": self._token(), "dhanClientId": settings.dhan_client_id},
+                    timeout=15,
+                )
+                response.raise_for_status()
+                token = str(response.json().get("accessToken") or "").strip()
+                if not token:
+                    raise RuntimeError("RenewToken response missing accessToken")
+                path = Path(settings.dhan_access_token_file.strip())
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_name(path.name + ".tmp")
+                fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as file:
+                        json.dump({"accessToken": token, "renewedAt": now.isoformat()}, file)
+                        file.flush()
+                        os.fsync(file.fileno())
+                    os.replace(tmp, path)
+                finally:
+                    tmp.unlink(missing_ok=True)
+                self._runtime_token = token
+                self._renewed_at = now
+                self._refresh_error = None
+                return {"status": "renewed", "renewedAt": now.isoformat()}
+            except Exception as exc:
+                self._refresh_error = f"{type(exc).__name__}: {str(exc)[:160]}"
+                return {"status": "failed", "reason": self._refresh_error}
 
     @property
     def market_ready(self) -> bool:
-        return bool(settings.dhan_client_id and settings.dhan_access_token)
+        return bool(settings.dhan_client_id and self._token())
 
     @property
     def sandbox_ready(self) -> bool:
@@ -55,7 +121,7 @@ class DhanService:
         return {
             "Accept": "application/json",
             "Content-Type": "application/json",
-            "access-token": settings.dhan_access_token,
+            "access-token": self._token(),
             "client-id": settings.dhan_client_id,
         }
 
@@ -88,6 +154,9 @@ class DhanService:
             "displayName": "DhanHQ Data API",
             "marketDataConfigured": self.market_ready,
             "tokenRequired": True,
+            "tokenAutoRenewEnabled": settings.dhan_auto_renew_enabled,
+            "tokenLastRenewedAt": self._renewed_at.isoformat() if self._renewed_at else None,
+            "tokenRefreshError": self._refresh_error,
             "supportsOptionChain": True,
             "syntheticPaper": False,
             "realMarketData": True,
