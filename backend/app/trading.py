@@ -22,7 +22,7 @@ from .notifications import push_notification_service
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
 from .research_engine import research_engine
-from .strategy import ARMS, adaptive_learner, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
+from .strategy import ARMS, adaptive_learner, evaluate_ema_liquidity_scalp, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
 
 IST = ZoneInfo(settings.timezone)
 
@@ -725,103 +725,17 @@ class TradingEngine:
                 "dataFreshness": freshness,
                 "entryReason": "STALE_DATA",
             }
-        context = market_context(candles)
-        # Single deterministic execution strategy. Adaptive learner remains
-        # active for research, but cannot select a non-scalp execution arm.
-        arm = next(arm for arm in ARMS if arm.name == "APEX_SCALP_MOMENTUM")
-        signal = evaluate_signal(candles, arm)
-        continuation = evaluate_mtf_continuation(candles)
-        signal["mtfContinuation"] = continuation
-        # Quality gate: reject contradictory higher-timeframe trends and weak
-        # one-minute entries; preserve the original signal for audit/learning.
-        def quality_reasons(candidate: dict) -> list[str]:
-            side = candidate.get("action")
-            if side not in {"CE", "PE"}:
-                return []
-            frames = continuation.get("frames") or {}
-            d5 = (frames.get("5m") or {}).get("trend")
-            d15 = (frames.get("15m") or {}).get("trend")
-            desired = "UP" if side == "CE" else "DOWN"
-            opposite = "DOWN" if side == "CE" else "UP"
-            reasons: list[str] = []
-            # Allow high-quality one-minute SMC scalps when the 5m trend is
-            # neutral or lagging. A directly opposing 5m+15m trend remains unsafe.
-            if d5 == opposite and d15 == opposite:
-                reasons.append("MTF_BOTH_OPPOSE")
-            confirmations = candidate.get("confirmations") or {}
-            structure = continuation.get("structure") or {}
-            smc = candidate.get("smc") or {}
-            structural = (
-                side == "CE" and (confirmations.get("bullBreakout") or structure.get("previousHighBreak") or smc.get("bos") == "BULL")
-            ) or (
-                side == "PE" and (confirmations.get("bearBreakdown") or structure.get("previousLowBreak") or smc.get("bos") == "BEAR")
-            )
-            momentum = (
-                side == "CE" and float(candidate.get("emaFast") or 0) > float(candidate.get("emaSlow") or 0) and float(candidate.get("rsi") or 50) >= 50
-            ) or (
-                side == "PE" and float(candidate.get("emaFast") or 0) < float(candidate.get("emaSlow") or 0) and float(candidate.get("rsi") or 50) <= 50
-            )
-            # Structure OR momentum is sufficient only when the higher
-            # timeframes do not jointly contradict the proposed direction.
-            # Both absent means the entry has no valid trigger.
-            if not structural and not momentum:
-                reasons.append("NO_STRUCTURE_OR_MOMENTUM_TRIGGER")
-            return reasons
-        if signal.get("action") == "NO_TRADE" and continuation.get("qualified"):
-            signal.update({
-                "action": continuation["action"],
-                "score": continuation["score"],
-                "underlyingPrice": continuation["underlyingPrice"],
-                "emaFast": continuation["emaFast"],
-                "emaSlow": continuation["emaSlow"],
-                "confirmations": {"bullBreakout": continuation.get("structure", {}).get("previousHighBreak", False), "bearBreakdown": continuation.get("structure", {}).get("previousLowBreak", False)},
-                "rsi": continuation["rsi"],
-                "previousHigh": continuation["previousHigh"],
-                "previousLow": continuation["previousLow"],
-                "patterns": continuation["patterns"],
-                "smc": continuation["smc"],
-                "entryReason": "MTF_SMC_CONTINUATION",
-                "entryThreshold": 0.56,
-                "smcOverride": True,
-                "context": context,
-                "strategy": "APEX_MTF_SMC_SCALP",
-                "blockedBy": [],
-                "reason": "MTF_SMC_CONTINUATION",
-                "directionCandidate": continuation.get("candidateAction") or continuation.get("action"),
-            })
-            chosen_strategy = "APEX_MTF_SMC_SCALP"
-        else:
-            chosen_strategy = arm.name
-        rejected = quality_reasons(signal)
-        if rejected:
-            signal["directionCandidate"] = signal.get("action")
-            signal["action"] = "NO_TRADE"
-            signal["blockedBy"] = list(signal.get("blockedBy") or []) + rejected
-            signal["entryReason"] = "QUALITY_GATE"
-            signal["reason"] = " | ".join(rejected)
+        # Strict single-setup execution: EMA9/EMA200 + 1m liquidity sweep.
+        # Research/neural models remain observational, never override entry.
+        signal = evaluate_ema_liquidity_scalp(candles)
         signal.update({
             "index": name,
             "underlyingKey": key,
-            "chosenStrategy": chosen_strategy,
-            "learningArm": arm.name,
+            "chosenStrategy": "APEX_EMA9_200_LIQUIDITY_SCALP",
+            "learningArm": "APEX_EMA9_200_LIQUIDITY_SCALP",
+            "neural": {"status": "research_only", "probability": None},
+            "neuralBlendWeight": 0.0,
         })
-        neural = neural_model_service.predict_signal(signal)
-        signal["neural"] = neural
-        if neural.get("status") == "production" and neural.get("probability") is not None and signal.get("action") in {"CE", "PE"}:
-            base_score = float(signal.get("score") or 0.0)
-            weight = max(0.0, min(0.30, float(settings.neural_inference_weight)))
-            probability = float(neural["probability"])
-            signal["rawSignalScore"] = round(base_score, 4)
-            signal["score"] = round(base_score * (1.0 - weight) + probability * weight, 4)
-            signal["neuralBlendWeight"] = weight
-        # A visually strong score is not sufficient: no entry below the
-        # configured standard threshold, even after neural-score blending.
-        if signal.get("action") in {"CE", "PE"} and float(signal.get("score") or 0) < 0.62:
-            signal["directionCandidate"] = signal["action"]
-            signal["action"] = "NO_TRADE"
-            signal["blockedBy"] = list(signal.get("blockedBy") or []) + ["BELOW_EXECUTION_QUALITY_THRESHOLD"]
-            signal["entryReason"] = "QUALITY_GATE"
-            signal["reason"] = "BELOW_EXECUTION_QUALITY_THRESHOLD"
         latest_candle_time = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date") if candles else None
         signal["candleTime"] = latest_candle_time
         signal["dataFreshness"] = freshness
@@ -1499,17 +1413,38 @@ class TradingEngine:
                 stop_distance = min(stop_distance, settings.scalp_max_stop_points)
             stop = round(max(0.05, entry - stop_distance), 2)
             stop_distance = round(entry - stop, 2)
-            minimum_target = stop_distance * max(1.0, settings.reward_risk_ratio)
-            # Dynamic target must clear execution costs/spread, not a fixed 3-point chase.
+            # A fixed 10-15 premium-point exit range; fees/spread must fit.
             spread_pct = max(0.0, float(option.get("spreadPct") or 0.0))
             spread_points = entry * spread_pct / 100.0
+            target_distance = max(
+                float(settings.scalp_min_target_points),
+                min(float(settings.scalp_target_points), float(settings.scalp_max_target_points)),
+            )
+            target_distance = min(target_distance, float(settings.scalp_max_target_points))
             estimated_lot_fees = float(estimate_paper_costs(
-                entry, entry + minimum_target, lot_size, exchange="BSE",
+                entry, entry + target_distance, lot_size, exchange="BSE",
                 synthetic=synthetic_demo,
             )["total"]) / max(1, lot_size)
-            # Buffer includes spread and illustrative entry/exit slippage.
             execution_buffer = 2.0 * spread_points + max(0.05, entry * 0.001)
-            target_distance = max(minimum_target, estimated_lot_fees + execution_buffer + 0.25 * stop_distance)
+            if (
+                stop_distance <= 0.0
+                or stop_distance > target_distance
+                or estimated_lot_fees + execution_buffer >= target_distance
+            ):
+                reason = "SCALP_COST_OR_STOP_EXCEEDS_10_15_POINT_TARGET"
+                decision.update({
+                    "action": "NO_TRADE", "reason": reason,
+                    "executionGate": self._mark_signal_block(
+                        live_observations, best, stage="SCALP_TARGET_RISK",
+                        reason=reason, details={
+                            "stopPoints": stop_distance, "targetPoints": target_distance,
+                            "estimatedFeesPerUnit": round(estimated_lot_fees, 2),
+                            "spreadAndSlippage": round(execution_buffer, 2),
+                        }
+                    ),
+                })
+                self.state.last_decision = decision
+                return decision
             target = round(entry + target_distance, 2)
             with SessionLocal() as db:
                 limits = self._limits(db)
@@ -1597,7 +1532,7 @@ class TradingEngine:
                 "quoteTime": option.get("quoteTime") or datetime.now(IST).isoformat(),
                 "entryTime": datetime.now(IST).isoformat(),
                 "tradeStyle": "SCALP" if is_scalp else "SWING",
-                "stopModel": "previous-candle structure mapped to option premium via delta; fallback percentage stop",
+                "stopModel": "liquidity sweep invalidation mapped to premium via delta; risk capped; trailing after progress",
                 "previousCandleLow": previous_low,
                 "previousCandleHigh": previous_high,
                 "structureStopDistance": round(stop_distance, 2),
@@ -1609,7 +1544,7 @@ class TradingEngine:
                 "paperScalpPolicy": {"maxAllocationPct": min(90.0, max(0.0, settings.capital_usage_pct)), "maxRiskRupees": round(min(capital, 40000.0) * 0.01, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "cost_spread_and_rr_adjusted"},
                 "paperStopBufferPoints": buffer_points,
                 "remainingLossHeadroomAtEntry": round(hard_headroom, 2),
-                "firstTarget": round(entry + (settings.scalp_target_points if is_scalp else settings.swing_first_target_points), 2),
+                "firstTarget": target,
                 "runnerTarget": target,
                 "partialBookPct": 0.0 if is_scalp else settings.swing_partial_pct,
                 "pullbackEntryPoints": settings.scalp_entry_pullback_points if is_scalp else 0.0,
@@ -1783,9 +1718,14 @@ class TradingEngine:
                 "premarketResearchTime": settings.premarket_plan_time,
                 "learningWindow": f"{settings.learning_worker_window_start_time}-{settings.learning_worker_window_end_time}",
                 "entryPolicy": {
+                    "strategy": "APEX_EMA9_200_LIQUIDITY_SCALP",
+                    "emaFast": 9, "emaSlow": 200,
+                    "requiredSmc": "LIQUIDITY_SWEEP",
+                    "scalpTargetMinPoints": settings.scalp_min_target_points,
+                    "scalpTargetMaxPoints": settings.scalp_max_target_points,
                     "standardMinScore": settings.signal_min_score,
                     "smcOverrideMinScore": settings.smc_override_min_score,
-                    "smcOverrideRule": "CHOCH or liquidity sweep, or BOS with directional candle/momentum confirmation",
+                    "smcOverrideRule": "EMA9/EMA200 trend + confirmed liquidity sweep only; no neural entry override",
                     "maxLiveCandleAgeSeconds": settings.live_trade_candle_max_age_seconds,
                     "staleDataPolicy": "NO_TRADE; stale candles never reach score/SMC execution gates",
                 },
