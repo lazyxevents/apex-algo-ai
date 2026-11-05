@@ -129,30 +129,51 @@ def test_option_selector_prefers_atm_then_nearest_otm():
     assert selected["moneyness"] == "OTM"
 
 
-def test_live_scan_rejects_countertrend_signal(monkeypatch):
-    import app.trading as trading
+def test_live_scan_requires_ema200_history(monkeypatch):
+    from app import trading
     engine = TradingEngine()
 
     class Provider:
         def intraday_candles(self, key):
             return [{"timestamp": "2026-10-08T14:20:00+05:30", "close": 71500}]
 
-    signal = {
-        "action": "PE", "score": 0.91, "emaFast": 100, "emaSlow": 101, "rsi": 40,
-        "underlyingPrice": 71500, "confirmations": {"bearBreakdown": True},
-        "smc": {"bos": "BEAR"}, "blockedBy": [],
-    }
-    continuation = {
-        "qualified": False,
-        "frames": {"5m": {"trend": "UP"}, "15m": {"trend": "UP"}},
-        "structure": {"previousLowBreak": True},
-    }
     monkeypatch.setattr(engine, "_candle_freshness", lambda candles: {"fresh": True})
-    monkeypatch.setattr(trading, "market_context", lambda candles: {})
-    monkeypatch.setattr(trading.adaptive_learner, "choose_arm", lambda context, capital: ARMS[0])
-    monkeypatch.setattr(trading, "evaluate_signal", lambda candles, arm: dict(signal))
-    monkeypatch.setattr(trading, "evaluate_mtf_continuation", lambda candles: continuation)
-    monkeypatch.setattr(trading.neural_model_service, "predict_signal", lambda signal: {"status": "insufficient_data"})
-    result = engine._scan_one(Provider(), "SENSEX", "BSE_INDEX|SENSEX", 30000)
+    result = engine._scan_one(Provider(), "SENSEX", "IDX_I|51|INDEX", 30000)
     assert result["action"] == "NO_TRADE"
-    assert "MTF_BOTH_OPPOSE" in result["blockedBy"]
+    assert "INSUFFICIENT_EMA200_CANDLES" in result["blockedBy"]
+    assert result["chosenStrategy"] == "APEX_EMA9_200_LIQUIDITY_SCALP"
+
+
+def test_ema200_liquidity_scalp_never_forces_entry():
+    from app.strategy import evaluate_ema_liquidity_scalp
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime(2026, 10, 8, 9, 15, tzinfo=timezone.utc)
+    candles = [
+        {"timestamp": (start + timedelta(minutes=i)).isoformat(),
+         "open": 100+i*0.1, "high": 101+i*0.1,
+         "low": 99+i*0.1, "close": 100.5+i*0.1, "volume": 1000}
+        for i in range(201)
+    ]
+    result = evaluate_ema_liquidity_scalp(candles)
+    assert result["action"] == "NO_TRADE"
+    assert "LIQUIDITY_SWEEP_NOT_CONFIRMED" in result["blockedBy"]
+
+
+def test_ema200_bullish_liquidity_sweep():
+    from app.strategy import evaluate_ema_liquidity_scalp
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime(2026, 10, 8, 9, 15, tzinfo=timezone.utc)
+    candles = [
+        {"timestamp": (start + timedelta(minutes=i)).isoformat(),
+         "open": 100+i*0.2, "high": 101+i*0.2,
+         "low": 99+i*0.2, "close": 100.6+i*0.2, "volume": 1000}
+        for i in range(201)
+    ]
+    pool_low = min(c["low"] for c in candles[-9:-1])
+    candles[-1]["low"] = pool_low - 1
+    candles[-1]["open"] = candles[-1]["close"] - 0.5
+    result = evaluate_ema_liquidity_scalp(candles)
+    assert result["action"] == "CE"
+    assert result["smc"]["liquiditySweep"] == "BULL"
