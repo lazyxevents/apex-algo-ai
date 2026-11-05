@@ -1243,3 +1243,6 @@ body,html,#root{background:#040615!important}
 .apex-reference-shell .summary-grid>*:hover,.apex-reference-shell .ref-mini-card:hover{border-color:#2bf4fa!important;box-shadow:0 0 17px rgba(40,231,247,.16)!important}
 @media(max-width:1349px){.ref-ticker-strip{grid-template-columns:repeat(4,minmax(0,1fr))}.ref-compact-strip{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:740px){.apex-reference-shell{width:calc(100% - 8px)!important;padding:6px!important;border-radius:10px}.ref-ticker-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.ref-compact-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.ref-mini-card{min-height:80px}.ref-mini-card strong{font-size:14px}}
+
+/* APEX scalp-first: hide duplicated visual-only panels; retain status, chart, orders and risk controls. */
+.apex-v3-hero, .ref-compact-strip, .intelligence-panel { display: none; }
