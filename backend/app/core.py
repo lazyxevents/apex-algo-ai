@@ -230,7 +230,7 @@ class Base(DeclarativeBase):
 
 
 def init_db() -> None:
-    from .models import AuditLog, DailyMarketPlan, LearningRewardEvent, LearningSample, LiveMarketObservation, ModelEvaluation, NeuralModelArtifact, PushSubscription, ResearchActivity, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
+    from .models import AuditLog, CandlePatternReference, DailyMarketPlan, LearningRewardEvent, LearningSample, LiveMarketObservation, ModelEvaluation, NeuralModelArtifact, PushSubscription, ResearchActivity, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
     Base.metadata.create_all(bind=engine)
 
 
