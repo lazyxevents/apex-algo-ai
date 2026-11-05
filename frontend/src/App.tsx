@@ -218,7 +218,7 @@ function MarketChart({
       <div>
         <div className="eyebrow">DHAN REAL MARKET DATA</div>
         <h2>SENSEX Native Candlestick Chart</h2>
-        <p>Broker candles directly from DhanHQ Data API • EMA 9 / EMA 21 • SMC support & resistance</p>
+        <p>Broker candles directly from DhanHQ Data API • EMA 9 / EMA 200 • SMC liquidity sweeps</p>
       </div>
       <div className="chart-head-right">
         <span className={`provider-chip ${freshness.fresh ? 'live' : 'stale'}`}>
@@ -283,7 +283,7 @@ function MarketChart({
         })}
 
         <polyline className="ema-line ema9" points={linePoints('ema9')} />
-        <polyline className="ema-line ema21" points={linePoints('ema21')} />
+        <polyline className="ema-line ema21" points={linePoints('ema200')} />
 
         {candles.filter((_: any, index: number) => index % Math.max(1, Math.floor(candles.length / 6)) === 0).map((row: any, index: number, arr: any[]) => {
           const originalIndex = candles.indexOf(row)
@@ -298,7 +298,7 @@ function MarketChart({
       <span><i className="legend-candle up" /> Bull candle</span>
       <span><i className="legend-candle down" /> Bear candle</span>
       <span><i className="legend-line-ui ema9" /> EMA 9</span>
-      <span><i className="legend-line-ui ema21" /> EMA 21</span>
+      <span><i className="legend-line-ui ema21" /> EMA 200</span>
       <span className="chart-source-note">Execution remains APEX PAPER • no Dhan exchange order is sent</span>
     </div>
   </section>
