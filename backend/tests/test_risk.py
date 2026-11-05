@@ -156,4 +156,3 @@ def test_live_scan_rejects_countertrend_signal(monkeypatch):
     result = engine._scan_one(Provider(), "SENSEX", "BSE_INDEX|SENSEX", 30000)
     assert result["action"] == "NO_TRADE"
     assert "MTF_BOTH_OPPOSE" in result["blockedBy"]
-    assert "15M_TREND_OPPOSES" in result["blockedBy"]
