@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     max_daily_loss_pct: float = 2.5
     max_weekly_loss_pct: float = 4.0
     max_monthly_drawdown_pct: float = 10.0
-    monthly_profit_target_pct: float = 10.0
+    monthly_profit_target_pct: float = 15.0
     monthly_target_lock: bool = True
     max_risk_per_trade: float = 400
     max_daily_loss: float = 1000
@@ -49,9 +49,11 @@ class Settings(BaseSettings):
     reward_risk_ratio: float = 1.8
     active_indices_raw: str = "SENSEX"
     sensex_lot_size: int = 20
-    scalp_target_points: float = 4.0
+    scalp_target_points: float = 12.0
     scalp_entry_pullback_points: float = 10.0
-    scalp_max_stop_points: float = 40.0
+    scalp_max_stop_points: float = 15.0
+    scalp_min_target_points: float = 10.0
+    scalp_max_target_points: float = 15.0
 
     # Explicit dashboard-triggered aggressive PAPER trade mode.
     manual_do_trade_enabled: bool = True
