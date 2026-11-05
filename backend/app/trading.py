@@ -1298,7 +1298,7 @@ class TradingEngine:
                 decision["signals"] = ranked
             # Automated entries are SENSEX scalp only. No forced trade.
             ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
-            decision["executionStrategy"] = "APEX_SCALP_MOMENTUM"
+            decision["executionStrategy"] = "APEX_EMA9_200_LIQUIDITY_SCALP"
             # Choose an executable scalp before high-score NO_TRADE candidates.
             scalp_candidates = [
                 candidate for candidate in ranked
@@ -1309,7 +1309,7 @@ class TradingEngine:
             if best.get("action") not in {"CE", "PE"}:
                 decision["reason"] = best.get("reason") or "no strategy setup passed score + candlestick confirmation"
                 decision["scalpScan"] = {
-                    "status": "NO_ENTRY", "strategy": "APEX_SCALP_MOMENTUM",
+                    "status": "NO_ENTRY", "strategy": "APEX_EMA9_200_LIQUIDITY_SCALP",
                     "directionCandidate": best.get("directionCandidate"),
                     "score": best.get("score"),
                     "blockedBy": best.get("blockedBy") or [],
