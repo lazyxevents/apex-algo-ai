@@ -22,6 +22,7 @@ from .notifications import push_notification_service
 from .models import AuditLog, Trade
 from .paper_costs import estimate_paper_costs
 from .research_engine import research_engine
+from .pattern_references import pattern_reference_service
 from .strategy import ARMS, adaptive_learner, evaluate_ema_liquidity_scalp, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
 
 IST = ZoneInfo(settings.timezone)
@@ -725,6 +726,8 @@ class TradingEngine:
                 "dataFreshness": freshness,
                 "entryReason": "STALE_DATA",
             }
+        # Reference collection is observational only; never alters execution gates.
+        pattern_reference_service.ingest(candles, instrument=name)
         # Strict single-setup execution: EMA9/EMA200 + 1m liquidity sweep.
         # Research/neural models remain observational, never override entry.
         signal = evaluate_ema_liquidity_scalp(candles)
@@ -1299,6 +1302,7 @@ class TradingEngine:
             # Automated entries are SENSEX scalp only. No forced trade.
             ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
             decision["executionStrategy"] = "APEX_EMA9_200_LIQUIDITY_SCALP"
+            decision["setupStatus"] = "SEARCHING"
             # Choose an executable scalp before high-score NO_TRADE candidates.
             scalp_candidates = [
                 candidate for candidate in ranked
@@ -1307,7 +1311,8 @@ class TradingEngine:
             ]
             best = max(scalp_candidates, key=lambda row: float(row.get("score") or 0)) if scalp_candidates else (ranked[0] if ranked else {"action": "NO_TRADE", "score": 0})
             if best.get("action") not in {"CE", "PE"}:
-                decision["reason"] = best.get("reason") or "no strategy setup passed score + candlestick confirmation"
+                decision["reason"] = best.get("reason") or "NO_SETUP_FOUND"
+                decision["setupStatus"] = "NO_SETUP_FOUND"
                 decision["scalpScan"] = {
                     "status": "NO_ENTRY", "strategy": "APEX_EMA9_200_LIQUIDITY_SCALP",
                     "directionCandidate": best.get("directionCandidate"),
@@ -1323,6 +1328,7 @@ class TradingEngine:
                 self.state.last_decision = decision
                 return decision
 
+            decision["setupStatus"] = "SETUP_FOUND"
             try:
                 with SessionLocal() as db:
                     self._authorize(db)
@@ -1688,6 +1694,7 @@ class TradingEngine:
             "mode": self.state.mode,
             "liveOrdersAllowed": False,
             "killSwitch": self.state.killed,
+            "patternReferences": pattern_reference_service.snapshot(),
             "automation": {
                 "enabled": settings.auto_trading_enabled,
                 "running": self.state.automation_running,
