@@ -1246,3 +1246,35 @@ body,html,#root{background:#040615!important}
 
 /* APEX scalp-first: hide duplicated visual-only panels; retain status, chart, orders and risk controls. */
 .apex-v3-hero, .ref-compact-strip, .intelligence-panel { display: none; }
+
+/* Minimal, responsive, scalp-first layout. Override old fixed 12-column desktop placements. */
+html, body, #root { max-width: 100%; min-width: 0; }
+.apex-reference-shell { display: flex !important; flex-direction: column !important; width: min(1320px,100%) !important; max-width: 100%; min-width: 0; gap: 12px; padding: clamp(12px,2vw,24px) !important; }
+.apex-reference-shell > * { width: 100%; min-width: 0; max-width: 100%; grid-column: auto !important; grid-row: auto !important; }
+.apex-reference-shell .apex-v3-hero, .apex-reference-shell .ref-compact-strip,
+.apex-reference-shell .intelligence-panel, .apex-reference-shell .apex-robot-shell { display: none !important; }
+.apex-reference-shell .summary-grid { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)) !important; }
+.apex-reference-shell .detail-copy { grid-template-columns: repeat(2,minmax(0,1fr)); }
+.apex-reference-shell .detail-copy b { float: none; display: block; margin-top: 5px; overflow-wrap: anywhere; }
+.apex-reference-shell .provider-status-grid { grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); }
+.apex-reference-shell .panel, .apex-reference-shell .market-chart-panel, .apex-reference-shell .provider-banner { min-width: 0; max-width: 100%; }
+.apex-reference-shell .table-scroll { max-width: 100%; overflow-x: auto; }
+.apex-reference-shell .chart-overlay { inset: 0; display: grid; place-items: center; }
+.shell.loading { display: flex; flex-direction: column; min-height: min(65vh,540px); justify-content: center; align-items: center; text-align: center; }
+.shell.loading .brand { justify-content: center; }
+@media(max-width:900px) {
+ .apex-reference-shell .summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+ .apex-reference-shell .two-col, .apex-reference-shell .details-grid { grid-template-columns: minmax(0,1fr) !important; }
+}
+@media(max-width:600px) {
+ .apex-reference-shell { padding: 10px !important; gap: 10px; }
+ .apex-reference-shell .detail-copy { grid-template-columns: minmax(0,1fr); padding: 0 10px 12px; }
+ .apex-reference-shell .ref-ticker-strip { grid-template-columns: repeat(2,minmax(0,1fr)) !important; }
+ .apex-reference-shell .summary-grid { gap: 8px; }
+ .apex-reference-shell .metric { padding: 12px 10px; }
+ .apex-reference-shell .metric strong { font-size: clamp(14px,4.5vw,20px); }
+ .apex-reference-shell .panel { padding: 12px; }
+ .apex-reference-shell .provider-banner { padding: 12px; }
+ .apex-reference-shell .provider-status-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .apex-reference-shell .topbar { padding: 6px 0 10px; }
+}
