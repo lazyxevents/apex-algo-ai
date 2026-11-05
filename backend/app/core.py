@@ -158,6 +158,8 @@ class Settings(BaseSettings):
     # DhanHQ market-data provider. Keys are exchangeSegment|securityId|instrument.
     dhan_client_id: str = ""
     dhan_access_token: str = ""
+    dhan_access_token_file: str = ""
+    dhan_auto_renew_enabled: bool = False
     dhan_nifty_key: str = "IDX_I|13|INDEX"
     dhan_banknifty_key: str = "IDX_I|25|INDEX"
     dhan_sensex_key: str = "IDX_I|51|INDEX"
