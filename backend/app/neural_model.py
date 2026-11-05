@@ -136,7 +136,7 @@ class NeuralModelService:
         with SessionLocal() as db:
             return list(db.execute(
                 select(LearningSample).where(
-                    LearningSample.strategy.in_(["SMC_SCALP_V2", "SMC_SWING_V2"]),
+                    LearningSample.strategy == "SMC_SCALP_V2",
                     LearningSample.outcome.in_(["TARGET", "STOP", "AMBIGUOUS_STOP_FIRST"]),
                 ).order_by(LearningSample.setup_time.asc())
             ).scalars().all())
@@ -193,6 +193,7 @@ class NeuralModelService:
             if (
                 int(latest_existing.trained_samples or 0) == int(len(y))
                 and int(latest_metrics.get("sourceMaxSampleId") or 0) == source_max_sample_id
+                and latest_metrics.get("trainingScope") == "SCALP_ONLY"
             ):
                 return {
                     "status": "up_to_date",
@@ -276,6 +277,7 @@ class NeuralModelService:
         result = {
             "status": "trained",
             "kind": "neural_mlp",
+            "trainingScope": "SCALP_ONLY",
             "architecture": f"{len(FEATURE_NAMES)}-{hidden_units}-1 tanh/sigmoid",
             "epochs": epochs,
             "eligibleSamples": int(len(y)),
@@ -308,7 +310,7 @@ class NeuralModelService:
                 except json.JSONDecodeError:
                     production_metrics = {}
             beats_current = True
-            if production_metrics:
+            if production_metrics.get("trainingScope") == "SCALP_ONLY":
                 old_test = production_metrics.get("outOfSample") or {}
                 beats_current = (
                     result["outOfSample"]["auc"] >= float(old_test.get("auc", 0.5)) - 0.01
@@ -358,6 +360,12 @@ class NeuralModelService:
         artifact = self._production()
         if artifact is None:
             return {"status": "shadow_waiting", "probability": None, "reason": "no promoted production neural model"}
+        try:
+            trained_metrics = json.loads(artifact.metrics_json or "{}")
+            if trained_metrics.get("trainingScope") != "SCALP_ONLY":
+                return {"status": "shadow_waiting", "probability": None, "reason": "legacy mixed-strategy model not eligible for scalp-only inference"}
+        except (ValueError, TypeError):
+            return {"status": "shadow_waiting", "probability": None, "reason": "model training scope unknown"}
         features, direction = parsed
         try:
             weights = json.loads(artifact.weights_json or "{}")
@@ -381,7 +389,7 @@ class NeuralModelService:
             latest = db.scalar(select(NeuralModelArtifact).order_by(NeuralModelArtifact.id.desc()).limit(1))
             total = int(db.scalar(select(func.count()).select_from(NeuralModelArtifact)) or 0)
             eligible_filter = (
-                LearningSample.strategy.in_(["SMC_SCALP_V2", "SMC_SWING_V2"]),
+                LearningSample.strategy == "SMC_SCALP_V2",
                 LearningSample.outcome.in_(["TARGET", "STOP", "AMBIGUOUS_STOP_FIRST"]),
             )
             eligible = int(db.scalar(
