@@ -1335,3 +1335,60 @@ html[data-theme="light"] .apex-reference-shell :is(.action-btn,.timeframe-tabs b
 html[data-theme="light"] .apex-reference-shell :is(.notice,.status-line,.clock) { color:#38576b }
 html[data-theme="light"] .apex-reference-shell .trade-table td { color:#35526b; }
 html[data-theme="light"] .apex-reference-shell .trade-table th { background:#eaf1f7;color:#536b7f }
+
+/* Two accessible colour modes for APEX and a compact trading command center. */
+.theme-toggle{border:1px solid #375069;background:#14283b;color:#e2edf6;border-radius:10px;padding:8px 12px;font-weight:700;font-size:12px;cursor:pointer;margin-bottom:8px}
+.theme-toggle:hover{border-color:#19ba9b}
+.apex-setup-banner{display:flex;justify-content:space-between;gap:16px;align-items:center;background:linear-gradient(100deg,#112a36,#0c2331);border:1px solid #377a78;border-radius:15px;padding:17px 20px;min-width:0}
+.apex-setup-banner div:first-child{min-width:0}
+.apex-setup-banner small{display:block;color:#83beb8;font-size:10px;letter-spacing:.07em}
+.apex-setup-banner strong{display:block;color:#f4fcff;font-size:clamp(20px,3vw,30px);margin:5px 0}
+.apex-setup-banner span{display:block;color:#aec7d0;line-height:1.5;overflow-wrap:anywhere;font-size:12px}
+.setup-side{flex:none;text-align:center;border-left:1px solid #2c4a57;padding-left:20px}
+.setup-side b{display:block;font-size:25px;color:#5ce1b0}
+.reference-count{color:#5ce1b0;white-space:nowrap}
+.reference-progress{height:11px;background:#1c3443;border-radius:99px;overflow:hidden;margin:14px 0}
+.reference-progress>span{height:100%;display:block;background:linear-gradient(90deg,#19a985,#4ee7ba);border-radius:99px;transition:width .25s ease}
+.reference-patterns{display:flex;flex-wrap:wrap;gap:7px}
+.reference-patterns>span{border:1px solid #2e4b5c;border-radius:99px;padding:5px 10px;font-size:11px;color:#adc1d3}
+.reference-patterns b{color:#61ddb4}
+html[data-theme="light"]{background:#f1f5fa;color:#152c3c;color-scheme:light}
+html[data-theme="light"] body{background:#f1f5fa;color:#152c3c}
+html[data-theme="light"] .apex-reference-shell{color:#152c3c}
+html[data-theme="light"] .apex-reference-shell .panel,
+html[data-theme="light"] .apex-reference-shell .metric,
+html[data-theme="light"] .apex-reference-shell .provider-banner,
+html[data-theme="light"] .apex-reference-shell .ref-ticker-strip,
+html[data-theme="light"] .apex-reference-shell .market-chart-panel,
+html[data-theme="light"] .apex-reference-shell .system-item{background:#fff!important;border-color:#d5e1ed!important;box-shadow:0 3px 18px rgba(30,58,85,.045)!important}
+html[data-theme="light"] .apex-reference-shell h1,
+html[data-theme="light"] .apex-reference-shell h2,
+html[data-theme="light"] .apex-reference-shell h3,
+html[data-theme="light"] .apex-reference-shell .metric strong,
+html[data-theme="light"] .apex-reference-shell .detail-copy b,
+html[data-theme="light"] .apex-reference-shell .system-item b,
+html[data-theme="light"] .apex-reference-shell .chart-stats b,
+html[data-theme="light"] .apex-reference-shell .provider-status-grid b,
+html[data-theme="light"] .apex-reference-shell .ref-ticker-item b{color:#1b3348!important}
+html[data-theme="light"] .apex-reference-shell p,
+html[data-theme="light"] .apex-reference-shell small,
+html[data-theme="light"] .apex-reference-shell .metric span,
+html[data-theme="light"] .apex-reference-shell .ref-ticker-item small{color:#556c82}
+html[data-theme="light"] .apex-reference-shell .detail-copy span,
+html[data-theme="light"] .apex-reference-shell .chart-stats span,
+html[data-theme="light"] .apex-reference-shell .provider-status-grid span,
+html[data-theme="light"] .apex-reference-shell .target-amounts>div,
+html[data-theme="light"] .apex-reference-shell .lock-grid span{background:#f2f6fa;border-color:#d9e5ee;color:#52697c}
+html[data-theme="light"] .apex-reference-shell .trade-table th{background:#eaf1f7;color:#476074}
+html[data-theme="light"] .apex-reference-shell .trade-table td{color:#254257;border-color:#e0e9ef}
+html[data-theme="light"] .apex-reference-shell .action-btn{background:#eaf2f7;color:#214052}
+html[data-theme="light"] .apex-reference-shell .native-chart-wrap{background:#f8fbff}
+html[data-theme="light"] .apex-reference-shell .chart-axis-label,
+html[data-theme="light"] .apex-reference-shell .chart-time-label{fill:#516c80}
+html[data-theme="light"] .apex-reference-shell .apex-setup-banner{background:#e8f7f4;border-color:#acdcd2}
+html[data-theme="light"] .apex-reference-shell .apex-setup-banner strong{color:#154639}
+html[data-theme="light"] .apex-reference-shell .apex-setup-banner span{color:#496d64}
+html[data-theme="light"] .apex-reference-shell .reference-patterns>span{color:#416076;border-color:#d3e1e8}
+html[data-theme="light"] .apex-reference-shell .reference-progress{background:#dfe9ee}
+html[data-theme="light"] .apex-reference-shell .theme-toggle{background:#f7fcff;color:#25465a}
+@media(max-width:600px){.apex-setup-banner{padding:12px;align-items:flex-start}.setup-side{padding-left:9px}.setup-side b{font-size:18px}.reference-count{font-size:13px}.theme-toggle{font-size:11px;padding:7px}.apex-reference-training .section-head{gap:7px}}
