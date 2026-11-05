@@ -227,3 +227,16 @@ Research/LLM output cannot place orders or override deterministic risk locks.
 - explicit limited-live activation gate
 
 Adaptive learning improves selection only from the data it sees; it does not guarantee profitability.
+
+
+## Dhan token renewal (opt-in)
+
+Dhan Web access tokens last 24 hours. APEX can renew an **active Dhan Web-generated** token using the official `GET /v2/RenewToken` endpoint. This endpoint cannot renew expired tokens or tokens created through a different authentication flow. Do not use unattended TOTP/PIN bypasses.
+
+1. Generate one valid Web token in Dhan and set `DHAN_CLIENT_ID` and `DHAN_ACCESS_TOKEN` as **backend secrets**.
+2. Attach a **persistent, private disk** to the always-on backend (not ephemeral Render free filesystem). Set `DHAN_ACCESS_TOKEN_FILE=/data/dhan_token.json` and `DHAN_AUTO_RENEW_ENABLED=true`.
+3. Restart once. The automation scan loop checks renewal. Once renewed, the new token is written with file permission 0600; subsequent restarts read that file first. Check `/api/status` provider fields `tokenLastRenewedAt` and `tokenRefreshError`.
+4. Ensure the backend is actually awake and scanning at least every 12 hours. Sleeping services cannot renew tokens. Never run two active renewal workers against the same Dhan account. If renewal fails or token expires, reauthenticate manually and replace the persistent token file securely. Do not paste tokens into issues or GitHub.
+5. Keep `TRADING_MODE=PAPER` and `ALLOW_LIVE_ORDERS=false` until data, fills and safety controls are verified.
+
+Dhan API documentation: https://dhanhq.co/docs/v2/authentication/
