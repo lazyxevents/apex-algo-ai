@@ -41,6 +41,8 @@ async def automation_loop():
     try:
         while True:
             try:
+                if settings.market_data_provider.strip().lower() == "dhan":
+                    await asyncio.to_thread(dhan_service.renew_token_if_due)
                 await asyncio.to_thread(trading_engine.automation_cycle, market_service)
             except Exception as exc:
                 # Never let one provider/strategy failure kill the long-running scan loop.
