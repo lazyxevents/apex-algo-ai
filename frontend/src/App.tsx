@@ -761,6 +761,8 @@ export default function App() {
         <span><small>Execution</small><b>{broker.paperExecution ? 'APEX PAPER' : (broker.mode || status.mode)}</b></span>
         <span><small>Dhan orders</small><b className={broker.liveOrdersAllowed ? 'negative' : 'positive'}>{broker.liveOrdersAllowed ? 'LIVE ENABLED' : 'BLOCKED'}</b></span>
         <span><small>Last provider success</small><b>{formatDateTime(market.lastSuccessAt)}</b></span>
+        <span><small>Dhan token</small><b className={market.tokenRefreshError ? "negative" : "positive"}>{market.tokenRefreshError ? "RENEW FAILED" : market.tokenAutoRenewEnabled ? "AUTO RENEW ON" : "MANUAL"}</b></span>
+        {market.tokenAutoRenewEnabled && <span><small>Last token rotation</small><b>{formatDateTime(market.tokenLastRenewedAt)}</b></span>}
       </div>
     </section>
 
