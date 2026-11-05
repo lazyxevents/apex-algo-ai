@@ -765,7 +765,7 @@ export default function App() {
       </div>
       <div className="reference-patterns">
         {(references.patterns || []).filter((pattern: any) => pattern.name !== 'NO_NAMED_PATTERN').map((pattern: any) =>
-          <span key={pattern.name}>{String(pattern.name).replaceAll('_',' ')} <b>{pattern.count}</b></span>)}
+          <span key={pattern.name}>{String(pattern.name).replace(/_/g, ' ')} <b>{pattern.count}</b></span>)}
       </div>
       <p className="panel-note">Count = real historical 1m OHLC examples with 3-future-bar labels, not neural accuracy or profitable option trades. Entry still follows EMA 9/200 + SMC liquidity.</p>
       {references.lastError && <p className="panel-note negative">Reference sync: {references.lastError}</p>}
@@ -792,7 +792,7 @@ export default function App() {
       </div>
       <div className="reference-patterns">
         {(references.patterns || []).filter((pattern: any) => pattern.name !== 'NO_NAMED_PATTERN').map((pattern: any) =>
-          <span key={pattern.name}>{String(pattern.name).replaceAll('_',' ')} <b>{pattern.count}</b></span>)}
+          <span key={pattern.name}>{String(pattern.name).replace(/_/g, ' ')} <b>{pattern.count}</b></span>)}
       </div>
       <p className="panel-note">Real historical 1m candles with 3-bar outcome labels. This count is not neural accuracy or profitable options trades. Execution remains EMA 9/200 + SMC liquidity only.</p>
       {references.lastError && <p className="panel-note negative">Reference sync: {references.lastError}</p>}
