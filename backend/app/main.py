@@ -147,6 +147,13 @@ def health():
     }
 
 
+@app.get("/test")
+@app.get("/ping")
+def uptime_ping():
+    """Fast UptimeRobot keep-alive endpoint. No DB or external market API calls."""
+    return {"status": "ok", "service": "apex-backend", "time": datetime.now(timezone.utc).isoformat()}
+
+
 @app.get("/healthz")
 def uptime_health():
     """UptimeRobot-friendly readiness check; no external Dhan calls."""
@@ -162,7 +169,9 @@ def readiness_diagnostics():
     mode = trading_engine.state.mode
     provider = market_service.status()
     db_ok = db_health() == "connected"
+    data_access_ok = provider.get("dataApiAccess") != "blocked"
     gates = {
+        "dataApiAccess": data_access_ok,
         "paperMode": mode == "PAPER",
         "autoTradingEnabled": bool(settings.auto_trading_enabled),
         "automationLoopRunning": bool(trading_engine.state.automation_running),
@@ -176,6 +185,8 @@ def readiness_diagnostics():
         "blockedBy": [key for key, ok in gates.items() if not ok],
         "lastAutomationError": trading_engine.state.last_error,
         "lastMarketError": provider.get("lastError"),
+        "dataApiAccess": provider.get("dataApiAccess", "unknown"),
+        "dataApiAccessReason": provider.get("dataApiAccessReason"),
         "lastCandleTime": provider.get("latestCandleTime"),
         "note": "No-trade reasons are readiness checks only; signal quality and risk gates apply independently.",
     }
