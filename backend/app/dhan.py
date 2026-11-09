@@ -39,6 +39,8 @@ class DhanService:
         self._renewed_at = None
         self._runtime_token = ""
         self._refresh_error = None
+        self._data_plan_block_until = 0.0
+        self._data_plan_error: str | None = None
         self._load_token()
 
 
@@ -166,6 +168,8 @@ class DhanService:
             "lastSuccessAt": self._last_success_at,
             "latestCandleTime": self._latest_candle_time,
             "lastError": self._last_error,
+            "dataApiAccess": "blocked" if monotonic() < self._data_plan_block_until else "not_verified",
+            "dataApiAccessReason": self._data_plan_error if monotonic() < self._data_plan_block_until else None,
             "note": (
                 "Real Dhan market data with APEX internal PAPER execution."
                 if self.market_ready
@@ -189,6 +193,9 @@ class DhanService:
     def _post(self, path: str, payload: dict, timeout: float = 15.0) -> dict:
         if not self.market_ready:
             raise RuntimeError("DHAN_CLIENT_ID/DHAN_ACCESS_TOKEN are missing")
+        data_endpoint = path in {"/charts/intraday", "/charts/historical", "/optionchain"}
+        if data_endpoint and monotonic() < self._data_plan_block_until:
+            raise RuntimeError(self._data_plan_error or "Dhan Data APIs plan required (DH-902)")
         try:
             with httpx.Client(timeout=timeout) as client:
                 res = client.post(f"{self.api_v2}{path}", headers=self._headers(), json=payload)
@@ -197,6 +204,14 @@ class DhanService:
                 except Exception:
                     body = {"raw": res.text}
                 if res.status_code >= 400:
+                    code = str(body.get("errorCode") or body.get("error_code") or "") if isinstance(body, dict) else ""
+                    message = str(body.get("errorMessage") or "") if isinstance(body, dict) else ""
+                    if data_endpoint and (code in {"DH-902", "806"} or (res.status_code == 401 and "Data APIs Plan" in message)):
+                        reason = "Dhan Data APIs subscription required (DH-902). Activate the Data APIs plan in DhanHQ; changing token alone will not grant market-data access."
+                        with self._lock:
+                            self._data_plan_error = reason
+                            self._data_plan_block_until = monotonic() + 300
+                        raise RuntimeError(reason)
                     raise RuntimeError(f"Dhan API {path} failed ({res.status_code}): {body}")
             if isinstance(body, dict) and str(body.get("status") or "").lower() == "failure":
                 raise RuntimeError(f"Dhan API {path} failed: {body}")
@@ -322,6 +337,8 @@ class DhanService:
         start = now - timedelta(days=max(1, min(30, int(settings.dhan_intraday_lookback_days))))
         candles = self._intraday_request(instrument_key, start, now, minutes)
         with self._lock:
+            self._data_plan_error = None
+            self._data_plan_block_until = 0.0
             self._candle_cache[key] = (now_mono, candles)
         return list(candles)
 
