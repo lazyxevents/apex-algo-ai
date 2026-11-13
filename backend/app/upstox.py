@@ -16,6 +16,9 @@ class UpstoxService:
 
     def __init__(self):
         self._contracts_cache: dict[str, tuple[date, list[dict]]] = {}
+        self._token_problem: str | None = None
+        self._last_error: str | None = None
+        self._last_success_at: str | None = None
 
     def _market_token(self) -> str:
         # Analytics Token is read-only and long-lived; ideal for market-data
@@ -31,25 +34,63 @@ class UpstoxService:
 
     @property
     def market_ready(self) -> bool:
-        return bool(self._market_token())
+        return bool(self._market_token()) and self._token_problem is None
 
     @property
     def sandbox_ready(self) -> bool:
         return bool(settings.upstox_sandbox_token)
 
     def status(self) -> dict:
+        configured = bool(self._market_token())
+        token_type = "analytics" if settings.upstox_analytics_token else ("oauth" if settings.upstox_access_token else "missing")
+        token_status = self._token_problem or ("MISSING" if not configured else ("READY" if self._last_success_at else "CONFIGURED"))
+        token_action_required = token_status in {"MISSING", "INVALID", "ACCESS_DENIED"}
+        token_message = (
+            "Generate an Upstox Analytics Token and set UPSTOX_ANALYTICS_TOKEN on the backend."
+            if token_status == "MISSING" else
+            "Upstox rejected the token (HTTP 401). Generate a fresh Analytics Token and update UPSTOX_ANALYTICS_TOKEN."
+            if token_status == "INVALID" else
+            "Upstox denied market-data access (HTTP 403). Check Analytics Token access or generate a fresh token."
+            if token_status == "ACCESS_DENIED" else
+            "Upstox Analytics Token is configured. It is read-only and does not place broker orders."
+        )
         return {
             "provider": "upstox",
+            "displayName": "Upstox Market Data API",
             "marketDataConfigured": self.market_ready,
             "tokenRequired": True,
-            "tokenType": "analytics" if settings.upstox_analytics_token else ("oauth" if settings.upstox_access_token else "missing"),
-            "tokenRenewal": "not_required_for_analytics_token",
+            "tokenType": token_type,
+            "tokenStatus": token_status,
+            "tokenActionRequired": token_action_required,
+            "tokenMessage": token_message,
+            "tokenRenewal": "not_required_for_analytics_token" if token_type == "analytics" else "daily_oauth",
+            "tokenInvalid": self._token_problem in {"INVALID", "ACCESS_DENIED"},
             "readOnlyMarketData": True,
             "supportsOptionChain": True,
             "syntheticPaper": False,
             "sandboxConfigured": self.sandbox_ready,
             "paperBroker": settings.paper_broker,
+            "lastSuccessAt": self._last_success_at,
+            "lastError": self._last_error,
         }
+
+    def _check_response(self, response: httpx.Response) -> httpx.Response:
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            if response.status_code == 401:
+                self._token_problem = "INVALID"
+                self._last_error = "Upstox rejected the market-data token (HTTP 401)."
+            elif response.status_code == 403:
+                self._token_problem = "ACCESS_DENIED"
+                self._last_error = "Upstox denied market-data access (HTTP 403)."
+            else:
+                self._last_error = f"Upstox market-data request failed (HTTP {response.status_code})."
+            raise
+        self._last_success_at = datetime.now(timezone.utc).isoformat()
+        self._last_error = None
+        self._token_problem = None
+        return response
 
     @staticmethod
     def _parse_candles(raw: list) -> list[dict]:
@@ -75,7 +116,7 @@ class UpstoxService:
         url = f"{self.api_v3}/historical-candle/intraday/{encoded}/minutes/{settings.candle_interval_minutes}"
         with httpx.Client(timeout=12) as client:
             res = client.get(url, headers=self._headers(self._market_token()))
-            res.raise_for_status()
+            self._check_response(res)
             raw = res.json().get("data", {}).get("candles", [])
         return self._parse_candles(raw)
 
@@ -89,7 +130,7 @@ class UpstoxService:
         )
         with httpx.Client(timeout=20) as client:
             res = client.get(url, headers=self._headers(self._market_token()))
-            res.raise_for_status()
+            self._check_response(res)
             raw = res.json().get("data", {}).get("candles", [])
         return self._parse_candles(raw)
 
@@ -118,7 +159,7 @@ class UpstoxService:
                 params={"instrument_key": underlying_key},
                 headers=self._headers(self._market_token()),
             )
-            res.raise_for_status()
+            self._check_response(res)
             rows = res.json().get("data", []) or []
         self._contracts_cache[underlying_key] = (date.today(), rows)
         return rows
@@ -147,7 +188,7 @@ class UpstoxService:
                 params={"instrument_key": underlying_key, "expiry_date": expiry},
                 headers=self._headers(self._market_token()),
             )
-            res.raise_for_status()
+            self._check_response(res)
             return res.json().get("data", []) or []
 
     def quote_ltp(self, instrument_key: str) -> float:
@@ -159,7 +200,7 @@ class UpstoxService:
                 params={"instrument_key": instrument_key},
                 headers=self._headers(self._market_token()),
             )
-            res.raise_for_status()
+            self._check_response(res)
             data = res.json().get("data", {}) or {}
         for item in data.values():
             for key in ("last_price", "ltp"):
