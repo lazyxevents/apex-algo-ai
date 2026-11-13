@@ -8,6 +8,16 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: backend
@@ -20,7 +30,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run backend tests
         env:
-          DATABASE_URL: sqlite:///./ci.db
+          MONGODB_URI: mongodb://localhost:27017
+          MONGODB_DATABASE: apgoai
           MARKET_DATA_PROVIDER: dhan
         run: pytest -q
 
