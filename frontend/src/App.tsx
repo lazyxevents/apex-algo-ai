@@ -223,7 +223,7 @@ function MarketChart({
       <div>
         <div className="eyebrow">{String(marketProviderName(data?.provider)).toUpperCase()} • REAL MARKET DATA</div>
         <h2>SENSEX Native Candlestick Chart</h2>
-        <p>Broker candles • EMA 9 / EMA 200 • SMC liquidity sweeps</p>
+        <p>Broker candles • EMA 9 / EMA 21 • pullback confirmation</p>
       </div>
       <div className="chart-head-right">
         <span className={`provider-chip ${freshness.fresh ? 'live' : 'stale'}`}>
@@ -288,7 +288,7 @@ function MarketChart({
         })}
 
         <polyline className="ema-line ema9" points={linePoints('ema9')} />
-        <polyline className="ema-line ema21" points={linePoints('ema200')} />
+        <polyline className="ema-line ema21" points={linePoints('ema21')} />
 
         {candles.filter((_: any, index: number) => index % Math.max(1, Math.floor(candles.length / 6)) === 0).map((row: any, index: number, arr: any[]) => {
           const originalIndex = candles.indexOf(row)
@@ -303,7 +303,7 @@ function MarketChart({
       <span><i className="legend-candle up" /> Bull candle</span>
       <span><i className="legend-candle down" /> Bear candle</span>
       <span><i className="legend-line-ui ema9" /> EMA 9</span>
-      <span><i className="legend-line-ui ema21" /> EMA 200</span>
+      <span><i className="legend-line-ui ema21" /> EMA 21</span>
       <span className="chart-source-note">Execution remains APEX PAPER • no broker order is sent</span>
     </div>
   </section>
@@ -768,7 +768,7 @@ export default function App() {
 
 
     <section className="apex-setup-banner" aria-live="polite">
-      <div><small>DAILY SETUP STATUS • EMA 9/200 + LIQUIDITY SWEEP</small>
+      <div><small>DAILY SETUP STATUS • EMA 9/21 PULLBACK SCALP</small>
         <strong>{setupState}</strong>
         <span>{openTrades.length ? String(openTrades.length) + ' open paper position(s)' :
           latestDecision.setupStatus === 'NO_SETUP_FOUND'
@@ -790,7 +790,7 @@ export default function App() {
         {(references.patterns || []).filter((pattern: any) => pattern.name !== 'NO_NAMED_PATTERN').map((pattern: any) =>
           <span key={pattern.name}>{String(pattern.name).replace(/_/g, ' ')} <b>{pattern.count}</b></span>)}
       </div>
-      <p className="panel-note">Count = real historical 1m OHLC examples with 3-future-bar labels, not neural accuracy or profitable option trades. Entry still follows EMA 9/200 + SMC liquidity.</p>
+      <p className="panel-note">Count = real historical 1m OHLC examples with 3-future-bar labels, not neural accuracy or profitable option trades. Entry still follows EMA 9/21 + SMC liquidity.</p>
       {references.lastError && <p className="panel-note negative">Reference sync: {references.lastError}</p>}
     </section>
     <section className="panel" aria-label="APEX live intelligence and execution status">
@@ -798,7 +798,7 @@ export default function App() {
       <div className="detail-copy">
         <span>Market / execution <b>{feedStale ? 'STALE FEED — ENTRIES BLOCKED' : providerReady ? 'FEED READY' : 'FEED UNAVAILABLE'} · {automation.running ? 'SCANNING' : 'SCAN IDLE'}</b></span>
         <span>Latest scan <b>{formatDateTime(automation.lastDecision?.at || automation.lastDecision?.phase?.now || status.lastCycleAt)}</b></span>
-        <span>Execution strategy <b>EMA 9 / EMA 200 + SMC LIQUIDITY SWEEP</b></span>
+        <span>Execution strategy <b>EMA 9 / EMA 21 PULLBACK + CONFIRMATION</b></span>
         <span>Training labels <b>{Number(trainingReadiness.eligibleSamples || 0).toLocaleString('en-IN')} / {Number(trainingReadiness.minimumSamples || 0).toLocaleString('en-IN')}</b></span>
         <span>Monthly guardrails <b>+{Number(mt.targetPct ?? 15)}% target · −10% drawdown limit</b></span>
         <span>Latest decision <b>{String(automation.lastDecision?.action || 'WAITING')} · {String(automation.lastDecision?.reason || automation.lastDecision?.executionGate?.reason || 'Awaiting next scan')}</b></span>
@@ -1165,6 +1165,30 @@ export default function App() {
             <span className={`model-role ${String(activeNeural.role || activeNeural.status || 'waiting').toLowerCase()}`}>{activeNeural.role || activeNeural.status || 'WAITING'}</span>
           </div>
           <LearningJar readiness={trainingReadiness} model={activeNeural} />
+          <div style={{border:'1px solid rgba(120,150,180,.28)',borderRadius:14,padding:'14px 16px',margin:'14px 0',background:'rgba(100,130,160,.06)'}}>
+            <b style={{display:'block',marginBottom:6}}>Neural training — what is actually happening?</b>
+            <p style={{margin:'0 0 10px',fontSize:13,lineHeight:1.6}}>
+              {neuralModel.enabled === false
+                ? 'Neural training is disabled in server settings. APEX can still collect observations, but it will not train a neural model.'
+                : trainingReadiness.productionModelReady
+                  ? 'A validated production model exists. It can provide a probability estimate; it does not control entries or override stop-loss and risk rules.'
+                  : Number(trainingReadiness.eligibleSamples || 0) >= Number(trainingReadiness.minimumSamples || 200) && trainingReadiness.classBalanceReady
+                    ? 'Enough labeled data is available. The next post-market training cycle can train and test a candidate. It becomes active only if validation and out-of-sample checks pass.'
+                    : 'APEX is currently collecting and labeling historical market setups. It does NOT update neural weights on every live candle. Training runs after market hours once enough clean outcomes exist.'}
+            </p>
+            <div style={{display:'flex',flexWrap:'wrap',gap:8,fontSize:12}}>
+              <span className="badge subtle">Live: observe candles + market context</span>
+              <span className="badge subtle">After outcome: label target-first / stop-first</span>
+              <span className="badge subtle">Post-market: train + out-of-sample test</span>
+              <span className="badge subtle">Promotion: validation gates only</span>
+            </div>
+            <p style={{margin:'10px 0 0',fontSize:12,lineHeight:1.6,opacity:.82}}>
+              What the model studies: EMA direction/gap, RSI, ATR volatility, volume ratio, bullish/bearish candle patterns, BOS/CHOCH, liquidity sweep, FVG, fake breakouts, scalp setup type, risk/reward and CE/PE direction. These are model inputs—not proof that it has learned a profitable edge.
+            </p>
+            <p style={{margin:'8px 0 0',fontSize:12,lineHeight:1.6,opacity:.82}}>
+              Paper trade outcomes and rewards appear after a trade closes. The neural dataset is labeled from eligible SMC scalp setups; a single open trade does not instantly retrain the model.
+            </p>
+          </div>
           <div className="core-stat-grid">
             <span><small>Architecture</small><b>{activeNeural.architecture || '14 → 24 → 1 MLP'}</b></span>
             <span><small>Labeled samples</small><b>{trainingReadiness.eligibleSamples ?? activeNeural.trainedSamples ?? worker.neuralTrainedSamples ?? 0}</b></span>
