@@ -147,8 +147,8 @@ def health():
     }
 
 
-@app.get("/test")
-@app.get("/ping")
+@app.api_route("/test", methods=["GET", "HEAD"])
+@app.api_route("/ping", methods=["GET", "HEAD"])
 def uptime_ping():
     """Fast UptimeRobot keep-alive endpoint. No DB or external market API calls."""
     return {"status": "ok", "service": "apex-backend", "time": datetime.now(timezone.utc).isoformat()}
