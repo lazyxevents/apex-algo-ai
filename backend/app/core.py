@@ -570,10 +570,10 @@ def init_db() -> None:
         collection = database[model.__tablename__]
         collection.create_index("id", unique=True, sparse=True)
         for column in model.__table__.columns:
-            if column.index:
-                collection.create_index(column.key)
             if column.unique:
                 collection.create_index(column.key, unique=True, sparse=True)
+            elif column.index:
+                collection.create_index(column.key)
         for constraint in model.__table__.constraints:
             if isinstance(constraint, UniqueConstraint):
                 keys = [(column.key, 1) for column in constraint.columns]
