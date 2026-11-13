@@ -28,12 +28,10 @@ class StrategyArm:
 
 
 ARMS = [
-    StrategyArm("APEX_BREAKOUT_BALANCED", 9, 21, 56, 44, 15, 1.05, settings.signal_min_score),
-    StrategyArm("APEX_BREAKOUT_FAST", 8, 18, 58, 42, 12, 1.10, min(0.82, settings.signal_min_score + 0.03)),
-    StrategyArm("APEX_BREAKOUT_STABLE", 12, 26, 55, 45, 20, 1.00, max(0.55, settings.signal_min_score - 0.02)),
-    StrategyArm("APEX_SCALP_MOMENTUM", 5, 13, 60, 40, 8, 1.20, max(0.72, settings.signal_min_score + 0.05), "scalp"),
+    # One production execution strategy. Legacy arms are intentionally disabled;
+    # this keeps research, reporting and reward learning aligned to the live paper policy.
+    StrategyArm("APEX_EMA9_21_PULLBACK_SCALP", 9, 21, 55, 45, 8, 1.0, 0.60, "scalp"),
 ]
-
 
 def _ema(values: list[float], period: int) -> float:
     if not values:
@@ -830,60 +828,74 @@ adaptive_learner = AdaptiveLearner()
 
 
 def evaluate_ema_liquidity_scalp(candles: list[dict]) -> dict:
-    """One deterministic SENSEX scalp: EMA9/200 directional bias + swept local liquidity.
+    """Single 1m EMA9/21 pullback scalp with candle confirmation.
 
-    Uses only completed 1m candles. NO_TRADE is deliberate if direction or
-    the most recent liquidity rejection is unconfirmed; no score gambling.
+    Requires a directional EMA trend, a recent pullback to EMA9, and a
+    completed confirmation candle. No liquidity-sweep/SMC/neural gate is
+    required for execution; those remain observational.
     """
-    name = "APEX_EMA9_200_LIQUIDITY_SCALP"
-    if len(candles) < 201:
+    name = "APEX_EMA9_21_PULLBACK_SCALP"
+    ordered = sorted(candles, key=lambda c: c.get("timestamp") or c.get("time") or "")
+    if len(ordered) < 30:
         return {
             "action": "NO_TRADE", "score": 0.0, "strategy": name,
-            "reason": "INSUFFICIENT_EMA200_CANDLES",
-            "blockedBy": ["INSUFFICIENT_EMA200_CANDLES"],
-            "candlesAvailable": len(candles), "candlesRequired": 201,
+            "reason": "INSUFFICIENT_CANDLES",
+            "blockedBy": ["INSUFFICIENT_CANDLES"],
+            "candlesAvailable": len(ordered), "candlesRequired": 30,
         }
-    ordered = sorted(candles, key=lambda c: c["timestamp"])
+
     closes = [float(c["close"]) for c in ordered]
-    fast, slow = _ema(closes, 9), _ema(closes, 200)
+    fast = _ema(closes, 9)
+    slow = _ema(closes, 21)
+    previous_fast = _ema(closes[:-1], 9)
     last = ordered[-1]
-    close = float(last["close"])
-    low = float(last["low"])
-    high = float(last["high"])
-    op = float(last["open"])
-    if not all(isfinite(x) for x in (close, low, high, op, fast, slow)):
+    close, op = float(last["close"]), float(last["open"])
+    high, low = float(last["high"]), float(last["low"])
+    values = (close, op, high, low, fast, slow, previous_fast)
+    if not all(isfinite(x) for x in values) or high < low:
         return {"action": "NO_TRADE", "score": 0.0, "strategy": name,
                 "reason": "INVALID_CANDLE", "blockedBy": ["INVALID_CANDLE"]}
-    prior = ordered[-9:-1]
-    pool_low = min(float(c["low"]) for c in prior)
-    pool_high = max(float(c["high"]) for c in prior)
-    # Sweeps must close back inside the prior range and confirm direction.
-    bull_sweep = low < pool_low and close > pool_low and close > op
-    bear_sweep = high > pool_high and close < pool_high and close < op
-    bull_trend = fast > slow and close > fast
-    bear_trend = fast < slow and close < fast
-    action = "CE" if bull_trend and bull_sweep else "PE" if bear_trend and bear_sweep else "NO_TRADE"
-    reason = ("EMA9_ABOVE_200_BULL_LIQUIDITY_SWEEP" if action == "CE"
-              else "EMA9_BELOW_200_BEAR_LIQUIDITY_SWEEP" if action == "PE"
-              else "EMA_TREND_NOT_ALIGNED" if not (bull_trend or bear_trend)
-              else "LIQUIDITY_SWEEP_NOT_CONFIRMED")
-    side = "BULL" if bull_sweep else "BEAR" if bear_sweep else "NONE"
+
+    recent = ordered[-4:-1]
+    bull_pullback = any(float(c["low"]) <= _ema(closes[:i + 1], 9) * 1.002
+                        for i, c in enumerate(ordered[-4:-1], start=len(ordered) - 4))
+    bear_pullback = any(float(c["high"]) >= _ema(closes[:i + 1], 9) * 0.998
+                        for i, c in enumerate(ordered[-4:-1], start=len(ordered) - 4))
+    bull_trend = fast > slow and close > fast and fast >= previous_fast
+    bear_trend = fast < slow and close < fast and fast <= previous_fast
+    bull_confirm = close > op and close > float(ordered[-2]["close"])
+    bear_confirm = close < op and close < float(ordered[-2]["close"])
+    action = "CE" if bull_trend and bull_pullback and bull_confirm else (
+        "PE" if bear_trend and bear_pullback and bear_confirm else "NO_TRADE"
+    )
+    if action == "CE":
+        reason = "EMA9_ABOVE_EMA21_PULLBACK_BULL_CONFIRM"
+    elif action == "PE":
+        reason = "EMA9_BELOW_EMA21_PULLBACK_BEAR_CONFIRM"
+    elif not (bull_trend or bear_trend):
+        reason = "EMA_TREND_NOT_ALIGNED"
+    elif not (bull_pullback or bear_pullback):
+        reason = "PULLBACK_NOT_CONFIRMED"
+    else:
+        reason = "CONFIRMATION_CANDLE_MISSING"
+
+    rsi = _rsi(closes)
     return {
-        "action": action,
-        "score": 0.9 if action != "NO_TRADE" else 0.0,
-        "strategy": name,
+        "action": action, "score": 0.70 if action != "NO_TRADE" else 0.0,
+        "strategy": name, "chosenStrategy": name, "learningArm": name,
         "reason": reason, "entryReason": reason,
-        "entryThreshold": 0.9,
+        "entryThreshold": 0.60,
         "blockedBy": [] if action != "NO_TRADE" else [reason],
         "directionCandidate": "CE" if bull_trend else "PE" if bear_trend else "NO_TRADE",
-        "underlyingPrice": close,
-        "emaFast": round(fast, 2), "emaSlow": round(slow, 2),
-        "previousLow": round(low if action == "CE" else pool_low, 2),
-        "previousHigh": round(high if action == "PE" else pool_high, 2),
-        "smc": {"liquiditySweep": side if action != "NO_TRADE" else "NONE",
-                "sweptLow": round(pool_low, 2), "sweptHigh": round(pool_high, 2)},
-        "confirmations": {"bullBreakout": False, "bearBreakdown": False,
-                          "bullLiquiditySweep": bull_sweep, "bearLiquiditySweep": bear_sweep},
-        "context": {"key": "EMA9_200|LIQUIDITY_SWEEP|SCALP",
+        "underlyingPrice": close, "emaFast": round(fast, 2),
+        "emaSlow": round(slow, 2), "rsi": round(rsi, 2),
+        "previousLow": round(min(float(c["low"]) for c in recent), 2),
+        "previousHigh": round(max(float(c["high"]) for c in recent), 2),
+        "smc": {"liquiditySweep": "NONE"},
+        "confirmations": {
+            "bullPullback": bull_pullback, "bearPullback": bear_pullback,
+            "bullCandle": bull_confirm, "bearCandle": bear_confirm,
+        },
+        "context": {"key": "EMA9_21|PULLBACK|SCALP",
                     "trend": "UP" if bull_trend else "DOWN" if bear_trend else "FLAT"},
     }
