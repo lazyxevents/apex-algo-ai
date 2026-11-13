@@ -215,6 +215,10 @@ def get_settings() -> Settings:
 
 settings = get_settings()
 
+class Base(DeclarativeBase):
+    pass
+
+
 # MongoDB persistence adapter. The trading/research services keep their existing
 # SQLAlchemy model and query expressions, while this adapter stores documents in Atlas.
 # No PostgreSQL/Neon connection is created by this application.
