@@ -777,6 +777,54 @@ export default function App() {
       </div>
       <div className="setup-side"><b>{r.tradesToday || 0} / {r.maxTradesPerDay || 5}</b><small>trades today</small></div>
     </section>
+    <section className="panel" aria-label="Machine learning learning center" style={{marginTop:16,border:'1px solid rgba(80,170,210,.35)',borderRadius:16,padding:'18px',background:'rgba(25,100,130,.07)'}}>
+      <div className="section-head compact" style={{marginBottom:12}}>
+        <div>
+          <div className="eyebrow">APEX MACHINE LEARNING CENTER</div>
+          <h2 style={{margin:'4px 0'}}>APEX abhi kya seekh raha hai?</h2>
+          <p style={{margin:0,fontSize:13,opacity:.78}}>Simple view: observation ≠ training ≠ proven profitable model.</p>
+        </div>
+        <span className={neuralModel.enabled === false ? 'model-role waiting' : trainingReadiness.productionModelReady ? 'model-role production' : 'model-role shadow'}>
+          {neuralModel.enabled === false ? 'TRAINING DISABLED' : trainingReadiness.productionModelReady ? 'MODEL ACTIVE' : trainingReadiness.status === 'READY_TO_TRAIN' ? 'READY FOR TRAINING' : 'COLLECTING DATA'}
+        </span>
+      </div>
+      <div className="core-stat-grid" style={{marginBottom:12}}>
+        <span><small>Market observations saved</small><b>{Number(liveLearning.totalObservations || 0).toLocaleString('en-IN')}</b></span>
+        <span><small>Outcomes waiting</small><b>{Number(liveLearning.pendingOutcomes || 0).toLocaleString('en-IN')}</b></span>
+        <span><small>Clean labeled ML samples</small><b>{Number(trainingReadiness.eligibleSamples || 0).toLocaleString('en-IN')} / {Number(trainingReadiness.minimumSamples || 200).toLocaleString('en-IN')}</b></span>
+        <span><small>Actual models trained</small><b>{Number(neuralModel.modelsTrained || 0).toLocaleString('en-IN')}</b></span>
+      </div>
+      <div style={{height:10,background:'rgba(120,140,160,.18)',borderRadius:99,overflow:'hidden'}}>
+        <div style={{height:'100%',width:`${Math.max(0,Math.min(100,Number(trainingReadiness.sampleProgressPct || 0)))}%`,background:'linear-gradient(90deg,#2da9a1,#65c5e5)',borderRadius:99}}/>
+      </div>
+      <div style={{display:'flex',justifyContent:'space-between',gap:12,fontSize:12,marginTop:6}}>
+        <span>First training readiness</span><b>{Number(trainingReadiness.sampleProgressPct || 0).toFixed(1)}%</b>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(190px,1fr))',gap:10,marginTop:14}}>
+        <div style={{padding:12,borderRadius:12,background:'rgba(120,140,160,.09)'}}>
+          <b>1. Data collect</b><p style={{fontSize:12,margin:'5px 0 0',opacity:.82}}>APEX market candles, EMA, RSI, ATR, volume aur SMC context observe karke save karta hai.</p>
+        </div>
+        <div style={{padding:12,borderRadius:12,background:'rgba(120,140,160,.09)'}}>
+          <b>2. Outcome label</b><p style={{fontSize:12,margin:'5px 0 0',opacity:.82}}>Setup ke baad dekha jata hai target pehle laga ya stop. Open/pending trades abhi training labels nahi hain.</p>
+        </div>
+        <div style={{padding:12,borderRadius:12,background:'rgba(120,140,160,.09)'}}>
+          <b>3. Neural training</b><p style={{fontSize:12,margin:'5px 0 0',opacity:.82}}>Minimum clean samples aur dono outcome classes hone par off-market MLP candidate train hota hai.</p>
+        </div>
+        <div style={{padding:12,borderRadius:12,background:'rgba(120,140,160,.09)'}}>
+          <b>4. Test before active</b><p style={{fontSize:12,margin:'5px 0 0',opacity:.82}}>Out-of-sample AUC/Brier aur promotion gates pass hue tabhi model production banega. Fail hua to candidate active nahi hoga.</p>
+        </div>
+      </div>
+      <div style={{marginTop:12,fontSize:12,lineHeight:1.65,opacity:.82}}>
+        <b>Abhi ka sach:</b> {neuralModel.enabled === false
+          ? 'Neural training server setting se disabled hai. Data observation ho sakta hai, lekin model train nahi hoga.'
+          : trainingReadiness.productionModelReady
+            ? `Production model ${activeNeural.version || ''} active hai. Trained samples: ${Number(activeNeural.trainedSamples || 0)}. Active hone ka matlab guaranteed profit nahi.`
+            : trainingReadiness.status === 'READY_TO_TRAIN'
+              ? 'Required clean labels collect ho chuke hain. Next scheduled off-market cycle candidate train karega; validation pass hona abhi baaki hai.'
+              : `${Number(trainingReadiness.remainingSamples ?? Math.max(0, Number(trainingReadiness.minimumSamples || 200)-Number(trainingReadiness.eligibleSamples || 0))).toLocaleString('en-IN')} aur clean labeled setups chahiye. Abhi production neural model active nahi hai.`}
+      </div>
+      <p style={{fontSize:11,margin:'8px 0 0',opacity:.65}}>Note: Neural label counter currently uses SMC_SCALP_V2 historical dataset. EMA9/21 paper-trade observations and these ML training labels are not automatically the same dataset. We should not claim the EMA strategy has been neural-trained until that linkage is implemented and verified.</p>
+    </section>
     <section className="apex-reference-training panel" aria-label="APEX candlestick reference learning status">
       <div className="section-head compact">
         <div><div className="eyebrow">APEX PATTERN REFERENCE LIBRARY</div>
