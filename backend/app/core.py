@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     force_exit_retry_count: int = 3
     force_exit_retry_delay_seconds: float = 1.0
 
-    market_data_provider: str = "dhan"
+    market_data_provider: str = "upstox"
     paper_broker: str = "internal"
     execution_broker: str = "dhan"
 
@@ -150,6 +150,7 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     vapid_subject: str = "mailto:officialtarun070@gmail.com"
 
+    upstox_analytics_token: str = ""
     upstox_access_token: str = ""
     upstox_sandbox_token: str = ""
     upstox_sandbox_product: str = "I"
