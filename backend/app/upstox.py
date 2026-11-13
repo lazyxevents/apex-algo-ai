@@ -17,6 +17,11 @@ class UpstoxService:
     def __init__(self):
         self._contracts_cache: dict[str, tuple[date, list[dict]]] = {}
 
+    def _market_token(self) -> str:
+        # Analytics Token is read-only and long-lived; ideal for market-data
+        # ingestion plus APEX internal PAPER execution.
+        return settings.upstox_analytics_token or settings.upstox_access_token
+
     def _headers(self, token: str) -> dict[str, str]:
         return {
             "Accept": "application/json",
@@ -26,7 +31,7 @@ class UpstoxService:
 
     @property
     def market_ready(self) -> bool:
-        return bool(settings.upstox_access_token)
+        return bool(self._market_token())
 
     @property
     def sandbox_ready(self) -> bool:
@@ -37,6 +42,9 @@ class UpstoxService:
             "provider": "upstox",
             "marketDataConfigured": self.market_ready,
             "tokenRequired": True,
+            "tokenType": "analytics" if settings.upstox_analytics_token else ("oauth" if settings.upstox_access_token else "missing"),
+            "tokenRenewal": "not_required_for_analytics_token",
+            "readOnlyMarketData": True,
             "supportsOptionChain": True,
             "syntheticPaper": False,
             "sandboxConfigured": self.sandbox_ready,
@@ -62,25 +70,25 @@ class UpstoxService:
 
     def intraday_candles(self, instrument_key: str) -> list[dict]:
         if not self.market_ready:
-            raise RuntimeError("UPSTOX_ACCESS_TOKEN is missing")
+            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN (recommended) or UPSTOX_ACCESS_TOKEN is missing")
         encoded = quote(instrument_key, safe="")
         url = f"{self.api_v3}/historical-candle/intraday/{encoded}/minutes/{settings.candle_interval_minutes}"
         with httpx.Client(timeout=12) as client:
-            res = client.get(url, headers=self._headers(settings.upstox_access_token))
+            res = client.get(url, headers=self._headers(self._market_token()))
             res.raise_for_status()
             raw = res.json().get("data", {}).get("candles", [])
         return self._parse_candles(raw)
 
     def historical_candles(self, instrument_key: str, from_date: date, to_date: date) -> list[dict]:
         if not self.market_ready:
-            raise RuntimeError("UPSTOX_ACCESS_TOKEN is missing")
+            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN (recommended) or UPSTOX_ACCESS_TOKEN is missing")
         encoded = quote(instrument_key, safe="")
         url = (
             f"{self.api_v3}/historical-candle/{encoded}/minutes/{settings.candle_interval_minutes}/"
             f"{to_date.isoformat()}/{from_date.isoformat()}"
         )
         with httpx.Client(timeout=20) as client:
-            res = client.get(url, headers=self._headers(settings.upstox_access_token))
+            res = client.get(url, headers=self._headers(self._market_token()))
             res.raise_for_status()
             raw = res.json().get("data", {}).get("candles", [])
         return self._parse_candles(raw)
@@ -100,7 +108,7 @@ class UpstoxService:
 
     def option_contracts(self, underlying_key: str) -> list[dict]:
         if not self.market_ready:
-            raise RuntimeError("UPSTOX_ACCESS_TOKEN is missing")
+            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN (recommended) or UPSTOX_ACCESS_TOKEN is missing")
         cached = self._contracts_cache.get(underlying_key)
         if cached and cached[0] == date.today():
             return cached[1]
@@ -108,7 +116,7 @@ class UpstoxService:
             res = client.get(
                 f"{self.api_v2}/option/contract",
                 params={"instrument_key": underlying_key},
-                headers=self._headers(settings.upstox_access_token),
+                headers=self._headers(self._market_token()),
             )
             res.raise_for_status()
             rows = res.json().get("data", []) or []
@@ -132,24 +140,24 @@ class UpstoxService:
 
     def option_chain(self, underlying_key: str, expiry: str) -> list[dict]:
         if not self.market_ready:
-            raise RuntimeError("UPSTOX_ACCESS_TOKEN is missing")
+            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN (recommended) or UPSTOX_ACCESS_TOKEN is missing")
         with httpx.Client(timeout=12) as client:
             res = client.get(
                 f"{self.api_v2}/option/chain",
                 params={"instrument_key": underlying_key, "expiry_date": expiry},
-                headers=self._headers(settings.upstox_access_token),
+                headers=self._headers(self._market_token()),
             )
             res.raise_for_status()
             return res.json().get("data", []) or []
 
     def quote_ltp(self, instrument_key: str) -> float:
         if not self.market_ready:
-            raise RuntimeError("UPSTOX_ACCESS_TOKEN is missing")
+            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN (recommended) or UPSTOX_ACCESS_TOKEN is missing")
         with httpx.Client(timeout=12) as client:
             res = client.get(
                 f"{self.api_v3}/market-quote/quotes",
                 params={"instrument_key": instrument_key},
-                headers=self._headers(settings.upstox_access_token),
+                headers=self._headers(self._market_token()),
             )
             res.raise_for_status()
             data = res.json().get("data", {}) or {}
