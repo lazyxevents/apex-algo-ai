@@ -734,8 +734,8 @@ class TradingEngine:
         signal.update({
             "index": name,
             "underlyingKey": key,
-            "chosenStrategy": "APEX_EMA9_200_LIQUIDITY_SCALP",
-            "learningArm": "APEX_EMA9_200_LIQUIDITY_SCALP",
+            "chosenStrategy": "APEX_EMA9_21_PULLBACK_SCALP",
+            "learningArm": "APEX_EMA9_21_PULLBACK_SCALP",
             "neural": {"status": "research_only", "probability": None},
             "neuralBlendWeight": 0.0,
         })
@@ -1301,7 +1301,7 @@ class TradingEngine:
                 decision["signals"] = ranked
             # Automated entries are SENSEX scalp only. No forced trade.
             ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
-            decision["executionStrategy"] = "APEX_EMA9_200_LIQUIDITY_SCALP"
+            decision["executionStrategy"] = "APEX_EMA9_21_PULLBACK_SCALP"
             decision["setupStatus"] = "SEARCHING"
             # Choose an executable scalp before high-score NO_TRADE candidates.
             scalp_candidates = [
@@ -1314,7 +1314,7 @@ class TradingEngine:
                 decision["reason"] = best.get("reason") or "NO_SETUP_FOUND"
                 decision["setupStatus"] = "NO_SETUP_FOUND"
                 decision["scalpScan"] = {
-                    "status": "NO_ENTRY", "strategy": "APEX_EMA9_200_LIQUIDITY_SCALP",
+                    "status": "NO_ENTRY", "strategy": "APEX_EMA9_21_PULLBACK_SCALP",
                     "directionCandidate": best.get("directionCandidate"),
                     "score": best.get("score"),
                     "blockedBy": best.get("blockedBy") or [],
@@ -1725,7 +1725,7 @@ class TradingEngine:
                 "premarketResearchTime": settings.premarket_plan_time,
                 "learningWindow": f"{settings.learning_worker_window_start_time}-{settings.learning_worker_window_end_time}",
                 "entryPolicy": {
-                    "strategy": "APEX_EMA9_200_LIQUIDITY_SCALP",
+                    "strategy": "APEX_EMA9_21_PULLBACK_SCALP",
                     "emaFast": 9, "emaSlow": 200,
                     "requiredSmc": "LIQUIDITY_SWEEP",
                     "scalpTargetMinPoints": settings.scalp_min_target_points,
