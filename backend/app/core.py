@@ -9,7 +9,6 @@ from sqlalchemy.orm import DeclarativeBase
 class Settings(BaseSettings):
     app_name: str = "APEX Algo AI"
     app_env: str = "development"
-    database_url: str = "sqlite:///./apex.db"
     cors_origins_raw: str = "http://localhost:5173"
 
     trading_mode: str = "OFF"
@@ -276,6 +275,9 @@ def _model_for_select(stmt):
         model = _model_for_table(table) if table is not None else None
         if model:
             return model
+        model = _model_for_table(raw)
+        if model:
+            return model
     for table in stmt.get_final_froms():
         model = _model_for_table(table)
         if model:
@@ -469,8 +471,12 @@ class MongoSession:
         if stmt._group_by_clauses:
             group_key = _column_name(stmt._group_by_clauses[0])
             pipeline = [{"$match": filt}, {"$group": {"_id": f"${group_key}", "count": {"$sum": 1}}}]
-            if sort:
-                pipeline.append({"$sort": {"count": sort[0][1]}})
+            group_direction = next((
+                -1 if isinstance(clause, UnaryExpression) and clause.modifier.__name__ == "desc_op" else 1
+                for clause in stmt._order_by_clauses if "count(" in str(clause).lower()
+            ), None)
+            if group_direction is not None:
+                pipeline.append({"$sort": {"count": group_direction}})
             if limit is not None:
                 pipeline.append({"$limit": int(limit.value if hasattr(limit, "value") else limit)})
             rows = [(row["_id"], row["count"]) for row in collection.aggregate(pipeline)]
@@ -482,7 +488,12 @@ class MongoSession:
         if limit is not None:
             cursor = cursor.limit(int(limit.value if hasattr(limit, "value") else limit))
         rows = list(cursor)
-        selected_model = any(item is model for item in raw)
+        selected_model = any(
+            item is model
+            or getattr(item, "name", None) == model.__tablename__
+            or getattr(getattr(item, "table", None), "name", None) == model.__tablename__
+            for item in raw
+        )
         if selected_model:
             values = []
             for doc in rows:
