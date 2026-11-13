@@ -2,8 +2,8 @@ from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy import UniqueConstraint
+from sqlalchemy.orm import DeclarativeBase
 
 
 class Settings(BaseSettings):
