@@ -88,6 +88,11 @@ function pnlClass(value: unknown) {
   return n > 0 ? 'positive' : n < 0 ? 'negative' : 'neutral'
 }
 
+function marketProviderName(provider: any) {
+  const key = String(provider?.provider || '').toLowerCase()
+  return provider?.displayName || (key === 'upstox' ? 'Upstox Market Data API' : key === 'dhan' ? 'DhanHQ Data API' : 'Market Data Provider')
+}
+
 function urlBase64ToUint8Array(value: string) {
   const padding = '='.repeat((4 - value.length % 4) % 4)
   const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/')
@@ -216,9 +221,9 @@ function MarketChart({
   return <section className="panel market-chart-panel">
     <div className="chart-head">
       <div>
-        <div className="eyebrow">DHAN REAL MARKET DATA</div>
+        <div className="eyebrow">{String(marketProviderName(data?.provider)).toUpperCase()} • REAL MARKET DATA</div>
         <h2>SENSEX Native Candlestick Chart</h2>
-        <p>Broker candles directly from DhanHQ Data API • EMA 9 / EMA 200 • SMC liquidity sweeps</p>
+        <p>Broker candles • EMA 9 / EMA 200 • SMC liquidity sweeps</p>
       </div>
       <div className="chart-head-right">
         <span className={`provider-chip ${freshness.fresh ? 'live' : 'stale'}`}>
@@ -236,7 +241,7 @@ function MarketChart({
     </div>
 
     <div className="chart-stats">
-      <span><small>Provider</small><b>{data?.provider?.displayName || 'DhanHQ Data API'}</b></span>
+      <span><small>Provider</small><b>{marketProviderName(data?.provider)}</b></span>
       <span><small>Last</small><b>{Number(latest.close || 0).toLocaleString('en-IN', {maximumFractionDigits:2})}</b></span>
       <span><small>Open</small><b>{Number(latest.open || 0).toLocaleString('en-IN', {maximumFractionDigits:2})}</b></span>
       <span><small>High</small><b>{Number(latest.high || 0).toLocaleString('en-IN', {maximumFractionDigits:2})}</b></span>
@@ -246,7 +251,7 @@ function MarketChart({
     </div>
 
     <div className="native-chart-wrap">
-      {loading && candles.length === 0 && <div className="chart-overlay">Loading Dhan candles…</div>}
+      {loading && candles.length === 0 && <div className="chart-overlay">Loading market candles…</div>}
       {error && candles.length === 0 && <div className="chart-overlay error">{error}</div>}
       {candles.length > 0 && <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="SENSEX candlestick chart">
         <defs>
@@ -299,7 +304,7 @@ function MarketChart({
       <span><i className="legend-candle down" /> Bear candle</span>
       <span><i className="legend-line-ui ema9" /> EMA 9</span>
       <span><i className="legend-line-ui ema21" /> EMA 200</span>
-      <span className="chart-source-note">Execution remains APEX PAPER • no Dhan exchange order is sent</span>
+      <span className="chart-source-note">Execution remains APEX PAPER • no broker order is sent</span>
     </div>
   </section>
 }
@@ -327,6 +332,8 @@ export default function App() {
   const [chartData, setChartData] = useState<any>(null)
   const [chartError, setChartError] = useState('')
   const [chartLoading, setChartLoading] = useState(true)
+  const [tokenModalDismissed, setTokenModalDismissed] = useState(false)
+  const [tokenCheckBusy, setTokenCheckBusy] = useState(false)
   const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -363,7 +370,7 @@ export default function App() {
       setChartData(data)
       setChartError('')
     } catch (e: any) {
-      setChartError(e?.message || 'Could not load Dhan chart data')
+      setChartError(e?.message || 'Could not load market chart data')
     } finally {
       if (!silent) setChartLoading(false)
     }
@@ -683,6 +690,37 @@ export default function App() {
   const targetAmount = Number(mt.targetAmount || 0)
   const monthPnl = Number(mt.monthPnl || 0)
   const targetProgress = targetAmount > 0 ? Math.max(0, Math.min(100, monthPnl / targetAmount * 100)) : 0
+  const tokenNeedsAttention = String(market.provider || '').toLowerCase() === 'upstox' && (
+    market.tokenActionRequired === true ||
+    ['MISSING', 'INVALID', 'ACCESS_DENIED'].includes(String(market.tokenStatus || '').toUpperCase()) ||
+    market.marketDataConfigured === false
+  )
+  const showTokenModal = tokenNeedsAttention && !tokenModalDismissed
+
+  async function verifyMarketToken() {
+    if (tokenCheckBusy) return
+    setTokenCheckBusy(true)
+    try {
+      const fresh = await fetchJson('/api/system/status')
+      setStatus(fresh)
+      const freshMarket = fresh?.market || {}
+      const stillNeedsToken = String(freshMarket.provider || '').toLowerCase() === 'upstox' && (
+        freshMarket.tokenActionRequired === true ||
+        ['MISSING', 'INVALID', 'ACCESS_DENIED'].includes(String(freshMarket.tokenStatus || '').toUpperCase()) ||
+        freshMarket.marketDataConfigured === false
+      )
+      if (!stillNeedsToken) {
+        setTokenModalDismissed(true)
+        setNotice({kind:'ok', text:'Upstox market-data token verified. APEX will resume scans when fresh candles arrive.'})
+      } else {
+        setNotice({kind:'error', text:freshMarket.tokenMessage || 'Token is still not ready. Check the backend environment variable and redeploy.'})
+      }
+    } catch (e: any) {
+      setNotice({kind:'error', text:e?.message || 'Could not verify the market-data token.'})
+    } finally {
+      setTokenCheckBusy(false)
+    }
+  }
 
   const scanDisabled = Boolean(busy || killed || status.mode !== 'PAPER' || !providerReady)
   const doTradeDisabled = Boolean(
@@ -778,7 +816,7 @@ export default function App() {
         <small>APEX / INTELLIGENCE CORE / SENSEX 1M</small>
         <h2>NEURAL <em>SCALP OS</em><span className="neural-os-version"> / V4</span></h2>
         <p>Autonomous-looking intelligence workspace, deterministic PAPER decisions. SMC structure + 1m execution, 5m/15m confirmation, neural shadow evaluation and cost-aware exits.</p>
-        <div className="apex-v3-tags"><span>● {automation.running ? 'SCANNER RUNNING' : 'SCANNER OFFLINE'}</span><span>{status.mode === 'PAPER' ? 'PAPER ACTIVE' : 'PAPER INACTIVE'}</span><span>{providerReady ? 'MARKET FEED READY' : 'CHECK DHAN FEED'}</span></div>
+        <div className="apex-v3-tags"><span>● {automation.running ? 'SCANNER RUNNING' : 'SCANNER OFFLINE'}</span><span>{status.mode === 'PAPER' ? 'PAPER ACTIVE' : 'PAPER INACTIVE'}</span><span>{providerReady ? 'MARKET FEED READY' : 'CHECK MARKET FEED'}</span></div>
       </div>
       <div className="apex-v3-targets">
         <div><small>DAILY NET PROFIT MILESTONE</small><strong>₹1,500</strong><span>Goal only · not guaranteed</span></div>
@@ -792,19 +830,19 @@ export default function App() {
 
     <section className="provider-banner">
       <div className="provider-main">
-        <span className="provider-logo">D</span>
+        <span className="provider-logo">{String(market.provider || 'M').slice(0, 1).toUpperCase()}</span>
         <div>
           <small>MARKET DATA PROVIDER</small>
-          <b>{market.displayName || 'DhanHQ Data API'}</b>
+          <b>{marketProviderName(market)}</b>
           <span>{market.realMarketData ? 'Real broker market data' : 'Provider connected'} • SENSEX • Option chain enabled</span>
         </div>
       </div>
       <div className="provider-status-grid">
         <span><small>Data</small><b className={providerReady ? 'positive' : 'negative'}>{providerReady ? 'CONNECTED' : 'OFFLINE'}</b></span>
         <span><small>Execution</small><b>{broker.paperExecution ? 'APEX PAPER' : (broker.mode || status.mode)}</b></span>
-        <span><small>Dhan orders</small><b className={broker.liveOrdersAllowed ? 'negative' : 'positive'}>{broker.liveOrdersAllowed ? 'LIVE ENABLED' : 'BLOCKED'}</b></span>
+        <span><small>Broker orders</small><b className={broker.liveOrdersAllowed ? 'negative' : 'positive'}>{broker.liveOrdersAllowed ? 'LIVE ENABLED' : 'BLOCKED'}</b></span>
         <span><small>Last provider success</small><b>{formatDateTime(market.lastSuccessAt)}</b></span>
-        <span><small>Dhan token</small><b className={market.tokenRefreshError ? "negative" : "positive"}>{market.tokenRefreshError ? "RENEW FAILED" : market.tokenAutoRenewEnabled ? "AUTO RENEW ON" : "MANUAL"}</b></span>
+        <span><small>Market token</small><b className={market.tokenActionRequired ? "negative" : "positive"}>{market.tokenActionRequired ? "UPDATE REQUIRED" : market.tokenType === "analytics" ? "ANALYTICS • LONG-LIVED" : market.tokenType === "oauth" ? "OAUTH • DAILY" : "CONFIGURED"}</b></span>
         {market.tokenAutoRenewEnabled && <span><small>Last token rotation</small><b>{formatDateTime(market.tokenLastRenewedAt)}</b></span>}
       </div>
     </section>
@@ -822,6 +860,29 @@ export default function App() {
       </div>
       <strong>{freshnessState}</strong>
     </section>}
+
+    {showTokenModal && <div className="token-modal-backdrop" role="presentation">
+      <section className="token-modal" role="dialog" aria-modal="true" aria-labelledby="token-modal-title">
+        <div className="token-modal-icon">!</div>
+        <small>APEX MARKET DATA CONNECTION</small>
+        <h2 id="token-modal-title">Please update your Upstox token</h2>
+        <p>{market.tokenMessage || 'APEX cannot verify the Upstox Analytics Token. New entries are paused until market data is restored.'}</p>
+        <div className="token-modal-steps">
+          <b>What to do</b>
+          <ol>
+            <li>Open Upstox Developer Apps and generate an <strong>Analytics Token</strong> (not the daily OAuth token).</li>
+            <li>In Render → APEX Backend → Environment, update <code>UPSTOX_ANALYTICS_TOKEN</code>.</li>
+            <li>Save and redeploy the backend, then return here and verify.</li>
+          </ol>
+        </div>
+        <p className="token-modal-note">This is a market-data issue, not a missing trading setup. APEX will not open trades using stale or unavailable data. Keep the token private; never paste it into chat.</p>
+        <div className="token-modal-actions">
+          <a className="action-btn primary" href="https://account.upstox.com/developer/apps" target="_blank" rel="noreferrer">Open Upstox Developer Apps ↗</a>
+          <button type="button" className="action-btn primary" onClick={() => void verifyMarketToken()} disabled={tokenCheckBusy}>{tokenCheckBusy ? 'Checking…' : "I've updated it — verify"}</button>
+          <button type="button" className="action-btn" onClick={() => setTokenModalDismissed(true)}>Remind me later</button>
+        </div>
+      </section>
+    </div>}
 
     <MarketChart
       data={chartData}
@@ -1268,7 +1329,7 @@ export default function App() {
           </tr>)}</tbody>
         </table>
       </div>}
-      <p className="panel-note">Dashboard checks every 1s, but provider freshness is independent. APEX hard-blocks new entries when the latest Dhan decision candle exceeds <b>{automation.entryPolicy?.maxLiveCandleAgeSeconds ?? 180}s</b>; stale broker candles remain visible for audit/research only.</p>
+      <p className="panel-note">Dashboard checks every 1s, but provider freshness is independent. APEX hard-blocks new entries when the latest provider decision candle exceeds <b>{automation.entryPolicy?.maxLiveCandleAgeSeconds ?? 180}s</b>; stale broker candles remain visible for audit/research only.</p>
     </section>
 
     <section className="two-col">
@@ -1315,7 +1376,7 @@ export default function App() {
             <button type="button" disabled={doTradeDisabled} onClick={() => void doTradeNow()}>
               {busy === 'do-trade' ? 'SCANNING…' : '⚠ DO TRADE'}
             </button>
-            <small>{busy === 'do-trade' ? 'Scanning current Dhan setup…' : manualDoTrade.last?.status === 'REFUSED' ? `Last refused: ${manualDoTrade.last.reason || 'safety/market gate'}` : feedStale ? 'Waiting for fresh candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
+            <small>{busy === 'do-trade' ? 'Scanning current market setup…' : manualDoTrade.last?.status === 'REFUSED' ? `Last refused: ${manualDoTrade.last.reason || 'safety/market gate'}` : feedStale ? 'Waiting for fresh candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
           </div>
         </div>
 
