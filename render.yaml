@@ -9,7 +9,7 @@ services:
     plan: free
     dockerContext: ./backend
     dockerfilePath: ./backend/Dockerfile
-    healthCheckPath: /api/health
+    healthCheckPath: /ping
     autoDeployTrigger: commit
     envVars:
       - key: DATABASE_URL
