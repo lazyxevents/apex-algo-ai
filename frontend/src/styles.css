@@ -1392,3 +1392,24 @@ html[data-theme="light"] .apex-reference-shell .reference-patterns>span{color:#4
 html[data-theme="light"] .apex-reference-shell .reference-progress{background:#dfe9ee}
 html[data-theme="light"] .apex-reference-shell .theme-toggle{background:#f7fcff;color:#25465a}
 @media(max-width:600px){.apex-setup-banner{padding:12px;align-items:flex-start}.setup-side{padding-left:9px}.setup-side b{font-size:18px}.reference-count{font-size:13px}.theme-toggle{font-size:11px;padding:7px}.apex-reference-training .section-head{gap:7px}}
+
+
+/* Upstox market-data recovery dialog. */
+.token-modal-backdrop{position:fixed;inset:0;z-index:1200;display:grid;place-items:center;padding:18px;background:rgba(2,8,14,.78);backdrop-filter:blur(8px)}
+.token-modal{width:min(560px,100%);max-height:min(88vh,760px);overflow:auto;padding:26px;border:1px solid rgba(247,190,84,.38);border-radius:18px;background:linear-gradient(160deg,#122535,#09141f);box-shadow:0 28px 100px rgba(0,0,0,.55);color:#eaf2fb}
+.token-modal-icon{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;background:rgba(245,181,67,.14);border:1px solid rgba(245,181,67,.32);color:#ffd37b;font-size:22px;font-weight:900;margin-bottom:14px}
+.token-modal>small{font-size:9px;letter-spacing:1.5px;color:#e7b75e;font-weight:900}
+.token-modal h2{font-size:23px;letter-spacing:-.5px;margin:7px 0 10px;color:#fff}
+.token-modal p{font-size:12px;line-height:1.6;color:#aebfd0;margin:9px 0}
+.token-modal-steps{margin:16px 0;padding:14px;border:1px solid #263c4d;border-radius:12px;background:rgba(4,14,22,.55)}
+.token-modal-steps>b{font-size:11px;color:#e7f1fb}
+.token-modal-steps ol{margin:9px 0 0;padding-left:20px;color:#aebfd0;font-size:11px;line-height:1.7}
+.token-modal-steps code{padding:2px 5px;border-radius:5px;background:#1a3042;color:#72e0bd}
+.token-modal-note{padding-left:10px;border-left:2px solid #d5a74d}
+.token-modal-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:17px}
+.token-modal-actions a{text-decoration:none;display:inline-flex;align-items:center}
+html[data-theme="light"] .token-modal{background:#fff;color:#183247;border-color:#e3c47f}
+html[data-theme="light"] .token-modal h2{color:#183247}
+html[data-theme="light"] .token-modal p,html[data-theme="light"] .token-modal-steps ol{color:#526a7e}
+html[data-theme="light"] .token-modal-steps{background:#f5f8fb;border-color:#dce6ef}
+@media(max-width:560px){.token-modal{padding:19px}.token-modal h2{font-size:20px}.token-modal-actions{flex-direction:column}.token-modal-actions>*{justify-content:center}}
