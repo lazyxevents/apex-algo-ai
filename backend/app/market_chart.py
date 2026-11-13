@@ -68,12 +68,12 @@ def build_market_chart(provider, timeframe: int = 1, limit: int = 160) -> dict:
 
     candles = sorted(candles, key=lambda row: str(row.get("timestamp") or ""))
     visible = candles[-limit:]
-    # Compute EMA over full broker history before slicing, so EMA200 is warmed up.
+    # Compute EMA over full broker history before slicing, so EMA9/EMA21 are warmed up.
     all_closes = [float(row["close"]) for row in candles]
     all_ema9 = _ema(all_closes, 9)
-    all_ema200 = _ema(all_closes, 200)
+    all_ema21 = _ema(all_closes, 21)
     ema9 = all_ema9[-len(visible):] if visible else []
-    ema200 = all_ema200[-len(visible):] if visible else []
+    ema21 = all_ema21[-len(visible):] if visible else []
 
     chart_rows = []
     for idx, row in enumerate(visible):
@@ -86,7 +86,7 @@ def build_market_chart(provider, timeframe: int = 1, limit: int = 160) -> dict:
             "volume": float(row.get("volume") or 0),
             "oi": float(row.get("oi") or 0),
             "ema9": round(float(ema9[idx]), 2),
-            "ema200": round(float(ema200[idx]), 2),
+            "ema21": round(float(ema21[idx]), 2),
         })
 
     latest = chart_rows[-1] if chart_rows else None
