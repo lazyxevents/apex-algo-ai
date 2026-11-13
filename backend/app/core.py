@@ -215,30 +215,359 @@ def get_settings() -> Settings:
 
 settings = get_settings()
 
-database_url = settings.database_url
-if database_url.startswith("postgresql://"):
-    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-elif database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
+# MongoDB persistence adapter. The trading/research services keep their existing
+# SQLAlchemy model and query expressions, while this adapter stores documents in Atlas.
+# No PostgreSQL/Neon connection is created by this application.
+import os
+import operator
+from datetime import datetime, timezone
+from pymongo import MongoClient, ReturnDocument
+from sqlalchemy import func, update
+from sqlalchemy.sql.elements import BinaryExpression, BooleanClauseList, BindParameter, UnaryExpression
+from sqlalchemy.sql.selectable import Select
 
-connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-engine = create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+MONGODB_URI = os.getenv("MONGODB_URI", "").strip()
+MONGODB_DATABASE = os.getenv("MONGODB_DATABASE", "apgoai").strip() or "apgoai"
+
+_client = None
+_mongo_db = None
 
 
-class Base(DeclarativeBase):
-    pass
+def _mongo():
+    global _client, _mongo_db
+    if _mongo_db is None:
+        if not MONGODB_URI:
+            raise RuntimeError("MONGODB_URI is not configured; set the MongoDB Atlas connection string.")
+        _client = MongoClient(
+            MONGODB_URI,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=20000,
+            retryWrites=True,
+            appname="APEX-Algo-AI",
+        )
+        _client.admin.command("ping")
+        _mongo_db = _client[MONGODB_DATABASE]
+    return _mongo_db
+
+
+def _model_for_table(table):
+    name = getattr(table, "name", None)
+    if not name:
+        return None
+    for mapper in Base.registry.mappers:
+        if mapper.local_table.name == name:
+            return mapper.class_
+    return None
+
+
+def _model_for_select(stmt):
+    for raw in stmt._raw_columns:
+        entity = getattr(raw, "entity", None)
+        if entity is not None and isinstance(entity, type) and hasattr(entity, "__tablename__"):
+            return entity
+        if isinstance(raw, type) and hasattr(raw, "__tablename__"):
+            return raw
+        table = getattr(raw, "table", None)
+        model = _model_for_table(table) if table is not None else None
+        if model:
+            return model
+    for table in stmt.get_final_froms():
+        model = _model_for_table(table)
+        if model:
+            return model
+    return None
+
+
+def _value(expr):
+    if isinstance(expr, BindParameter):
+        return expr.value
+    if hasattr(expr, "value") and not hasattr(expr, "key"):
+        return expr.value
+    return expr
+
+
+def _column_name(expr):
+    if isinstance(expr, UnaryExpression):
+        expr = expr.element
+    return getattr(expr, "key", None) or getattr(expr, "name", None)
+
+
+def _compile_condition(expr):
+    if isinstance(expr, BooleanClauseList):
+        parts = [_compile_condition(item) for item in expr.clauses]
+        if expr.operator is operator.or_:
+            return {"$or": parts}
+        return {"$and": parts}
+    if isinstance(expr, BinaryExpression):
+        key = _column_name(expr.left)
+        if not key:
+            raise ValueError(f"Unsupported MongoDB filter expression: {expr}")
+        right = _value(expr.right)
+        op = expr.operator
+        if op is operator.eq:
+            return {key: right}
+        if op is operator.ne:
+            return {key: {"$ne": right}}
+        if op is operator.gt:
+            return {key: {"$gt": right}}
+        if op is operator.ge:
+            return {key: {"$gte": right}}
+        if op is operator.lt:
+            return {key: {"$lt": right}}
+        if op is operator.le:
+            return {key: {"$lte": right}}
+        if op.__name__ == "in_op":
+            return {key: {"$in": list(right)}}
+        if op.__name__ == "not_in_op":
+            return {key: {"$nin": list(right)}}
+        if op.__name__ == "is_":
+            return {key: right}
+        if op.__name__ == "is_not":
+            return {key: {"$ne": right}}
+        raise ValueError(f"Unsupported MongoDB comparison operator: {op}")
+    raise ValueError(f"Unsupported MongoDB filter: {expr}")
+
+
+def _combine_filters(criteria):
+    if not criteria:
+        return {}
+    parts = [_compile_condition(item) for item in criteria]
+    return parts[0] if len(parts) == 1 else {"$and": parts}
+
+
+def _serialize(model):
+    data = {}
+    for column in model.__table__.columns:
+        key = column.key
+        value = getattr(model, key, None)
+        if value is None and column.default is not None:
+            default = column.default.arg
+            value = default() if callable(default) else default
+            setattr(model, key, value)
+        data[key] = value
+    return data
+
+
+def _hydrate(model, doc):
+    values = {key: value for key, value in doc.items() if key != "_id" and key in model.__table__.columns}
+    for column in model.__table__.columns:
+        key = column.key
+        if key not in values and column.default is not None:
+            default = column.default.arg
+            values[key] = default() if callable(default) else default
+        value = values.get(key)
+        if isinstance(value, datetime) and value.tzinfo is None:
+            values[key] = value.replace(tzinfo=timezone.utc)
+    return model(**values)
+
+
+class _ScalarRows:
+    def __init__(self, rows):
+        self._rows = rows
+    def all(self):
+        return [row[0] if isinstance(row, tuple) else row for row in self._rows]
+    def first(self):
+        rows = self.all()
+        return rows[0] if rows else None
+
+
+class _MongoResult:
+    def __init__(self, rows=(), rowcount=0):
+        self._rows = list(rows)
+        self.rowcount = rowcount
+    def all(self):
+        return list(self._rows)
+    def scalars(self):
+        return _ScalarRows(self._rows)
+    def scalar(self):
+        if not self._rows:
+            return None
+        row = self._rows[0]
+        return row[0] if isinstance(row, tuple) else row
+    def scalar_one_or_none(self):
+        return self.scalar()
+
+
+class MongoSession:
+    def __init__(self):
+        self.db = _mongo()
+        self.pending = []
+        self.identity = {}
+        self.closed = False
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            self.rollback()
+        self.close()
+        return False
+
+    def add(self, obj):
+        self.pending.append(obj)
+
+    def _collection(self, model):
+        return self.db[model.__tablename__]
+
+    def _next_id(self, model):
+        counter = self.db["_apex_counters"].find_one_and_update(
+            {"_id": model.__tablename__},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+        return int(counter["seq"])
+
+    def _filter(self, stmt):
+        return _combine_filters(stmt._where_criteria)
+
+    def _sort(self, stmt):
+        out = []
+        for clause in stmt._order_by_clauses:
+            direction = -1 if isinstance(clause, UnaryExpression) and clause.modifier.__name__ == "desc_op" else 1
+            key = _column_name(clause)
+            if key:
+                out.append((key, direction))
+        return out
+
+    def _count_query(self, stmt, model, collection, filt):
+        raw = stmt._raw_columns[0]
+        if getattr(raw, "name", None) == "count" or "count(" in str(raw).lower():
+            return collection.count_documents(filt)
+
+    def execute(self, stmt):
+        if getattr(stmt, "__visit_name__", "") == "update":
+            model = _model_for_table(stmt.table)
+            if model is None:
+                raise ValueError("MongoDB update target could not be resolved")
+            filt = _combine_filters(stmt._where_criteria)
+            values = {}
+            for key, value in (stmt._values or {}).items():
+                values[getattr(key, "key", key)] = _value(value)
+            result = self._collection(model).update_many(filt, {"$set": values})
+            return _MongoResult(rowcount=result.modified_count)
+
+        if not isinstance(stmt, Select):
+            raise TypeError(f"Unsupported MongoDB statement: {type(stmt).__name__}")
+        model = _model_for_select(stmt)
+        if model is None:
+            raise ValueError("MongoDB query model could not be resolved")
+        collection = self._collection(model)
+        filt = self._filter(stmt)
+        raw = list(stmt._raw_columns)
+        is_count = any("count(" in str(item).lower() for item in raw)
+        if is_count and not stmt._group_by_clauses:
+            return _MongoResult([(collection.count_documents(filt),)])
+        sort = self._sort(stmt)
+        limit = stmt._limit
+        if stmt._group_by_clauses:
+            group_key = _column_name(stmt._group_by_clauses[0])
+            pipeline = [{"$match": filt}, {"$group": {"_id": f"${group_key}", "count": {"$sum": 1}}}]
+            if sort:
+                pipeline.append({"$sort": {"count": sort[0][1]}})
+            if limit is not None:
+                pipeline.append({"$limit": int(limit.value if hasattr(limit, "value") else limit)})
+            rows = [(row["_id"], row["count"]) for row in collection.aggregate(pipeline)]
+            return _MongoResult(rows)
+
+        cursor = collection.find(filt)
+        if sort:
+            cursor = cursor.sort(sort)
+        if limit is not None:
+            cursor = cursor.limit(int(limit.value if hasattr(limit, "value") else limit))
+        rows = list(cursor)
+        selected_model = any(item is model for item in raw)
+        if selected_model:
+            values = []
+            for doc in rows:
+                obj_id = doc.get("id")
+                identity_key = (model, obj_id)
+                obj = self.identity.get(identity_key)
+                if obj is None:
+                    obj = _hydrate(model, doc)
+                    self.identity[identity_key] = obj
+                values.append(obj)
+            return _MongoResult(values)
+        keys = [_column_name(item) for item in raw]
+        projected = []
+        for doc in rows:
+            vals = tuple(doc.get(key) for key in keys)
+            projected.append(vals[0] if len(vals) == 1 else vals)
+        return _MongoResult(projected)
+
+    def scalar(self, stmt):
+        return self.execute(stmt).scalar()
+
+    def scalars(self, stmt):
+        return self.execute(stmt).scalars()
+
+    def get(self, model, identity):
+        key = (model, identity)
+        if key in self.identity:
+            return self.identity[key]
+        doc = self._collection(model).find_one({"id": identity})
+        if not doc:
+            return None
+        obj = _hydrate(model, doc)
+        self.identity[key] = obj
+        return obj
+
+    def commit(self):
+        for obj in self.pending:
+            data = _serialize(obj)
+            if data.get("id") is None:
+                data["id"] = self._next_id(type(obj))
+                obj.id = data["id"]
+            self._collection(type(obj)).replace_one({"id": data["id"]}, data, upsert=True)
+            self.identity[(type(obj), data["id"])] = obj
+        self.pending.clear()
+        for (model, identity), obj in list(self.identity.items()):
+            data = _serialize(obj)
+            self._collection(model).replace_one({"id": identity}, data, upsert=True)
+
+    def refresh(self, obj):
+        doc = self._collection(type(obj)).find_one({"id": obj.id})
+        if doc:
+            fresh = _hydrate(type(obj), doc)
+            for column in obj.__table__.columns:
+                setattr(obj, column.key, getattr(fresh, column.key, None))
+        return obj
+
+    def rollback(self):
+        self.pending.clear()
+        self.identity.clear()
+
+    def close(self):
+        self.closed = True
+
+
+SessionLocal = MongoSession
 
 
 def init_db() -> None:
-    from .models import AuditLog, CandlePatternReference, DailyMarketPlan, LearningRewardEvent, LearningSample, LiveMarketObservation, ModelEvaluation, NeuralModelArtifact, PushSubscription, ResearchActivity, ResearchKnowledge, ResearchRun, StrategyHypothesis, StrategyState, Trade  # noqa: F401
-    Base.metadata.create_all(bind=engine)
+    # Import all models before creating indexes.
+    from . import models as _models  # noqa: F401
+    database = _mongo()
+    for mapper in Base.registry.mappers:
+        model = mapper.class_
+        collection = database[model.__tablename__]
+        collection.create_index("id", unique=True, sparse=True)
+        for column in model.__table__.columns:
+            if column.index:
+                collection.create_index(column.key)
+            if column.unique:
+                collection.create_index(column.key, unique=True, sparse=True)
+        for constraint in model.__table__.constraints:
+            if isinstance(constraint, UniqueConstraint):
+                keys = [(column.key, 1) for column in constraint.columns]
+                collection.create_index(keys, unique=True, sparse=True)
 
 
 def db_health() -> str:
     try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+        _mongo().command("ping")
         return "connected"
     except Exception:
         return "disconnected"
