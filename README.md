@@ -209,7 +209,7 @@ pytest -q
 
 The continuous worker now records structured 1-minute directional setup samples with EMA/RSI/ATR/volume, candlestick patterns and SMC context (BOS, CHOCH, liquidity sweep, FVG and fake breakout), plus target-before-stop labels, MAE/MFE and R-multiple outcome. Candidate evaluation uses chronological train/validation/out-of-sample splits.
 
-APEX now also trains a real small MLP neural model on event-driven `SMC_SCALP_V2` / `SMC_SWING_V2` labeled samples. TIMEOUT/censored rows are excluded from neural labels. Training uses chronological train/validation/out-of-sample splits, persists weights in Postgres, and keeps weights frozen during the live trade window.
+APEX now also trains a real small MLP neural model on event-driven `SMC_SCALP_V2` / `SMC_SWING_V2` labeled samples. TIMEOUT/censored rows are excluded from neural labels. Training uses chronological train/validation/out-of-sample splits, persists weights in MongoDB Atlas, and keeps weights frozen during the live trade window.
 
 A candidate is promoted to paper-production only when validation and OOS AUC/Brier gates pass. Promoted neural probability is blended conservatively into the existing deterministic paper signal score; hard risk controls remain authoritative. Closed valid paper trades separately update the contextual epsilon-greedy bandit using shaped net-R rewards. Invalid contracts are excluded from both learning layers.
 
