@@ -349,7 +349,7 @@ def _serialize(model):
         value = getattr(model, key, None)
         if value is None and column.default is not None:
             default = column.default.arg
-            value = default() if callable(default) else default
+            value = default(None) if callable(default) else default
             setattr(model, key, value)
         data[key] = value
     return data
@@ -361,7 +361,7 @@ def _hydrate(model, doc):
         key = column.key
         if key not in values and column.default is not None:
             default = column.default.arg
-            values[key] = default() if callable(default) else default
+            values[key] = default(None) if callable(default) else default
         value = values.get(key)
         if isinstance(value, datetime) and value.tzinfo is None:
             values[key] = value.replace(tzinfo=timezone.utc)
