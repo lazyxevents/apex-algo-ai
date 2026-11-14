@@ -333,6 +333,10 @@ export default function App() {
   const [chartData, setChartData] = useState<any>(null)
   const [chartError, setChartError] = useState('')
   const [chartLoading, setChartLoading] = useState(true)
+  const [chartErrorDialogOpen, setChartErrorDialogOpen] = useState(false)
+  const chartRetryAfterRef = useRef(0)
+  const chartRateLimitCountRef = useRef(0)
+  const chartRequestInFlightRef = useRef(false)
   const [tokenCheckBusy, setTokenCheckBusy] = useState(false)
   const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
   useEffect(() => {
@@ -364,17 +368,36 @@ export default function App() {
   }, [])
 
   const loadChart = useCallback(async (silent = false) => {
+    if (chartRequestInFlightRef.current) return
+    if (silent && Date.now() < chartRetryAfterRef.current) return
+    chartRequestInFlightRef.current = true
     if (!silent) setChartLoading(true)
     try {
       const data = await fetchJson(`/api/market/chart?timeframe=${chartTimeframe}&limit=160`)
       setChartData(data)
       setChartError('')
+      setChartErrorDialogOpen(false)
+      chartRateLimitCountRef.current = 0
+      chartRetryAfterRef.current = 0
     } catch (e: any) {
-      setChartError(e?.message || 'Could not load market chart data')
+      const message = e?.message || 'Could not load market chart data'
+      setChartError(message)
+      setChartErrorDialogOpen(true)
+      if (/429|too many requests|rate.?limit/i.test(message)) {
+        chartRateLimitCountRef.current += 1
+        const delayMs = Math.min(5 * 60_000, 60_000 * (2 ** Math.min(2, chartRateLimitCountRef.current - 1)))
+        chartRetryAfterRef.current = Date.now() + delayMs
+      }
     } finally {
+      chartRequestInFlightRef.current = false
       if (!silent) setChartLoading(false)
     }
   }, [chartTimeframe])
+
+  const retryChartNow = useCallback(() => {
+    chartRetryAfterRef.current = 0
+    void loadChart(false)
+  }, [loadChart])
 
   const loadAll = useCallback(async () => {
     await Promise.all([loadStatus(), loadTrades(), loadChart()])
@@ -384,7 +407,7 @@ export default function App() {
     void loadAll()
     const tradePoll = window.setInterval(() => void loadTrades(true), 1000)
     const statusPoll = window.setInterval(() => void loadStatus(true), 3000)
-    const chartPoll = window.setInterval(() => void loadChart(true), 5000)
+    const chartPoll = window.setInterval(() => void loadChart(true), 30000)
     const clockPoll = window.setInterval(() => setClock(new Date()), 1000)
     return () => {
       window.clearInterval(tradePoll)
@@ -1576,6 +1599,23 @@ export default function App() {
         <pre>{JSON.stringify({qValues: learning.qValues, researchArms: learning.latestResearch?.arms}, null, 2)}</pre>
       </details>
     </section>
+
+    {chartErrorDialogOpen && chartError && <div className="token-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setChartErrorDialogOpen(false) }}>
+      <section className="token-modal api-error-modal" role="alertdialog" aria-modal="true" aria-labelledby="api-error-title">
+        <div className="token-modal-icon">!</div>
+        <small>APEX MARKET DATA • API ERROR</small>
+        <h2 id="api-error-title">{/429|too many requests|rate.?limit/i.test(chartError) ? 'Upstox Rate Limit Reached' : 'Market Data Request Failed'}</h2>
+        <p>{/429|too many requests|rate.?limit/i.test(chartError)
+          ? 'Upstox is temporarily limiting chart requests. APEX will pause automatic retries to avoid sending repeated requests.'
+          : 'APEX could not load market candles. The exact provider response is shown below.'}</p>
+        <div className="api-error-code"><span>ERROR DETAILS</span><code>{chartError}</code></div>
+        {/429|too many requests|rate.?limit/i.test(chartError) && <p className="token-modal-note">Recommended: wait 60 seconds before retrying. Automatic chart polling is now reduced to once every 30 seconds, with an increasing cooldown after rate-limit responses.</p>}
+        <div className="token-modal-actions">
+          <button type="button" className="action-btn primary" onClick={retryChartNow} disabled={chartLoading}>Retry chart</button>
+          <button type="button" className="action-btn" onClick={() => setChartErrorDialogOpen(false)}>Close</button>
+        </div>
+      </section>
+    </div>}
 
     <footer className="apex-footer">
       <span>APEX Algo AI • Testing dashboard</span>
