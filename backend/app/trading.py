@@ -35,6 +35,8 @@ class RuntimeState:
     automation_running: bool = False
     position_monitor_running: bool = False
     last_cycle_at: str | None = None
+    last_cycle_completed_at: str | None = None
+    next_scan_at: str | None = None
     last_position_update_at: str | None = None
     last_premarket_date: str | None = None
     last_premarket_learning_date: str | None = None
@@ -1707,6 +1709,8 @@ class TradingEngine:
                     "running": self.state.automation_running,
                     "intervalSeconds": max(15, settings.auto_scan_interval_seconds),
                     "lastAttemptAt": self.state.last_cycle_at,
+                    "lastCompletedAt": self.state.last_cycle_completed_at,
+                    "nextScanAt": self.state.next_scan_at,
                     "state": (
                         "RETRYING_STALE_FEED"
                         if self.state.automation_running and any(
