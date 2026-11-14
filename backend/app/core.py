@@ -293,7 +293,9 @@ def _value(expr):
     if getattr(expr, "__visit_name__", None) == "false":
         return False
     if isinstance(expr, BindParameter):
-        return expr.value
+        # SQLAlchemy can wrap SQL NULL inside a bind parameter. Unwrap recursively
+        # so the MongoDB adapter never passes a SQL expression object to BSON.
+        return _value(expr.value)
     if hasattr(expr, "value") and not hasattr(expr, "key"):
         return expr.value
     return expr
