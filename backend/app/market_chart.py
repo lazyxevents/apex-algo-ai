@@ -52,7 +52,7 @@ def _freshness(candles: list[dict]) -> dict:
     }
 
 
-def build_market_chart(provider, timeframe: int = 1, limit: int = 160) -> dict:
+def build_market_chart(provider, timeframe: int = 1, limit: int = 160, trades: list[dict] | None = None) -> dict:
     underlying_key = settings.underlying_keys.get("SENSEX")
     if not underlying_key:
         raise RuntimeError("SENSEX is not enabled")
@@ -108,6 +108,48 @@ def build_market_chart(provider, timeframe: int = 1, limit: int = 160) -> dict:
     structure = analyze_structure(candles[-max(80, limit):]) if candles else {}
     freshness = _freshness(candles)
 
+    swing_highs: list[dict] = []
+    swing_lows: list[dict] = []
+    for idx in range(2, max(2, len(chart_rows) - 2)):
+        window = chart_rows[idx - 2:idx + 3]
+        if len(window) != 5:
+            continue
+        pivot = chart_rows[idx]
+        high, low = float(pivot["high"]), float(pivot["low"])
+        if high >= max(float(row["high"]) for j, row in enumerate(window) if j != 2):
+            swing_highs.append({"index": idx, "price": round(high, 2), "timestamp": pivot.get("timestamp")})
+        if low <= min(float(row["low"]) for j, row in enumerate(window) if j != 2):
+            swing_lows.append({"index": idx, "price": round(low, 2), "timestamp": pivot.get("timestamp")})
+
+    structure_events: list[dict] = []
+    if chart_rows:
+        last_index, last_candle = len(chart_rows) - 1, chart_rows[-1]
+        for key, label, price_key in (
+            ("bos", "BOS", "close"), ("choch", "CHOCH", "close"),
+            ("liquiditySweep", "LIQUIDITY SWEEP", "high"), ("fairValueGap", "FVG", "close"),
+        ):
+            direction = str(structure.get(key) or "NONE").upper()
+            if direction in {"BULL", "BEAR"}:
+                structure_events.append({"index": last_index, "type": label, "direction": direction,
+                    "price": round(float(last_candle.get(price_key) or last_candle["close"]), 2),
+                    "timestamp": last_candle.get("timestamp")})
+
+    trade_markers: list[dict] = []
+    for trade in trades or []:
+        meta = trade.get("meta") or {}
+        if str(meta.get("index") or "").upper() != "SENSEX":
+            continue
+        try:
+            underlying_price = float(meta.get("underlyingPrice") or meta.get("underlyingEntry") or 0)
+        except (TypeError, ValueError):
+            continue
+        marker_time = meta.get("underlyingEntryTime") or meta.get("entryTime") or trade.get("openedAt")
+        if underlying_price > 0 and marker_time:
+            trade_markers.append({"tradeId": trade.get("id"),
+                "direction": str(trade.get("direction") or meta.get("direction") or "").upper(),
+                "price": round(underlying_price, 2), "timestamp": marker_time,
+                "status": trade.get("status"), "label": "PAPER ENTRY"})
+
     return {
         "provider": provider.status(),
         "symbol": "SENSEX",
@@ -118,6 +160,8 @@ def build_market_chart(provider, timeframe: int = 1, limit: int = 160) -> dict:
         "changePct": round(change, 3),
         "freshness": freshness,
         "structure": structure,
+        "annotations": {"swingHighs": swing_highs[-18:], "swingLows": swing_lows[-18:], "events": structure_events},
+        "tradeMarkers": trade_markers[-30:],
         "candles": chart_rows,
         "generatedAt": datetime.now(IST).isoformat(),
     }
