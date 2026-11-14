@@ -713,6 +713,63 @@ class TradingEngine:
         }
 
 
+    def _fresh_market_news(self) -> dict:
+        """Return only recently fetched, timestamped headlines for advisory context."""
+        research = self.state.market_research or {}
+        health = research.get("newsHealth") or {}
+        rows = research.get("news") or []
+        fetched_raw = health.get("lastFetchAt")
+        if not fetched_raw:
+            return {"status": "UNAVAILABLE", "lastFetchAt": None, "headlines": []}
+        try:
+            fetched_at = datetime.fromisoformat(str(fetched_raw).replace("Z", "+00:00"))
+            if fetched_at.tzinfo is None:
+                fetched_at = fetched_at.replace(tzinfo=IST)
+            fetched_at = fetched_at.astimezone(IST)
+            age_minutes = (datetime.now(IST) - fetched_at).total_seconds() / 60
+        except (TypeError, ValueError):
+            return {"status": "INVALID_TIMESTAMP", "lastFetchAt": str(fetched_raw), "headlines": []}
+        if age_minutes < -10 or age_minutes > 360 or str(health.get("status") or "").upper() != "OK":
+            return {
+                "status": "STALE" if age_minutes > 360 else "UNVERIFIED",
+                "lastFetchAt": fetched_at.isoformat(),
+                "ageMinutes": round(age_minutes, 1),
+                "headlines": [],
+            }
+
+        headlines = []
+        for row in rows:
+            if not isinstance(row, dict) or not row.get("title") or not row.get("url"):
+                continue
+            published_raw = row.get("published")
+            if not published_raw:
+                continue
+            try:
+                published = datetime.fromisoformat(str(published_raw).replace("Z", "+00:00"))
+                if published.tzinfo is None:
+                    published = published.replace(tzinfo=IST)
+                published = published.astimezone(IST)
+                article_age = (datetime.now(IST) - published).total_seconds() / 3600
+            except (TypeError, ValueError):
+                continue
+            if article_age < -0.25 or article_age > 24:
+                continue
+            headlines.append({
+                "title": str(row.get("title"))[:220],
+                "summary": str(row.get("summary") or "")[:500],
+                "source": str(row.get("source") or "")[:100],
+                "publishedAt": published.isoformat(),
+                "url": str(row.get("url"))[:900],
+            })
+            if len(headlines) >= 6:
+                break
+        return {
+            "status": "FRESH" if headlines else "NO_RECENT_HEADLINES",
+            "lastFetchAt": fetched_at.isoformat(),
+            "ageMinutes": round(age_minutes, 1),
+            "headlines": headlines,
+        }
+
     def _build_market_intelligence(self, signal: dict) -> dict:
         """Transparent observational market read; never changes execution gates."""
         context = signal.get("marketContext") or {}
@@ -806,6 +863,72 @@ class TradingEngine:
         if structure.get("previousLowBreak"): structure_labels.append("PREVIOUS LOW BREAK")
         structure_summary = " · ".join(structure_labels) if structure_labels else "No clear HH/HL/LH/LL confirmation"
         confluence = "HIGH" if t5 == t15 and t5 in {"UP", "DOWN"} else "MEDIUM" if t1 in {"UP", "DOWN"} and t1 == t5 else "LOW"
+        news_context = self._fresh_market_news()
+        ai_review = {
+            "status": "not_configured",
+            "enabled": False,
+            "provider": "none",
+            "risk": "UNKNOWN",
+            "confidence": 0.0,
+            "reasons": [],
+            "warnings": ["LLM provider is not configured; deterministic technical analysis remains available."],
+            "authority": "ADVISORY_ONLY",
+            "newsContextStatus": news_context.get("status"),
+        }
+        if str(signal.get("index") or "").upper() == "SENSEX" and ollama_advisor.configured:
+            cache_key = (
+                str(signal.get("candleTime") or ""),
+                str(news_context.get("lastFetchAt") or ""),
+                str(news_context.get("status") or ""),
+            )
+            cached = getattr(self, "_market_ai_cache", None)
+            if cached and cached.get("key") == cache_key:
+                ai_review = dict(cached.get("value") or ai_review)
+            else:
+                raw_review = ollama_advisor.analyze_trade({
+                    "task": "Explain the current SENSEX paper-trading market snapshot. Do not predict certainty.",
+                    "instrument": signal.get("index"),
+                    "marketFreshness": freshness,
+                    "regime": regime,
+                    "technicalBias": bias,
+                    "volatility": volatility,
+                    "timeframes": {
+                        "1m": t1, "5m": t5, "15m": t15,
+                        "source": "5m and 15m are resampled from provider 1m OHLCV candles, not independent feeds",
+                    },
+                    "structure": structure,
+                    "patterns": patterns,
+                    "smc": mtf.get("smc") or {},
+                    "indicators": {
+                        "rsi": signal.get("rsi") or context.get("rsi"),
+                        "emaFast": signal.get("emaFast") or context.get("emaFast"),
+                        "emaSlow": signal.get("emaSlow") or context.get("emaSlow"),
+                        "atrPct": context.get("atrPct"),
+                    },
+                    "strategyCandidate": {
+                        "action": action,
+                        "directionCandidate": candidate,
+                        "score": signal.get("score"),
+                        "reason": signal.get("reason"),
+                        "blockedBy": signal.get("blockedBy") or [],
+                    },
+                    "news": news_context,
+                    "instruction": "Explain evidence, conflicts and risks. Do not invent news. Ignore execution authority: hard risk gates remain deterministic.",
+                })
+                ai_review = {
+                    "status": raw_review.get("status") or "unknown",
+                    "enabled": bool(raw_review.get("enabled")),
+                    "provider": raw_review.get("provider") or "none",
+                    "model": raw_review.get("model"),
+                    "bias": raw_review.get("bias") or "NEUTRAL",
+                    "risk": raw_review.get("risk") or "UNKNOWN",
+                    "confidence": raw_review.get("confidence", 0.0),
+                    "reasons": [str(x)[:260] for x in (raw_review.get("reasons") or [])[:5]],
+                    "warnings": [str(x)[:260] for x in (raw_review.get("warnings") or [])[:5]],
+                    "authority": "ADVISORY_ONLY",
+                    "newsContextStatus": news_context.get("status"),
+                }
+                self._market_ai_cache = {"key": cache_key, "value": dict(ai_review)}
         return {
             "instrument": signal.get("index") or "UNKNOWN",
             "updatedAt": datetime.now(IST).isoformat(),
@@ -816,6 +939,9 @@ class TradingEngine:
             "tradeSuitability": suitability,
             "confluence": confluence,
             "timeframes": {"1m": t1, "5m": t5, "15m": t15},
+            "timeframeSource": "1m is the provider feed; 5m and 15m are aggregated from 1m candles, not independent broker feeds.",
+            "aiReview": ai_review,
+            "newsContext": news_context,
             "structure": structure,
             "structureSummary": structure_summary,
             "patterns": {"bullish": bull_patterns[:4], "bearish": bear_patterns[:4], "neutral": neutral_patterns[:3], "active": active_patterns},
@@ -825,6 +951,8 @@ class TradingEngine:
             "candidateState": candidate_state,
             "suggestedOption": suggested_option,
             "timing": {
+                "method": "RULE_BASED_CONFIRMATION_WINDOW",
+                "forecastAvailable": False,
                 "entryWindow": entry_window,
                 "historicalHold": {"status": "COLLECTING_HISTORY", "sampleCount": 0, "minimumSamples": 10, "medianMinutes": None, "label": "Collecting closed paper-trade history"},
             },
