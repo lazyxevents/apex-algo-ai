@@ -205,6 +205,9 @@ function ScannerPanel({
   const newsItems = Array.isArray(intelligence?.latestNews) ? intelligence.latestNews.slice(0, 3) : []
   const newsHealth = intelligence?.newsHealth || {}
   const activePatterns = Array.isArray(marketIntel?.patterns?.active) ? marketIntel.patterns.active : []
+  const aiReview = marketIntel?.aiReview || {}
+  const aiReasons = Array.isArray(aiReview.reasons) ? aiReview.reasons : []
+  const aiWarnings = Array.isArray(aiReview.warnings) ? aiReview.warnings : []
   const suggested = marketIntel?.suggestedOption || 'NO TRADE'
   const stages = [
     {label:'Market feed',detail:feedReady?'Connected / fresh candles':feedStale?'Stale feed — entries blocked':'Provider not ready',state:feedReady?'DONE':'BLOCKED'},
@@ -220,7 +223,7 @@ function ScannerPanel({
       <div><small>SCAN INTERVAL</small><b>{interval}s</b></div></div>
     <div className="scanner-progress"><span style={{width:`${progressPct}%`}}/></div>
     <div className="scanner-meta"><span>Last attempt <b>{formatDateTime(loop.lastAttemptAt||automation?.lastCycleAt)}</b></span>
-      <span>Market <b>SENSEX • 1m / 5m / 15m</b></span><span>Open paper trades <b>{openTrades.length}</b></span></div>
+      <span>Market <b>SENSEX • 1m feed / derived 5m-15m</b></span><span>Open paper trades <b>{openTrades.length}</b></span></div>
 
     <div className="scanner-market-intel">
       <div className="scanner-intel-heading"><b>AI MARKET READ</b><span>{marketIntel.updatedAt ? formatDateTime(marketIntel.updatedAt) : 'Awaiting live scan'}</span></div>
@@ -234,12 +237,26 @@ function ScannerPanel({
         {['15m','5m','1m'].map(frame=><span key={frame}><small>{frame}</small><b className={frames[frame]==='UP'?'positive':frames[frame]==='DOWN'?'negative':'neutral'}>{frames[frame]||'UNKNOWN'}</b></span>)}
       </div>
       <p className="scanner-market-narrative">{marketIntel.marketNarrative || 'APEX is waiting for enough fresh candles to establish market direction.'}</p>
+      <small className="scanner-footnote">{marketIntel.timeframeSource || '5m and 15m context is derived from 1m candles.'}</small>
       <div className="scanner-intel-foot">
         <span>Structure: <b>{marketIntel.structureSummary || 'Waiting for HH/HL/LH/LL structure'}</b></span>
         <span>Technical: <b>RSI {marketIntel.evidence?.rsi ?? '—'} · EMA9 {marketIntel.evidence?.emaFast ?? '—'} / EMA21 {marketIntel.evidence?.emaSlow ?? '—'}</b></span>
         <span>SMC: <b>{[marketIntel.smc?.bos && marketIntel.smc.bos!=='NONE' ? `BOS ${marketIntel.smc.bos}` : '', marketIntel.smc?.choch && marketIntel.smc.choch!=='NONE' ? `CHOCH ${marketIntel.smc.choch}` : '', marketIntel.smc?.liquiditySweep && marketIntel.smc.liquiditySweep!=='NONE' ? `SWEEP ${marketIntel.smc.liquiditySweep}` : ''].filter(Boolean).join(' · ') || 'No active event'}</b></span>
       </div>
       {activePatterns.length>0&&<div className="scanner-tags scanner-pattern-tags">{activePatterns.map((pattern:string)=><span key={pattern}>{pattern.replace(/_/g,' ')}</span>)}</div>}
+    </div>
+
+    <div className="scanner-ai-review">
+      <div className="scanner-intel-heading"><b>LLM MARKET REVIEW</b><span>{String(aiReview.status || 'NOT RUN').replace(/_/g,' ').toUpperCase()}</span></div>
+      <div className="scanner-ai-summary">
+        <span>Advisory bias <b>{String(aiReview.bias || 'UNKNOWN')}</b></span>
+        <span>Risk <b>{String(aiReview.risk || 'UNKNOWN')}</b></span>
+        <span>Review confidence <b>{Number.isFinite(Number(aiReview.confidence)) ? Math.round(Number(aiReview.confidence)*100)+'%' : '—'}</b></span>
+        <span>News context <b>{String(aiReview.newsContextStatus || marketIntel.newsContext?.status || 'UNAVAILABLE')}</b></span>
+      </div>
+      {aiReasons.length>0 ? <ul>{aiReasons.map((reason:string,index:number)=><li key={index}>{reason}</li>)}</ul> : <p>{aiReview.status==='not_configured'?'LLM provider is not configured. Technical market read and risk gates continue without an LLM opinion.':'No additional LLM observations were returned for this scan.'}</p>}
+      {aiWarnings.length>0&&<div className="scanner-ai-warnings">{aiWarnings.map((warning:string,index:number)=><span key={index}>{warning}</span>)}</div>}
+      <small className="scanner-footnote">LLM output is an explanation layer only. It cannot approve, reject or execute an order, and its confidence is not a calibrated target-hit probability.</small>
     </div>
 
     <div className="scanner-timing">
