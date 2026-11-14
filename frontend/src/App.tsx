@@ -253,6 +253,7 @@ function MarketChart({
     <div className="native-chart-wrap">
       {loading && candles.length === 0 && <div className="chart-overlay">Loading market candles…</div>}
       {error && candles.length === 0 && <div className="chart-overlay error">{error}</div>}
+      {!loading && !error && candles.length === 0 && <div className="chart-overlay">No candles returned. Checking recent historical data…</div>}
       {candles.length > 0 && <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="SENSEX candlestick chart">
         <defs>
           <linearGradient id="chartFade" x1="0" x2="0" y1="0" y2="1">
