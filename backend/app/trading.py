@@ -1086,6 +1086,8 @@ class TradingEngine:
             "mtfContinuation": analysis,
             "index": "SENSEX",
             "underlyingKey": underlying_key,
+            "underlyingPrice": round(float(underlying_price), 2),
+            "underlyingEntryTime": now.isoformat(),
             "contextKey": f"MANUAL|{(frames.get('5m') or {}).get('trend','UNKNOWN')}|{(frames.get('15m') or {}).get('trend','UNKNOWN')}",
             "context": {
                 "trend1m": (frames.get("1m") or {}).get("trend"),
@@ -1567,6 +1569,8 @@ class TradingEngine:
                 "smc": best.get("smc") or {},
                 "index": best["index"],
                 "underlyingKey": best["underlyingKey"],
+                "underlyingPrice": round(float(best["underlyingPrice"]), 2),
+                "underlyingEntryTime": datetime.now(IST).isoformat(),
                 "contextKey": context.get("key", "UNKNOWN"),
                 "context": context,
                 "patterns": best.get("patterns"),
