@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from .core import settings
@@ -65,6 +65,15 @@ def build_market_chart(provider, timeframe: int = 1, limit: int = 160) -> dict:
         candles = provider.intraday_candles(underlying_key)
     else:
         raise RuntimeError("Current provider does not support requested chart timeframe")
+
+    # Intraday endpoints can return an empty list on weekends/holidays.
+    # Fall back to recent historical candles so the chart still renders.
+    if not candles and hasattr(provider, "historical_candles_interval"):
+        to_date = datetime.now(IST).date()
+        from_date = to_date - timedelta(days=7)
+        candles = provider.historical_candles_interval(
+            underlying_key, timeframe, from_date, to_date
+        )
 
     candles = sorted(candles, key=lambda row: str(row.get("timestamp") or ""))
     visible = candles[-limit:]
