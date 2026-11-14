@@ -166,6 +166,63 @@ async function fetchJson(path: string, options?: RequestInit) {
 }
 
 
+function ScannerPanel({
+  automation,
+  market,
+  feedStale,
+  openTrades,
+  clock,
+}: {
+  automation: any
+  market: any
+  feedStale: boolean
+  openTrades: Trade[]
+  clock: Date
+}) {
+  const loop = automation?.scanLoop || {}
+  const decision = automation?.lastDecision || {}
+  const signals = Array.isArray(decision?.signals) ? decision.signals : []
+  const interval = Math.max(15, Number(loop.intervalSeconds || 30))
+  const lastAttempt = Date.parse(loop.lastAttemptAt || automation?.lastCycleAt || '')
+  const elapsed = Number.isFinite(lastAttempt) ? Math.max(0, Math.floor((clock.getTime() - lastAttempt) / 1000)) : 0
+  const countdown = Math.max(0, interval - (elapsed % interval))
+  const scanRunning = Boolean(loop.running ?? automation?.running)
+  const setupFound = decision?.setupStatus === 'SETUP_FOUND'
+  const lastGate = decision?.executionGate || {}
+  const candidateCount = signals.length
+  const phase = decision?.phase || {}
+  const feedReady = market?.marketDataConfigured !== false && !feedStale
+  const resultText = decision?.reason || decision?.scalpScan?.blockedBy?.join(' • ') || 'Waiting for next strategy cycle'
+  const stages = [
+    {label:'Market feed',detail:feedReady?'Connected / fresh candles':feedStale?'Stale feed — entries blocked':'Provider not ready',state:feedReady?'DONE':'BLOCKED'},
+    {label:'Market scan',detail:phase?.liveScan?'Live session scan enabled':phase?.reason||'Waiting for entry window',state:phase?.liveScan?'RUNNING':'WAIT'},
+    {label:'EMA 9/21 + SMC',detail:candidateCount?`${candidateCount} market candidates evaluated`:'Waiting for candidate data',state:candidateCount?'DONE':scanRunning?'RUNNING':'WAIT'},
+    {label:'Setup quality',detail:setupFound?'Qualified direction found':decision?.scalpScan?.status==='NO_ENTRY'?'No valid entry yet':'No confirmed setup',state:setupFound?'PASS':candidateCount?'BLOCKED':'WAIT'},
+    {label:'Risk / execution',detail:lastGate?.reason||(openTrades.length?'Paper position active':'Risk checks run after setup confirmation'),state:openTrades.length?'ACTIVE':lastGate?.status==='BLOCKED'?'BLOCKED':setupFound?'CHECK':'WAIT'},
+  ]
+  return <section className="panel scanner-panel" aria-label="Live strategy scanner">
+    <div className="scanner-head"><div><div className="eyebrow">APEX LIVE SCANNER</div><h2>Trade Finder</h2></div>
+      <span className={scanRunning?'scanner-live-pill active':'scanner-live-pill'}><i/>{scanRunning?'ENGINE ON':'ENGINE OFF'}</span></div>
+    <div className="scanner-countdown"><div><small>NEXT BACKEND SCAN</small><strong>{scanRunning?`${countdown}s`:'PAUSED'}</strong></div>
+      <div><small>SCAN INTERVAL</small><b>{interval}s</b></div></div>
+    <div className="scanner-progress"><span style={{width:scanRunning?`${Math.min(100,(elapsed%interval)/interval*100)}%`:'0%'}}/></div>
+    <div className="scanner-meta"><span>Last attempt <b>{formatDateTime(loop.lastAttemptAt||automation?.lastCycleAt)}</b></span>
+      <span>Market <b>SENSEX • 1m / 5m / 15m</b></span><span>Open paper trades <b>{openTrades.length}</b></span></div>
+    <div className="scanner-stages">{stages.map((stage,index)=><div className="scanner-stage" key={stage.label}>
+      <span className={`scanner-stage-dot ${stage.state.toLowerCase()}`}>{['DONE','PASS','ACTIVE'].includes(stage.state)?'✓':stage.state==='BLOCKED'?'!':index+1}</span>
+      <div><b>{stage.label}</b><small>{stage.detail}</small></div><em>{stage.state}</em></div>)}</div>
+    <div className="scanner-candidates"><div className="scanner-subhead"><b>MARKET CANDIDATES</b><span>{candidateCount} evaluated</span></div>
+      {signals.length?signals.slice(0,5).map((signal:any,index:number)=><div className="scanner-candidate" key={`${signal.index||signal.instrument||index}-${index}`}>
+        <div><b>{signal.index||signal.instrument||'MARKET'}</b><small>{signal.chosenStrategy||signal.strategy||'Strategy scan'}</small></div>
+        <strong className={signal.action==='CE'?'positive':signal.action==='PE'?'negative':'neutral'}>{signal.action||'NO TRADE'}</strong>
+        <span>{Math.round(Number(signal.score||0)*100)}%</span></div>)
+      :<div className="scanner-empty">No fresh candidate result yet. APEX will show evaluated markets after the next backend scan.</div>}</div>
+    <div className="scanner-decision"><small>LAST DECISION / WHY NO TRADE</small><p>{resultText}</p>
+      {Array.isArray(decision?.scalpScan?.blockedBy)&&decision.scalpScan.blockedBy.length>0&&<div className="scanner-tags">{decision.scalpScan.blockedBy.map((reason:string)=><span key={reason}>{reason.replace(/_/g,' ')}</span>)}</div>}</div>
+    <small className="scanner-footnote">Countdown refreshes every second; broker/strategy scans run on the backend interval above to respect provider rate limits. No scan is claimed while the engine is paused.</small>
+  </section>
+}
+
 function MarketChart({
   data,
   timeframe,
@@ -183,8 +240,15 @@ function MarketChart({
   const latest = data?.latest || {}
   const freshness = data?.freshness || {}
   const structure = data?.structure || {}
+  const annotations = data?.annotations || {}
   const support = Number(structure?.levels?.support)
   const resistance = Number(structure?.levels?.resistance)
+  const hasSupport = Number.isFinite(support) && support > 0
+  const hasResistance = Number.isFinite(resistance) && resistance > 0
+  const swingHighs = Array.isArray(annotations.swingHighs) ? annotations.swingHighs : []
+  const swingLows = Array.isArray(annotations.swingLows) ? annotations.swingLows : []
+  const structureEvents = Array.isArray(annotations.events) ? annotations.events : []
+  const tradeMarkers = Array.isArray(data?.tradeMarkers) ? data.tradeMarkers : []
 
   const width = 1000
   const height = 410
@@ -192,8 +256,8 @@ function MarketChart({
   const plotW = width - pad.left - pad.right
   const plotH = height - pad.top - pad.bottom
   const priceValues = candles.flatMap((row: any) => [Number(row.low), Number(row.high)]).filter(Number.isFinite)
-  if (Number.isFinite(support)) priceValues.push(support)
-  if (Number.isFinite(resistance)) priceValues.push(resistance)
+  if (hasSupport) priceValues.push(support)
+  if (hasResistance) priceValues.push(resistance)
   const rawMin = priceValues.length ? Math.min(...priceValues) : 0
   const rawMax = priceValues.length ? Math.max(...priceValues) : 1
   const buffer = Math.max(5, (rawMax - rawMin) * 0.08)
@@ -217,6 +281,22 @@ function MarketChart({
     const price = maxPrice - range * pct
     return { y: pad.top + plotH * pct, price }
   })
+  const entryMarkerPoints = tradeMarkers.map((marker:any) => {
+    const markerTime = Date.parse(marker.timestamp || '')
+    if (!Number.isFinite(markerTime) || candles.length === 0) return null
+    let nearest = -1, distance = Number.POSITIVE_INFINITY
+    candles.forEach((row:any,index:number) => {
+      const candleTime = Date.parse(row.timestamp || '')
+      if (!Number.isFinite(candleTime)) return
+      const delta = Math.abs(candleTime-markerTime)
+      if (delta < distance) { distance = delta; nearest = index }
+    })
+    if (nearest < 0 || distance > timeframe*60_000*3) return null
+    const direction = String(marker.direction||'').toUpperCase()
+    const price = Number(marker.price)
+    if (!Number.isFinite(price) || price < minPrice || price > maxPrice) return null
+    return {...marker,index:nearest,x:x(nearest),y:y(price),direction}
+  }).filter(Boolean)
 
   return <section className="panel market-chart-panel">
     <div className="chart-head">
@@ -266,11 +346,11 @@ function MarketChart({
           <text className="chart-axis-label" x={width-pad.right+8} y={row.y+4}>{row.price.toFixed(0)}</text>
         </g>)}
 
-        {Number.isFinite(support) && <g>
+        {hasSupport && <g>
           <line className="level-line support" x1={pad.left} x2={width-pad.right} y1={y(support)} y2={y(support)} />
           <text className="level-label support" x={width-pad.right-6} y={y(support)-5}>S {support.toFixed(0)}</text>
         </g>}
-        {Number.isFinite(resistance) && <g>
+        {hasResistance && <g>
           <line className="level-line resistance" x1={pad.left} x2={width-pad.right} y1={y(resistance)} y2={y(resistance)} />
           <text className="level-label resistance" x={width-pad.right-6} y={y(resistance)-5}>R {resistance.toFixed(0)}</text>
         </g>}
@@ -290,6 +370,18 @@ function MarketChart({
 
         <polyline className="ema-line ema9" points={linePoints('ema9')} />
         <polyline className="ema-line ema21" points={linePoints('ema21')} />
+        {swingHighs.map((point:any,index:number)=><g key={`sh-${point.index}-${index}`} className="chart-structure-marker swing-high">
+          <circle cx={x(Number(point.index))} cy={y(Number(point.price))} r="3.5"/><text x={x(Number(point.index))} y={y(Number(point.price))-7}>SH</text></g>)}
+        {swingLows.map((point:any,index:number)=><g key={`sl-${point.index}-${index}`} className="chart-structure-marker swing-low">
+          <circle cx={x(Number(point.index))} cy={y(Number(point.price))} r="3.5"/><text x={x(Number(point.index))} y={y(Number(point.price))+13}>SL</text></g>)}
+        {structureEvents.map((event:any,index:number)=><g key={`event-${event.type}-${index}`} className={`chart-event-marker ${String(event.direction).toLowerCase()}`}>
+          <line x1={x(Number(event.index))} x2={x(Number(event.index))} y1={pad.top} y2={pad.top+plotH}/>
+          <text x={Math.min(width-pad.right-6,x(Number(event.index))+5)} y={pad.top+14+index*12}>{event.type} {event.direction}</text></g>)}
+        {entryMarkerPoints.map((marker:any,index:number)=><g key={`entry-${marker.tradeId||index}`} className={`chart-entry-marker ${marker.direction==='PE'?'pe':'ce'}`}>
+          <path d={marker.direction==='PE'
+            ? `M ${marker.x} ${marker.y+18} L ${marker.x-7} ${marker.y+5} L ${marker.x-3} ${marker.y+5} L ${marker.x-3} ${marker.y-7} L ${marker.x+3} ${marker.y-7} L ${marker.x+3} ${marker.y+5} L ${marker.x+7} ${marker.y+5} Z`
+            : `M ${marker.x} ${marker.y-18} L ${marker.x-7} ${marker.y-5} L ${marker.x-3} ${marker.y-5} L ${marker.x-3} ${marker.y+7} L ${marker.x+3} ${marker.y+7} L ${marker.x+3} ${marker.y-5} L ${marker.x+7} ${marker.y-5} Z`}/>
+          <text x={marker.x+10} y={marker.y-8}>{marker.direction} ENTRY</text></g>)}
 
         {candles.filter((_: any, index: number) => index % Math.max(1, Math.floor(candles.length / 6)) === 0).map((row: any, index: number, arr: any[]) => {
           const originalIndex = candles.indexOf(row)
@@ -305,7 +397,9 @@ function MarketChart({
       <span><i className="legend-candle down" /> Bear candle</span>
       <span><i className="legend-line-ui ema9" /> EMA 9</span>
       <span><i className="legend-line-ui ema21" /> EMA 21</span>
-      <span className="chart-source-note">Execution remains APEX PAPER • no broker order is sent</span>
+      <span className="chart-marker-key">SH / SL swing points</span>
+      <span className="chart-marker-key entry">↑ / ↓ confirmed paper entry</span>
+      <span className="chart-source-note">Underlying SENSEX prices • PAPER only</span>
     </div>
   </section>
 }
@@ -940,13 +1034,10 @@ export default function App() {
       </div>
     </section>}
 
-    <MarketChart
-      data={chartData}
-      timeframe={chartTimeframe}
-      onTimeframe={setChartTimeframe}
-      loading={chartLoading}
-      error={chartError}
-    />
+    <div className="chart-scanner-layout">
+      <MarketChart data={chartData} timeframe={chartTimeframe} onTimeframe={setChartTimeframe} loading={chartLoading} error={chartError}/>
+      <ScannerPanel automation={automation} market={market} feedStale={feedStale} openTrades={openTrades} clock={clock}/>
+    </div>
 
     <section className="ref-compact-strip" aria-label="APEX risk and neural indicators">
       <div className="ref-mini-card"><small>◉ TRADE RADAR</small><strong>{automation.running?'ACTIVE':'PAUSED'}</strong><span>SENSEX • 1M / 5M / 15M</span></div>
