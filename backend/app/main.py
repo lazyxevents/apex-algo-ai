@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -40,6 +40,7 @@ async def automation_loop():
     trading_engine.state.automation_running = True
     try:
         while True:
+            trading_engine.state.next_scan_at = None
             try:
                 if settings.market_data_provider.strip().lower() == "dhan":
                     await asyncio.to_thread(dhan_service.renew_token_if_due)
@@ -47,7 +48,11 @@ async def automation_loop():
             except Exception as exc:
                 # Never let one provider/strategy failure kill the long-running scan loop.
                 trading_engine.state.last_error = f"automation loop recovered: {exc}"
-            await asyncio.sleep(max(15, settings.auto_scan_interval_seconds))
+            delay = max(15, settings.auto_scan_interval_seconds)
+            completed_at = datetime.now(timezone.utc)
+            trading_engine.state.last_cycle_completed_at = completed_at.isoformat()
+            trading_engine.state.next_scan_at = (completed_at + timedelta(seconds=delay)).isoformat()
+            await asyncio.sleep(delay)
     finally:
         trading_engine.state.automation_running = False
 
