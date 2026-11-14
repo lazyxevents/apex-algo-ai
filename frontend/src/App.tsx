@@ -184,9 +184,12 @@ function ScannerPanel({
   const signals = Array.isArray(decision?.signals) ? decision.signals : []
   const interval = Math.max(15, Number(loop.intervalSeconds || 30))
   const lastAttempt = Date.parse(loop.lastAttemptAt || automation?.lastCycleAt || '')
+  const nextScan = Date.parse(loop.nextScanAt || '')
   const elapsed = Number.isFinite(lastAttempt) ? Math.max(0, Math.floor((clock.getTime() - lastAttempt) / 1000)) : 0
-  const countdown = Math.max(0, interval - (elapsed % interval))
   const scanRunning = Boolean(loop.running ?? automation?.running)
+  const cycleInProgress = scanRunning && !Number.isFinite(nextScan)
+  const countdown = Number.isFinite(nextScan) ? Math.max(0, Math.ceil((nextScan - clock.getTime()) / 1000)) : 0
+  const progressPct = Number.isFinite(nextScan) ? Math.max(0, Math.min(100, (1 - countdown / interval) * 100)) : 0
   const setupFound = decision?.setupStatus === 'SETUP_FOUND'
   const lastGate = decision?.executionGate || {}
   const candidateCount = signals.length
@@ -203,9 +206,9 @@ function ScannerPanel({
   return <section className="panel scanner-panel" aria-label="Live strategy scanner">
     <div className="scanner-head"><div><div className="eyebrow">APEX LIVE SCANNER</div><h2>Trade Finder</h2></div>
       <span className={scanRunning?'scanner-live-pill active':'scanner-live-pill'}><i/>{scanRunning?'ENGINE ON':'ENGINE OFF'}</span></div>
-    <div className="scanner-countdown"><div><small>NEXT BACKEND SCAN</small><strong>{scanRunning?`${countdown}s`:'PAUSED'}</strong></div>
+    <div className="scanner-countdown"><div><small>{cycleInProgress?'CURRENT CYCLE':'NEXT BACKEND SCAN'}</small><strong>{!scanRunning?'PAUSED':cycleInProgress?'SCANNING':`${countdown}s`}</strong></div>
       <div><small>SCAN INTERVAL</small><b>{interval}s</b></div></div>
-    <div className="scanner-progress"><span style={{width:scanRunning?`${Math.min(100,(elapsed%interval)/interval*100)}%`:'0%'}}/></div>
+    <div className="scanner-progress"><span style={{width:`${progressPct}%`}}/></div>
     <div className="scanner-meta"><span>Last attempt <b>{formatDateTime(loop.lastAttemptAt||automation?.lastCycleAt)}</b></span>
       <span>Market <b>SENSEX • 1m / 5m / 15m</b></span><span>Open paper trades <b>{openTrades.length}</b></span></div>
     <div className="scanner-stages">{stages.map((stage,index)=><div className="scanner-stage" key={stage.label}>
