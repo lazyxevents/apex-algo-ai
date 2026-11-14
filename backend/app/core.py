@@ -286,6 +286,12 @@ def _model_for_select(stmt):
 
 
 def _value(expr):
+    if expr is None or getattr(expr, "__visit_name__", None) == "null":
+        return None
+    if getattr(expr, "__visit_name__", None) == "true":
+        return True
+    if getattr(expr, "__visit_name__", None) == "false":
+        return False
     if isinstance(expr, BindParameter):
         return expr.value
     if hasattr(expr, "value") and not hasattr(expr, "key"):
