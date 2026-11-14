@@ -1542,3 +1542,19 @@ html[data-theme="light"] .scanner-intel-grid strong,html[data-theme="light"] .sc
 html[data-theme="light"] .scanner-market-narrative{color:#3c5d6c;background:#eef8f5}
 html[data-theme="light"] .scanner-intel-foot b{color:#31556b}
 @media(max-width:700px){.scanner-intel-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.scanner-intel-heading{align-items:flex-start}}
+
+
+/* Evidence-based LLM review panel. */
+.scanner-ai-review{display:grid;gap:8px;padding:11px;border:1px solid rgba(105,145,175,.22);border-radius:10px;background:rgba(12,27,40,.5)}
+.scanner-ai-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.scanner-ai-summary span{display:flex;justify-content:space-between;gap:7px;padding:7px;border:1px solid rgba(110,150,175,.14);border-radius:6px;color:#8199aa;font-size:8px}
+.scanner-ai-summary b{color:#d6e6f0;text-align:right}
+.scanner-ai-review ul{display:grid;gap:5px;margin:0;padding-left:17px;color:#c2d3df;font-size:9px;line-height:1.5}
+.scanner-ai-review>p{margin:0;color:#8199aa;font-size:9px;line-height:1.5}
+.scanner-ai-warnings{display:grid;gap:4px}
+.scanner-ai-warnings span{padding:6px 8px;border-left:2px solid #d6a05b;background:rgba(160,112,48,.08);color:#d6b782;font-size:8px;line-height:1.45}
+html[data-theme="light"] .scanner-ai-review{background:#f8fbfd;border-color:#d8e5ed}
+html[data-theme="light"] .scanner-ai-summary span{background:#fff;border-color:#e0e9ef;color:#61798b}
+html[data-theme="light"] .scanner-ai-summary b{color:#254257}
+html[data-theme="light"] .scanner-ai-review ul{color:#405f73}
+html[data-theme="light"] .scanner-ai-warnings span{background:#fff8eb;color:#87612d}
