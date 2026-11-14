@@ -21,9 +21,10 @@ class UpstoxService:
         self._last_success_at: str | None = None
 
     def _market_token(self) -> str:
-        # Analytics Token is read-only and long-lived; ideal for market-data
-        # ingestion plus APEX internal PAPER execution.
-        return settings.upstox_analytics_token or settings.upstox_access_token
+        # Use only the long-lived, read-only Analytics Token for market data.
+        # OAuth access tokens expire daily and must never silently become the
+        # production data-feed credential.
+        return settings.upstox_analytics_token.strip()
 
     def _headers(self, token: str) -> dict[str, str]:
         return {
@@ -42,13 +43,13 @@ class UpstoxService:
 
     def status(self) -> dict:
         configured = bool(self._market_token())
-        token_type = "analytics" if settings.upstox_analytics_token else ("oauth" if settings.upstox_access_token else "missing")
+        token_type = "analytics" if settings.upstox_analytics_token.strip() else "missing"
         token_status = self._token_problem or ("MISSING" if not configured else ("READY" if self._last_success_at else "CONFIGURED"))
         token_action_required = token_status in {"MISSING", "INVALID", "ACCESS_DENIED"}
         token_message = (
-            "Generate an Upstox Analytics Token and set UPSTOX_ANALYTICS_TOKEN on the backend."
+            "Upstox Analytics Token is missing. Daily OAuth tokens are not used for the APEX market-data feed. Set UPSTOX_ANALYTICS_TOKEN on the backend."
             if token_status == "MISSING" else
-            "Upstox rejected the token (HTTP 401). Generate a fresh Analytics Token and update UPSTOX_ANALYTICS_TOKEN."
+            "Upstox rejected the Analytics Token (HTTP 401). Generate a fresh Analytics Token and update UPSTOX_ANALYTICS_TOKEN."
             if token_status == "INVALID" else
             "Upstox denied market-data access (HTTP 403). Check Analytics Token access or generate a fresh token."
             if token_status == "ACCESS_DENIED" else
@@ -63,7 +64,7 @@ class UpstoxService:
             "tokenStatus": token_status,
             "tokenActionRequired": token_action_required,
             "tokenMessage": token_message,
-            "tokenRenewal": "not_required_for_analytics_token" if token_type == "analytics" else "daily_oauth",
+            "tokenRenewal": "not_required_for_analytics_token" if token_type == "analytics" else "analytics_token_required",
             "tokenInvalid": self._token_problem in {"INVALID", "ACCESS_DENIED"},
             "readOnlyMarketData": True,
             "supportsOptionChain": True,
@@ -111,7 +112,7 @@ class UpstoxService:
 
     def intraday_candles(self, instrument_key: str) -> list[dict]:
         if not self.market_ready:
-            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN (recommended) or UPSTOX_ACCESS_TOKEN is missing")
+            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN is missing; daily OAuth tokens are not supported for the market-data feed")
         encoded = quote(instrument_key, safe="")
         url = f"{self.api_v3}/historical-candle/intraday/{encoded}/minutes/{settings.candle_interval_minutes}"
         with httpx.Client(timeout=12) as client:
