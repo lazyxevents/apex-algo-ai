@@ -1413,3 +1413,17 @@ html[data-theme="light"] .token-modal h2{color:#183247}
 html[data-theme="light"] .token-modal p,html[data-theme="light"] .token-modal-steps ol{color:#526a7e}
 html[data-theme="light"] .token-modal-steps{background:#f5f8fb;border-color:#dce6ef}
 @media(max-width:560px){.token-modal{padding:19px}.token-modal h2{font-size:20px}.token-modal-actions{flex-direction:column}.token-modal-actions>*{justify-content:center}}
+
+
+/* Detailed provider/API error dialog. */
+.api-error-modal{border-color:rgba(248,103,103,.42)}
+.api-error-modal .token-modal-icon{background:rgba(248,103,103,.14);border-color:rgba(248,103,103,.34);color:#ff9999}
+.api-error-modal>small{color:#ff9d9d}
+.api-error-code{display:grid;gap:8px;margin:15px 0;padding:13px;border:1px solid #3a4b5b;border-radius:11px;background:rgba(2,9,16,.68)}
+.api-error-code>span{font-size:9px;font-weight:900;letter-spacing:1.2px;color:#f2b3b3}
+.api-error-code code{display:block;max-height:190px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;color:#f2dede;font-size:11px;line-height:1.6}
+.api-error-modal .token-modal-actions .action-btn{cursor:pointer}
+.api-error-modal .token-modal-actions .action-btn:disabled{opacity:.55;cursor:not-allowed}
+html[data-theme="light"] .api-error-code{background:#f8f1f1;border-color:#ead2d2}
+html[data-theme="light"] .api-error-code code{color:#713c3c}
+@media(max-width:560px){.api-error-code code{font-size:10px}}
