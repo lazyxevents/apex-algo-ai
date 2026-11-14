@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from time import sleep
 from urllib.parse import quote
 
@@ -109,6 +109,39 @@ class UpstoxService:
                 "oi": float(row[6] or 0) if len(row) > 6 else 0,
             })
         return sorted(candles, key=lambda x: x["timestamp"])
+
+    def intraday_candles_interval(self, instrument_key: str, interval: int) -> list[dict]:
+        """Fetch the current-session candles for the requested chart interval."""
+        if interval not in {1, 5, 15}:
+            raise ValueError("Supported chart intervals are 1, 5 and 15 minutes")
+        if not self.market_ready:
+            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN is missing or rejected")
+        encoded = quote(instrument_key, safe="")
+        url = f"{self.api_v3}/historical-candle/intraday/{encoded}/minutes/{interval}"
+        with httpx.Client(timeout=12) as client:
+            res = client.get(url, headers=self._headers(self._market_token()))
+            self._check_response(res)
+            raw = res.json().get("data", {}).get("candles", [])
+        return self._parse_candles(raw)
+
+    def historical_candles_interval(
+        self, instrument_key: str, interval: int, from_date: date, to_date: date
+    ) -> list[dict]:
+        """Fetch historical candles so charts remain useful outside market hours."""
+        if interval not in {1, 5, 15}:
+            raise ValueError("Supported chart intervals are 1, 5 and 15 minutes")
+        if not self.market_ready:
+            raise RuntimeError("UPSTOX_ANALYTICS_TOKEN is missing or rejected")
+        encoded = quote(instrument_key, safe="")
+        url = (
+            f"{self.api_v3}/historical-candle/{encoded}/minutes/{interval}/"
+            f"{to_date.isoformat()}/{from_date.isoformat()}"
+        )
+        with httpx.Client(timeout=20) as client:
+            res = client.get(url, headers=self._headers(self._market_token()))
+            self._check_response(res)
+            raw = res.json().get("data", {}).get("candles", [])
+        return self._parse_candles(raw)
 
     def intraday_candles(self, instrument_key: str) -> list[dict]:
         if not self.market_ready:
