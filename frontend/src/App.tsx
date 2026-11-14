@@ -226,7 +226,7 @@ function ScannerPanel({
       <div className="scanner-intel-heading"><b>AI MARKET READ</b><span>{marketIntel.updatedAt ? formatDateTime(marketIntel.updatedAt) : 'Awaiting live scan'}</span></div>
       <div className="scanner-intel-grid">
         <div><small>MARKET BIAS</small><strong className={String(marketIntel.bias||'').includes('BULL')?'positive':String(marketIntel.bias||'').includes('BEAR')?'negative':'neutral'}>{String(marketIntel.bias||'WAITING').replace(/_/g,' ')}</strong><span>{String(marketIntel.regime||'NO LIVE READ').replace(/_/g,' ')}</span></div>
-        <div><small>VOLATILITY</small><strong>{String(marketIntel.volatility||'UNKNOWN').replace(/_/g,' ')}</strong><span>ATR {marketIntel.atrPct != null ? \`\${Number(marketIntel.atrPct).toFixed(3)}%\` : '—'}</span></div>
+        <div><small>VOLATILITY</small><strong>{String(marketIntel.volatility||'UNKNOWN').replace(/_/g,' ')}</strong><span>ATR {marketIntel.atrPct != null ? `${Number(marketIntel.atrPct).toFixed(3)}%` : '—'}</span></div>
         <div><small>TRADE SUITABILITY</small><strong className={marketIntel.tradeSuitability==='FAVOURABLE'?'positive':marketIntel.tradeSuitability==='AVOID'?'negative':'neutral'}>{String(marketIntel.tradeSuitability||'WAITING').replace(/_/g,' ')}</strong><span>Confluence {marketIntel.confluence||'—'}</span></div>
         <div><small>TRADE IDEA</small><strong className={suggested.includes('CALL')?'positive':suggested.includes('PUT')?'negative':'neutral'}>{suggested}</strong><span>{marketIntel.candidateState ? String(marketIntel.candidateState).replace(/_/g,' ') : 'No setup yet'}</span></div>
       </div>
@@ -236,7 +236,7 @@ function ScannerPanel({
       <p className="scanner-market-narrative">{marketIntel.marketNarrative || 'APEX is waiting for enough fresh candles to establish market direction.'}</p>
       <div className="scanner-intel-foot">
         <span>Structure: <b>{String(marketIntel.structure?.swingStructure || 'NOT CONFIRMED').replace(/_/g,' ')}</b></span>
-        <span>SMC: <b>{[marketIntel.smc?.bos && marketIntel.smc.bos!=='NONE' ? \`BOS \${marketIntel.smc.bos}\` : '', marketIntel.smc?.choch && marketIntel.smc.choch!=='NONE' ? \`CHOCH \${marketIntel.smc.choch}\` : '', marketIntel.smc?.liquiditySweep && marketIntel.smc.liquiditySweep!=='NONE' ? \`SWEEP \${marketIntel.smc.liquiditySweep}\` : ''].filter(Boolean).join(' · ') || 'No active event'}</b></span>
+        <span>SMC: <b>{[marketIntel.smc?.bos && marketIntel.smc.bos!=='NONE' ? `BOS ${marketIntel.smc.bos}` : '', marketIntel.smc?.choch && marketIntel.smc.choch!=='NONE' ? `CHOCH ${marketIntel.smc.choch}` : '', marketIntel.smc?.liquiditySweep && marketIntel.smc.liquiditySweep!=='NONE' ? `SWEEP ${marketIntel.smc.liquiditySweep}` : ''].filter(Boolean).join(' · ') || 'No active event'}</b></span>
       </div>
       {activePatterns.length>0&&<div className="scanner-tags scanner-pattern-tags">{activePatterns.map((pattern:string)=><span key={pattern}>{pattern.replace(/_/g,' ')}</span>)}</div>}
     </div>
