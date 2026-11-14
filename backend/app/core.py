@@ -286,7 +286,7 @@ def _model_for_select(stmt):
 
 
 def _value(expr):
-    if expr is None or getattr(expr, "__visit_name__", None) == "null":
+    if expr is None or expr.__class__.__name__ == "Null" or getattr(expr, "__visit_name__", None) == "null":
         return None
     if getattr(expr, "__visit_name__", None) == "true":
         return True
