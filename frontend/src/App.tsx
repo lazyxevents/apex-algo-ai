@@ -235,7 +235,8 @@ function ScannerPanel({
       </div>
       <p className="scanner-market-narrative">{marketIntel.marketNarrative || 'APEX is waiting for enough fresh candles to establish market direction.'}</p>
       <div className="scanner-intel-foot">
-        <span>Structure: <b>{String(marketIntel.structure?.swingStructure || 'NOT CONFIRMED').replace(/_/g,' ')}</b></span>
+        <span>Structure: <b>{marketIntel.structureSummary || 'Waiting for HH/HL/LH/LL structure'}</b></span>
+        <span>Technical: <b>RSI {marketIntel.evidence?.rsi ?? '—'} · EMA9 {marketIntel.evidence?.emaFast ?? '—'} / EMA21 {marketIntel.evidence?.emaSlow ?? '—'}</b></span>
         <span>SMC: <b>{[marketIntel.smc?.bos && marketIntel.smc.bos!=='NONE' ? `BOS ${marketIntel.smc.bos}` : '', marketIntel.smc?.choch && marketIntel.smc.choch!=='NONE' ? `CHOCH ${marketIntel.smc.choch}` : '', marketIntel.smc?.liquiditySweep && marketIntel.smc.liquiditySweep!=='NONE' ? `SWEEP ${marketIntel.smc.liquiditySweep}` : ''].filter(Boolean).join(' · ') || 'No active event'}</b></span>
       </div>
       {activePatterns.length>0&&<div className="scanner-tags scanner-pattern-tags">{activePatterns.map((pattern:string)=><span key={pattern}>{pattern.replace(/_/g,' ')}</span>)}</div>}

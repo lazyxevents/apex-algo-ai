@@ -797,6 +797,14 @@ class TradingEngine:
         bear_patterns = patterns.get("bearish") or []
         neutral_patterns = patterns.get("neutral") or []
         active_patterns = list(dict.fromkeys(bull_patterns[:3] + bear_patterns[:3] + neutral_patterns[:2]))[:6]
+        structure_labels = []
+        if structure.get("higherHigh"): structure_labels.append("HH")
+        if structure.get("higherLow"): structure_labels.append("HL")
+        if structure.get("lowerHigh"): structure_labels.append("LH")
+        if structure.get("lowerLow"): structure_labels.append("LL")
+        if structure.get("previousHighBreak"): structure_labels.append("PREVIOUS HIGH BREAK")
+        if structure.get("previousLowBreak"): structure_labels.append("PREVIOUS LOW BREAK")
+        structure_summary = " · ".join(structure_labels) if structure_labels else "No clear HH/HL/LH/LL confirmation"
         confluence = "HIGH" if t5 == t15 and t5 in {"UP", "DOWN"} else "MEDIUM" if t1 in {"UP", "DOWN"} and t1 == t5 else "LOW"
         return {
             "instrument": signal.get("index") or "UNKNOWN",
@@ -809,6 +817,7 @@ class TradingEngine:
             "confluence": confluence,
             "timeframes": {"1m": t1, "5m": t5, "15m": t15},
             "structure": structure,
+            "structureSummary": structure_summary,
             "patterns": {"bullish": bull_patterns[:4], "bearish": bear_patterns[:4], "neutral": neutral_patterns[:3], "active": active_patterns},
             "smc": mtf.get("smc") or {},
             "marketNarrative": narrative,
