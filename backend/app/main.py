@@ -227,10 +227,15 @@ def market_chart(timeframe: int = 1, limit: int = 160):
     if timeframe not in {1, 5, 15}:
         raise HTTPException(status_code=400, detail="timeframe must be 1, 5 or 15 minutes")
     try:
+        try:
+            chart_trades = trading_engine.list_trades(limit=100)
+        except Exception:
+            chart_trades = []
         return build_market_chart(
             market_service,
             timeframe=timeframe,
             limit=min(max(limit, 40), 260),
+            trades=chart_trades,
         )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
