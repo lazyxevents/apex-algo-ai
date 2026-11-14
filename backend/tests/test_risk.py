@@ -129,8 +129,7 @@ def test_option_selector_prefers_atm_then_nearest_otm():
     assert selected["moneyness"] == "OTM"
 
 
-def test_live_scan_requires_ema200_history(monkeypatch):
-    from app import trading
+def test_live_scan_requires_minimum_ema9_21_history(monkeypatch):
     engine = TradingEngine()
 
     class Provider:
@@ -140,11 +139,26 @@ def test_live_scan_requires_ema200_history(monkeypatch):
     monkeypatch.setattr(engine, "_candle_freshness", lambda candles: {"fresh": True})
     result = engine._scan_one(Provider(), "SENSEX", "IDX_I|51|INDEX", 30000)
     assert result["action"] == "NO_TRADE"
-    assert "INSUFFICIENT_EMA200_CANDLES" in result["blockedBy"]
-    assert result["chosenStrategy"] == "APEX_EMA9_200_LIQUIDITY_SCALP"
+    assert "INSUFFICIENT_CANDLES" in result["blockedBy"]
+    assert result["chosenStrategy"] == "APEX_EMA9_21_PULLBACK_SCALP"
 
 
-def test_ema200_liquidity_scalp_never_forces_entry():
+def test_ema9_21_pullback_strategy_does_not_force_entry():
+    from app.strategy import evaluate_ema_liquidity_scalp
+    from datetime import datetime, timedelta, timezone
+
+    start = datetime(2026, 10, 8, 9, 15, tzinfo=timezone.utc)
+    candles = [
+        {"timestamp": (start + timedelta(minutes=i)).isoformat(),
+         "open": 100, "high": 100.5, "low": 99.5, "close": 100, "volume": 1000}
+        for i in range(40)
+    ]
+    result = evaluate_ema_liquidity_scalp(candles)
+    assert result["action"] == "NO_TRADE"
+    assert "EMA_TREND_NOT_ALIGNED" in result["blockedBy"]
+
+
+def test_ema9_21_bullish_pullback_confirmation():
     from app.strategy import evaluate_ema_liquidity_scalp
     from datetime import datetime, timedelta, timezone
 
@@ -156,24 +170,7 @@ def test_ema200_liquidity_scalp_never_forces_entry():
         for i in range(201)
     ]
     result = evaluate_ema_liquidity_scalp(candles)
-    assert result["action"] == "NO_TRADE"
-    assert "LIQUIDITY_SWEEP_NOT_CONFIRMED" in result["blockedBy"]
-
-
-def test_ema200_bullish_liquidity_sweep():
-    from app.strategy import evaluate_ema_liquidity_scalp
-    from datetime import datetime, timedelta, timezone
-
-    start = datetime(2026, 10, 8, 9, 15, tzinfo=timezone.utc)
-    candles = [
-        {"timestamp": (start + timedelta(minutes=i)).isoformat(),
-         "open": 100+i*0.2, "high": 101+i*0.2,
-         "low": 99+i*0.2, "close": 100.6+i*0.2, "volume": 1000}
-        for i in range(201)
-    ]
-    pool_low = min(c["low"] for c in candles[-9:-1])
-    candles[-1]["low"] = pool_low - 1
-    candles[-1]["open"] = candles[-1]["close"] - 0.5
-    result = evaluate_ema_liquidity_scalp(candles)
     assert result["action"] == "CE"
-    assert result["smc"]["liquiditySweep"] == "BULL"
+    assert result["strategy"] == "APEX_EMA9_21_PULLBACK_SCALP"
+    assert result["confirmations"]["bullPullback"] is True
+    assert result["confirmations"]["bullCandle"] is True
