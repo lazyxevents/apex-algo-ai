@@ -172,12 +172,14 @@ function ScannerPanel({
   feedStale,
   openTrades,
   clock,
+  intelligence,
 }: {
   automation: any
   market: any
   feedStale: boolean
   openTrades: Trade[]
   clock: Date
+  intelligence: any
 }) {
   const loop = automation?.scanLoop || {}
   const decision = automation?.lastDecision || {}
@@ -196,6 +198,14 @@ function ScannerPanel({
   const phase = decision?.phase || {}
   const feedReady = market?.marketDataConfigured !== false && !feedStale
   const resultText = decision?.reason || decision?.scalpScan?.blockedBy?.join(' • ') || 'Waiting for next strategy cycle'
+  const marketIntel = decision?.marketIntelligence || {}
+  const frames = marketIntel?.timeframes || {}
+  const timing = marketIntel?.timing || {}
+  const holdEstimate = timing?.historicalHold || {}
+  const newsItems = Array.isArray(intelligence?.latestNews) ? intelligence.latestNews.slice(0, 3) : []
+  const newsHealth = intelligence?.newsHealth || {}
+  const activePatterns = Array.isArray(marketIntel?.patterns?.active) ? marketIntel.patterns.active : []
+  const suggested = marketIntel?.suggestedOption || 'NO TRADE'
   const stages = [
     {label:'Market feed',detail:feedReady?'Connected / fresh candles':feedStale?'Stale feed — entries blocked':'Provider not ready',state:feedReady?'DONE':'BLOCKED'},
     {label:'Market scan',detail:phase?.liveScan?'Live session scan enabled':phase?.reason||'Waiting for entry window',state:phase?.liveScan?'RUNNING':'WAIT'},
@@ -211,6 +221,43 @@ function ScannerPanel({
     <div className="scanner-progress"><span style={{width:`${progressPct}%`}}/></div>
     <div className="scanner-meta"><span>Last attempt <b>{formatDateTime(loop.lastAttemptAt||automation?.lastCycleAt)}</b></span>
       <span>Market <b>SENSEX • 1m / 5m / 15m</b></span><span>Open paper trades <b>{openTrades.length}</b></span></div>
+
+    <div className="scanner-market-intel">
+      <div className="scanner-intel-heading"><b>AI MARKET READ</b><span>{marketIntel.updatedAt ? formatDateTime(marketIntel.updatedAt) : 'Awaiting live scan'}</span></div>
+      <div className="scanner-intel-grid">
+        <div><small>MARKET BIAS</small><strong className={String(marketIntel.bias||'').includes('BULL')?'positive':String(marketIntel.bias||'').includes('BEAR')?'negative':'neutral'}>{String(marketIntel.bias||'WAITING').replace(/_/g,' ')}</strong><span>{String(marketIntel.regime||'NO LIVE READ').replace(/_/g,' ')}</span></div>
+        <div><small>VOLATILITY</small><strong>{String(marketIntel.volatility||'UNKNOWN').replace(/_/g,' ')}</strong><span>ATR {marketIntel.atrPct != null ? \`\${Number(marketIntel.atrPct).toFixed(3)}%\` : '—'}</span></div>
+        <div><small>TRADE SUITABILITY</small><strong className={marketIntel.tradeSuitability==='FAVOURABLE'?'positive':marketIntel.tradeSuitability==='AVOID'?'negative':'neutral'}>{String(marketIntel.tradeSuitability||'WAITING').replace(/_/g,' ')}</strong><span>Confluence {marketIntel.confluence||'—'}</span></div>
+        <div><small>TRADE IDEA</small><strong className={suggested.includes('CALL')?'positive':suggested.includes('PUT')?'negative':'neutral'}>{suggested}</strong><span>{marketIntel.candidateState ? String(marketIntel.candidateState).replace(/_/g,' ') : 'No setup yet'}</span></div>
+      </div>
+      <div className="scanner-timeframes">
+        {['15m','5m','1m'].map(frame=><span key={frame}><small>{frame}</small><b className={frames[frame]==='UP'?'positive':frames[frame]==='DOWN'?'negative':'neutral'}>{frames[frame]||'UNKNOWN'}</b></span>)}
+      </div>
+      <p className="scanner-market-narrative">{marketIntel.marketNarrative || 'APEX is waiting for enough fresh candles to establish market direction.'}</p>
+      <div className="scanner-intel-foot">
+        <span>Structure: <b>{String(marketIntel.structure?.swingStructure || 'NOT CONFIRMED').replace(/_/g,' ')}</b></span>
+        <span>SMC: <b>{[marketIntel.smc?.bos && marketIntel.smc.bos!=='NONE' ? \`BOS \${marketIntel.smc.bos}\` : '', marketIntel.smc?.choch && marketIntel.smc.choch!=='NONE' ? \`CHOCH \${marketIntel.smc.choch}\` : '', marketIntel.smc?.liquiditySweep && marketIntel.smc.liquiditySweep!=='NONE' ? \`SWEEP \${marketIntel.smc.liquiditySweep}\` : ''].filter(Boolean).join(' · ') || 'No active event'}</b></span>
+      </div>
+      {activePatterns.length>0&&<div className="scanner-tags scanner-pattern-tags">{activePatterns.map((pattern:string)=><span key={pattern}>{pattern.replace(/_/g,' ')}</span>)}</div>}
+    </div>
+
+    <div className="scanner-timing">
+      <div className="scanner-intel-heading"><b>TRADE TIMING & PLAN</b><span>1-minute execution view</span></div>
+      <div className="scanner-timing-grid">
+        <div><small>ENTRY WINDOW</small><b>{timing.entryWindow || 'Waiting for a completed candle confirmation.'}</b></div>
+        <div><small>EXPECTED HOLD</small><b>{holdEstimate.label || 'Collecting closed paper-trade history; no reliable estimate yet.'}</b></div>
+      </div>
+      <p>CALL/PUT candidate is not an order. Existing option liquidity, stop-loss, capital, timing and deterministic risk gates must all pass before a paper entry.</p>
+    </div>
+
+    <div className="scanner-news">
+      <div className="scanner-intel-heading"><b>NEWS & EVENT CONTEXT</b><span>{String(newsHealth.status||'NOT VERIFIED').replace(/_/g,' ')}</span></div>
+      {newsItems.length ? newsItems.map((item:any,index:number)=><a key={item.url||index} href={item.url} target="_blank" rel="noreferrer">
+        <b>{item.title || 'Market headline'}</b><small>{item.type || 'Research source'} · {formatDateTime(item.lastCheckedAt)}</small>
+      </a>) : <div className="scanner-empty">No persisted market headlines are available yet. APEX will not invent a news summary.</div>}
+      <small className="scanner-footnote">Headlines are from APEX's persisted research feed. Check their timestamps; this is not a guaranteed real-time breaking-news terminal.</small>
+    </div>
+
     <div className="scanner-stages">{stages.map((stage,index)=><div className="scanner-stage" key={stage.label}>
       <span className={`scanner-stage-dot ${stage.state.toLowerCase()}`}>{['DONE','PASS','ACTIVE'].includes(stage.state)?'✓':stage.state==='BLOCKED'?'!':index+1}</span>
       <div><b>{stage.label}</b><small>{stage.detail}</small></div><em>{stage.state}</em></div>)}</div>
@@ -1039,7 +1086,7 @@ export default function App() {
 
     <div className="chart-scanner-layout">
       <MarketChart data={chartData} timeframe={chartTimeframe} onTimeframe={setChartTimeframe} loading={chartLoading} error={chartError}/>
-      <ScannerPanel automation={automation} market={market} feedStale={feedStale} openTrades={openTrades} clock={clock}/>
+      <ScannerPanel automation={automation} market={market} feedStale={feedStale} openTrades={openTrades} clock={clock} intelligence={intelligence}/>
     </div>
 
     <section className="ref-compact-strip" aria-label="APEX risk and neural indicators">

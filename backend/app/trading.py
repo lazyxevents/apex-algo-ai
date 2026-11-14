@@ -712,6 +712,168 @@ class TradingEngine:
             "maxAgeSeconds": max_age,
         }
 
+
+    def _build_market_intelligence(self, signal: dict) -> dict:
+        """Transparent observational market read; never changes execution gates."""
+        context = signal.get("marketContext") or {}
+        mtf = signal.get("mtfAnalysis") or {}
+        frames = mtf.get("frames") or {}
+        t1 = str((frames.get("1m") or {}).get("trend") or context.get("trend") or "UNKNOWN").upper()
+        t5 = str((frames.get("5m") or {}).get("trend") or "UNKNOWN").upper()
+        t15 = str((frames.get("15m") or {}).get("trend") or "UNKNOWN").upper()
+        volatility = str(context.get("volatility") or "UNKNOWN").upper()
+        freshness = signal.get("dataFreshness") or {}
+        fresh = bool(freshness.get("fresh"))
+        structure = mtf.get("structure") or mtf.get("smc") or {}
+        patterns = mtf.get("patterns") or {}
+        action = str(signal.get("action") or "NO_TRADE").upper()
+        candidate = str(signal.get("directionCandidate") or action).upper()
+
+        if not fresh:
+            regime = "DATA_UNAVAILABLE"
+        elif volatility == "HIGH":
+            regime = "HIGH_VOLATILITY"
+        elif t5 == "FLAT" and t15 == "FLAT":
+            regime = "SIDEWAYS"
+        elif t5 == "UP" and t15 == "UP":
+            regime = "BULLISH_TREND"
+        elif t5 == "DOWN" and t15 == "DOWN":
+            regime = "BEARISH_TREND"
+        elif (t5 == "UP" and t15 == "DOWN") or (t5 == "DOWN" and t15 == "UP"):
+            regime = "MIXED_TIMEFRAMES"
+        elif t1 == "UP" and t5 == "UP":
+            regime = "EARLY_BULLISH"
+        elif t1 == "DOWN" and t5 == "DOWN":
+            regime = "EARLY_BEARISH"
+        elif t1 == "FLAT" and t5 == "UNKNOWN" and t15 == "UNKNOWN":
+            regime = "SIDEWAYS_POSSIBLE"
+        else:
+            regime = "TRANSITIONAL"
+
+        if regime in {"BULLISH_TREND", "EARLY_BULLISH"}:
+            bias = "BULLISH"
+        elif regime in {"BEARISH_TREND", "EARLY_BEARISH"}:
+            bias = "BEARISH"
+        elif candidate == "CE" and t1 == "UP":
+            bias = "BULLISH_LEAN"
+        elif candidate == "PE" and t1 == "DOWN":
+            bias = "BEARISH_LEAN"
+        else:
+            bias = "NEUTRAL"
+
+        if regime in {"DATA_UNAVAILABLE", "HIGH_VOLATILITY", "SIDEWAYS"}:
+            suitability = "AVOID"
+        elif regime in {"BULLISH_TREND", "BEARISH_TREND"} and volatility in {"LOW", "NORMAL"}:
+            suitability = "FAVOURABLE"
+        elif regime in {"EARLY_BULLISH", "EARLY_BEARISH"}:
+            suitability = "WATCH"
+        else:
+            suitability = "CAUTION"
+
+        narratives = {
+            "SIDEWAYS": "Market range-bound lag raha hai. Range ke beech entry avoid karo; clean breakout, retest aur volume confirmation ka wait karo.",
+            "HIGH_VOLATILITY": "Volatility elevated hai. Premium whipsaw aur fast stop-outs ka risk high hai; confirmation ke bina CALL/PUT chase mat karo.",
+            "BULLISH_TREND": "5m aur 15m trend bullish align hain. CALL setup ke liye pullback/retest prefer karo; highs par price chase mat karo.",
+            "BEARISH_TREND": "5m aur 15m trend bearish align hain. PUT setup ke liye pullback/retest prefer karo; lows par price chase mat karo.",
+            "MIXED_TIMEFRAMES": "Higher timeframes ek direction mein agree nahi kar rahe. Capital protect karo aur alignment ka wait karo.",
+            "DATA_UNAVAILABLE": "Fresh market data available nahi hai. Market bias unreliable hai; APEX ko trade skip karna chahiye.",
+        }
+        narrative = narratives.get(regime, "Market transition mein hai. Structure, candle close aur timeframe alignment confirm hone tak wait karo.")
+
+        if action in {"CE", "PE"}:
+            entry_window = "Latest completed 1m candle par candidate confirm hua; next scan mein bhi valid ho aur risk/option filters pass hon tabhi entry."
+            suggested_option = "CALL (CE)" if action == "CE" else "PUT (PE)"
+            candidate_state = "CONFIRMED_CANDIDATE"
+        elif candidate in {"CE", "PE"}:
+            entry_window = "Abhi entry nahi. Next 1–3 completed 1m candles mein pullback + confirmation mile tab reassess; setup invalidate ho to cancel."
+            suggested_option = "CALL WATCH" if candidate == "CE" else "PUT WATCH"
+            candidate_state = "WAITING_CONFIRMATION"
+        else:
+            entry_window = "No valid directional trigger. Structure clear hone tak NO TRADE."
+            suggested_option = "NO TRADE"
+            candidate_state = "NO_VALID_SETUP"
+
+        bull_patterns = patterns.get("bullish") or []
+        bear_patterns = patterns.get("bearish") or []
+        neutral_patterns = patterns.get("neutral") or []
+        active_patterns = list(dict.fromkeys(bull_patterns[:3] + bear_patterns[:3] + neutral_patterns[:2]))[:6]
+        confluence = "HIGH" if t5 == t15 and t5 in {"UP", "DOWN"} else "MEDIUM" if t1 in {"UP", "DOWN"} and t1 == t5 else "LOW"
+        return {
+            "instrument": signal.get("index") or "UNKNOWN",
+            "updatedAt": datetime.now(IST).isoformat(),
+            "bias": bias,
+            "regime": regime,
+            "volatility": volatility,
+            "atrPct": context.get("atrPct"),
+            "tradeSuitability": suitability,
+            "confluence": confluence,
+            "timeframes": {"1m": t1, "5m": t5, "15m": t15},
+            "structure": structure,
+            "patterns": {"bullish": bull_patterns[:4], "bearish": bear_patterns[:4], "neutral": neutral_patterns[:3], "active": active_patterns},
+            "smc": mtf.get("smc") or {},
+            "marketNarrative": narrative,
+            "candidateAction": action if action in {"CE", "PE"} else candidate,
+            "candidateState": candidate_state,
+            "suggestedOption": suggested_option,
+            "timing": {
+                "entryWindow": entry_window,
+                "historicalHold": {"status": "COLLECTING_HISTORY", "sampleCount": 0, "minimumSamples": 10, "medianMinutes": None, "label": "Collecting closed paper-trade history"},
+            },
+            "dataFreshness": freshness,
+            "lastCandleTime": signal.get("candleTime"),
+            "evidence": {
+                "rsi": signal.get("rsi") or context.get("rsi"),
+                "emaFast": signal.get("emaFast") or context.get("emaFast"),
+                "emaSlow": signal.get("emaSlow") or context.get("emaSlow"),
+                "smc": mtf.get("smc") or {},
+                "patternNames": active_patterns,
+            },
+        }
+
+    def _historical_hold_estimate(self) -> dict:
+        """Publish holding-time estimates only after enough closed SENSEX scalp outcomes."""
+        durations: list[float] = []
+        with SessionLocal() as db:
+            for trade in self._closed_rows(db):
+                meta = self._meta(trade)
+                if str(meta.get("index") or "").upper() != "SENSEX":
+                    continue
+                strategy = str(meta.get("strategy") or meta.get("learningArm") or "").upper()
+                if "APEX_EMA9_21_PULLBACK_SCALP" not in strategy:
+                    continue
+                opened, closed = self._as_ist(trade.opened_at), self._as_ist(trade.closed_at)
+                if opened and closed and closed > opened:
+                    minutes = (closed - opened).total_seconds() / 60.0
+                    if 0 < minutes <= 240:
+                        durations.append(minutes)
+        count = len(durations)
+        if count < 10:
+            return {"status": "COLLECTING_HISTORY", "sampleCount": count, "minimumSamples": 10,
+                    "medianMinutes": None, "label": f"Reliable estimate ke liye 10 closed SENSEX scalp trades chahiye ({count}/10)"}
+        ordered = sorted(durations)
+        middle = count // 2
+        median_minutes = ordered[middle] if count % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+        return {"status": "HISTORICAL_MEDIAN", "sampleCount": count, "minimumSamples": 10,
+                "medianMinutes": round(median_minutes, 1),
+                "label": f"Historical median hold: {median_minutes:.1f} min ({count} closed paper trades)"}
+
+    def _attach_trade_finder_intelligence(self, decision: dict, ranked: list[dict]) -> None:
+        sensex = next((row for row in ranked if str(row.get("index") or "").upper() == "SENSEX"), None)
+        if not sensex:
+            decision["marketIntelligence"] = {
+                "bias": "UNKNOWN", "regime": "DATA_UNAVAILABLE", "volatility": "UNKNOWN",
+                "tradeSuitability": "AVOID",
+                "marketNarrative": "SENSEX market context is not available in this scan. New entries remain subject to existing data and risk checks.",
+                "timing": {"entryWindow": "Wait for fresh, valid market data.", "historicalHold": self._historical_hold_estimate()},
+                "timeframes": {},
+            }
+            return
+        intelligence = dict(sensex.get("marketIntelligence") or {})
+        timing = dict(intelligence.get("timing") or {})
+        timing["historicalHold"] = self._historical_hold_estimate()
+        intelligence["timing"] = timing
+        decision["marketIntelligence"] = intelligence
+
     def _scan_one(self, provider, name: str, key: str, capital: float) -> dict:
         candles = provider.intraday_candles(key)
         freshness = self._candle_freshness(candles)
@@ -741,9 +903,24 @@ class TradingEngine:
             "neural": {"status": "research_only", "probability": None},
             "neuralBlendWeight": 0.0,
         })
+        normalized_candles = [
+            {**row, "timestamp": row.get("timestamp") or row.get("time") or row.get("date")}
+            for row in candles
+        ]
+        try:
+            mtf_analysis = evaluate_mtf_continuation(normalized_candles)
+        except Exception as exc:
+            mtf_analysis = {"qualified": False, "reason": f"MTF analysis unavailable: {str(exc)[:120]}", "frames": {}}
+        try:
+            live_context = market_context(normalized_candles)
+        except Exception:
+            live_context = {"trend": "UNKNOWN", "volatility": "UNKNOWN", "atrPct": None}
         latest_candle_time = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date") if candles else None
         signal["candleTime"] = latest_candle_time
         signal["dataFreshness"] = freshness
+        signal["mtfAnalysis"] = mtf_analysis
+        signal["marketContext"] = live_context
+        signal["marketIntelligence"] = self._build_market_intelligence(signal)
         return signal
 
     def _scan_and_observe(self, provider, capital: float) -> tuple[list[dict], list[dict]]:
@@ -1261,6 +1438,7 @@ class TradingEngine:
                 ranked, live_observations = self._scan_and_observe(provider, observation_capital)
                 decision["liveObservations"] = live_observations
                 decision["signals"] = ranked
+                self._attach_trade_finder_intelligence(decision, ranked)
 
             risk = self.risk_snapshot()
             if risk["monthlyTargetLocked"]:
@@ -1303,6 +1481,7 @@ class TradingEngine:
                 ranked, live_observations = self._scan_and_observe(provider, capital)
                 decision["liveObservations"] = live_observations
                 decision["signals"] = ranked
+                self._attach_trade_finder_intelligence(decision, ranked)
             # Automated entries are SENSEX scalp only. No forced trade.
             ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
             decision["executionStrategy"] = "APEX_EMA9_21_PULLBACK_SCALP"
