@@ -332,7 +332,6 @@ export default function App() {
   const [chartData, setChartData] = useState<any>(null)
   const [chartError, setChartError] = useState('')
   const [chartLoading, setChartLoading] = useState(true)
-  const [tokenModalDismissed, setTokenModalDismissed] = useState(false)
   const [tokenCheckBusy, setTokenCheckBusy] = useState(false)
   const previousOpenTradeIdsRef = useRef<Set<number> | null>(null)
   useEffect(() => {
@@ -692,10 +691,8 @@ export default function App() {
   const targetProgress = targetAmount > 0 ? Math.max(0, Math.min(100, monthPnl / targetAmount * 100)) : 0
   const tokenNeedsAttention = String(market.provider || '').toLowerCase() === 'upstox' && (
     market.tokenActionRequired === true ||
-    ['MISSING', 'INVALID', 'ACCESS_DENIED'].includes(String(market.tokenStatus || '').toUpperCase()) ||
-    market.marketDataConfigured === false
+    ['MISSING', 'INVALID', 'ACCESS_DENIED'].includes(String(market.tokenStatus || '').toUpperCase())
   )
-  const showTokenModal = tokenNeedsAttention && !tokenModalDismissed
 
   async function verifyMarketToken() {
     if (tokenCheckBusy) return
@@ -706,14 +703,12 @@ export default function App() {
       const freshMarket = fresh?.market || {}
       const stillNeedsToken = String(freshMarket.provider || '').toLowerCase() === 'upstox' && (
         freshMarket.tokenActionRequired === true ||
-        ['MISSING', 'INVALID', 'ACCESS_DENIED'].includes(String(freshMarket.tokenStatus || '').toUpperCase()) ||
-        freshMarket.marketDataConfigured === false
+        ['MISSING', 'INVALID', 'ACCESS_DENIED'].includes(String(freshMarket.tokenStatus || '').toUpperCase())
       )
       if (!stillNeedsToken) {
-        setTokenModalDismissed(true)
-        setNotice({kind:'ok', text:'Upstox market-data token verified. APEX will resume scans when fresh candles arrive.'})
+        setNotice({kind:'ok', text:'Upstox Analytics Token verified. APEX will resume scans when fresh candles arrive.'})
       } else {
-        setNotice({kind:'error', text:freshMarket.tokenMessage || 'Token is still not ready. Check the backend environment variable and redeploy.'})
+        setNotice({kind:'error', text:freshMarket.tokenMessage || 'Analytics Token is still not ready. Check UPSTOX_ANALYTICS_TOKEN on Render.'})
       }
     } catch (e: any) {
       setNotice({kind:'error', text:e?.message || 'Could not verify the market-data token.'})
@@ -909,28 +904,17 @@ export default function App() {
       <strong>{freshnessState}</strong>
     </section>}
 
-    {showTokenModal && <div className="token-modal-backdrop" role="presentation">
-      <section className="token-modal" role="dialog" aria-modal="true" aria-labelledby="token-modal-title">
-        <div className="token-modal-icon">!</div>
-        <small>APEX MARKET DATA CONNECTION</small>
-        <h2 id="token-modal-title">Please update your Upstox token</h2>
-        <p>{market.tokenMessage || 'APEX cannot verify the Upstox Analytics Token. New entries are paused until market data is restored.'}</p>
-        <div className="token-modal-steps">
-          <b>What to do</b>
-          <ol>
-            <li>Open Upstox Developer Apps and generate an <strong>Analytics Token</strong> (not the daily OAuth token).</li>
-            <li>In Render → APEX Backend → Environment, update <code>UPSTOX_ANALYTICS_TOKEN</code>.</li>
-            <li>Save and redeploy the backend, then return here and verify.</li>
-          </ol>
-        </div>
-        <p className="token-modal-note">This is a market-data issue, not a missing trading setup. APEX will not open trades using stale or unavailable data. Keep the token private; never paste it into chat.</p>
+    {tokenNeedsAttention && <section className="freshness-banner stale" role="status">
+      <div className="freshness-icon">!</div>
+      <div>
+        <b>Upstox Analytics Token needs attention</b>
+        <span>{market.tokenMessage || 'The read-only Analytics Token is missing or rejected. Daily OAuth tokens are not used for this feed. New entries remain blocked until market data is restored.'}</span>
         <div className="token-modal-actions">
-          <a className="action-btn primary" href="https://account.upstox.com/developer/apps" target="_blank" rel="noreferrer">Open Upstox Developer Apps ↗</a>
-          <button type="button" className="action-btn primary" onClick={() => void verifyMarketToken()} disabled={tokenCheckBusy}>{tokenCheckBusy ? 'Checking…' : "I've updated it — verify"}</button>
-          <button type="button" className="action-btn" onClick={() => setTokenModalDismissed(true)}>Remind me later</button>
+          <a className="action-btn" href="https://account.upstox.com/developer/apps" target="_blank" rel="noreferrer">Open Upstox Developer Apps ↗</a>
+          <button type="button" className="action-btn primary" onClick={() => void verifyMarketToken()} disabled={tokenCheckBusy}>{tokenCheckBusy ? 'Checking…' : 'Verify Analytics Token'}</button>
         </div>
-      </section>
-    </div>}
+      </div>
+    </section>}
 
     <MarketChart
       data={chartData}
