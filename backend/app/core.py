@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     cors_origins_raw: str = "http://localhost:5173"
 
-    trading_mode: str = "OFF"
+    trading_mode: str = "PAPER"
     auto_trading_enabled: bool = True
     auto_scan_interval_seconds: int = 30
     position_monitor_interval_seconds: float = 2.0
