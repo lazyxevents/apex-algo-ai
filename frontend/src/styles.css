@@ -1558,3 +1558,7 @@ html[data-theme="light"] .scanner-ai-summary span{background:#fff;border-color:#
 html[data-theme="light"] .scanner-ai-summary b{color:#254257}
 html[data-theme="light"] .scanner-ai-review ul{color:#405f73}
 html[data-theme="light"] .scanner-ai-warnings span{background:#fff8eb;color:#87612d}
+
+/* APEX monitor-only dashboard: remove manual trade and position-edit controls. */
+.do-trade-card{display:none!important}
+.trade-actions{display:none!important}
