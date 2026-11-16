@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import time
+import threading
 from typing import Any
 
 import httpx
@@ -10,6 +12,10 @@ from .core import settings
 
 
 class OllamaAdvisor:
+    _rate_lock = threading.Lock()
+    _rate_limited_until = 0.0
+    _last_429_message = 'OpenRouter rate limit active; retrying automatically after cooldown.'
+
     """Unified advisory layer: prefer Ollama when configured, otherwise OpenRouter free router."""
 
     @property
@@ -125,52 +131,34 @@ class OllamaAdvisor:
 
     def analyze_trade(self, snapshot: dict[str, Any]) -> dict[str, Any]:
         if not self.configured:
-            return {
-                "enabled": False,
-                "status": "not_configured",
-                "provider": "none",
-                "bias": "NEUTRAL",
-                "confidence": 0.0,
-                "risk": "UNKNOWN",
-                "approveTechnicalSetup": True,
-                "reasons": [],
-                "warnings": [],
-            }
+            return {"enabled": False, "status": "not_configured", "provider": "none", "bias": "NEUTRAL", "confidence": 0.0, "risk": "UNKNOWN", "approveTechnicalSetup": True, "reasons": [], "warnings": [], "authority": "ADVISORY_ONLY"}
+        if self.provider == "openrouter" and time.monotonic() < self._rate_limited_until:
+            return {"enabled": True, "status": "rate_limited", "provider": self.provider, "model": self.model, "bias": "NEUTRAL", "confidence": 0.0, "risk": "UNKNOWN", "approveTechnicalSetup": True, "reasons": [], "warnings": [self._last_429_message], "authority": "ADVISORY_ONLY"}
         try:
-            parsed = (
-                self._analyze_ollama(snapshot)
-                if self.provider == "ollama"
-                else self._analyze_openrouter(snapshot)
-            )
-            parsed["enabled"] = True
-            parsed["status"] = "ok"
-            parsed["provider"] = self.provider
-            parsed["model"] = self.model
+            parsed = self._analyze_ollama(snapshot) if self.provider == "ollama" else self._analyze_openrouter(snapshot)
+            parsed.update({"enabled": True, "status": "ok", "provider": self.provider, "model": self.model, "authority": "ADVISORY_ONLY"})
             return parsed
         except Exception as exc:
             detail = str(exc)[:180]
             status = "error"
-            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401:
-                status = "auth_error"
-                detail = (
-                    "OpenRouter rejected OPENROUTER_API_KEY (HTTP 401). "
-                    "Update the key in Render Environment; technical rules remain independent."
-                )
-            elif isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 402:
-                status = "billing_error"
-                detail = "OpenRouter returned HTTP 402: check account credits or provider billing."
-            return {
-                "enabled": True,
-                "status": status,
-                "provider": self.provider,
-                "model": self.model,
-                "bias": "NEUTRAL",
-                "confidence": 0.0,
-                "risk": "UNKNOWN",
-                "approveTechnicalSetup": True,
-                "reasons": [],
-                "warnings": [detail],
-            }
+            if isinstance(exc, httpx.HTTPStatusError):
+                code = exc.response.status_code
+                if code == 401:
+                    status, detail = "auth_error", "OpenRouter rejected OPENROUTER_API_KEY (HTTP 401). Update the key in Render Environment."
+                elif code == 402:
+                    status, detail = "billing_error", "OpenRouter returned HTTP 402: check account credits or provider billing."
+                elif code == 429:
+                    status = "rate_limited"
+                    retry_after = exc.response.headers.get("Retry-After", "")
+                    try:
+                        cooldown = min(600.0, max(60.0, float(retry_after)))
+                    except (TypeError, ValueError):
+                        cooldown = 120.0
+                    detail = "OpenRouter rate limit (429). APEX pauses LLM calls for " + str(int(cooldown)) + "s; technical scanning and deterministic risk checks continue."
+                    with self._rate_lock:
+                        self._rate_limited_until = time.monotonic() + cooldown
+                        self._last_429_message = detail
+            return {"enabled": True, "status": status, "provider": self.provider, "model": self.model, "bias": "NEUTRAL", "confidence": 0.0, "risk": "UNKNOWN", "approveTechnicalSetup": True, "reasons": [], "warnings": [detail], "authority": "ADVISORY_ONLY"}
 
     def web_research(self, queries: list[str]) -> dict[str, Any]:
         if not (settings.ollama_web_search_enabled and settings.ollama_api_key):
