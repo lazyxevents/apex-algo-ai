@@ -1685,57 +1685,15 @@ export default function App() {
 
         <div className="actions">
           <ActionButton
-            label="PAPER"
-            tone="primary"
-            disabled={Boolean(busy || killed || status.mode === 'PAPER')}
-            tip={killed ? 'Reset kill switch first.' : status.mode === 'PAPER' ? 'PAPER mode is already active.' : 'Enable automated paper trading.'}
-            onClick={() => runAction('paper', 'PAPER mode enabled.', () => fetchJson('/api/system/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:'PAPER'})}))}
-          />
-          <ActionButton
-            label="SAFE"
-            disabled={Boolean(busy || killed || status.mode === 'SAFE')}
-            tip={killed ? 'Reset kill switch first.' : status.mode === 'SAFE' ? 'SAFE mode is already active.' : 'Stop new entries while keeping the system available.'}
-            onClick={() => runAction('safe', 'SAFE mode enabled.', () => fetchJson('/api/system/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:'SAFE'})}))}
-          />
-          <ActionButton
-            label="OFF"
-            disabled={Boolean(busy || status.mode === 'OFF')}
-            tip={status.mode === 'OFF' ? 'System is already OFF.' : 'Turn strategy entries off.'}
-            onClick={() => runAction('off', 'Automation mode switched OFF.', () => fetchJson('/api/system/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:'OFF'})}))}
-          />
-          <ActionButton
-            label="Run Scan Now"
-            disabled={scanDisabled}
-            tip={killed ? 'Kill switch is active.' : status.mode !== 'PAPER' ? 'Switch to PAPER first.' : !providerReady ? 'Market provider is not ready.' : 'Run one strategy scan immediately.'}
-            onClick={() => runAction('scan', 'Manual scan completed.', () => fetchJson('/api/automation/run-once', {method:'POST'}))}
-          />
-          <ActionButton
-            label="Run Research"
-            disabled={Boolean(busy || !providerReady)}
-            tip={!providerReady ? 'Market provider is not ready.' : 'Run the daily research routine now.'}
-            onClick={() => runAction('research', 'Research run completed.', () => fetchJson('/api/research/run-once', {method:'POST'}))}
-          />
-          <ActionButton
-            label="Flatten"
-            disabled={flattenDisabled}
-            tip={openTrades.length === 0 ? 'There is no open position to close.' : 'Close all open paper positions immediately.'}
-            onClick={() => runAction('flatten', 'Open paper positions flattened.', () => fetchJson('/api/risk/flatten', {method:'POST'}))}
-          />
-          <ActionButton
             label="KILL + FLATTEN"
             tone="danger"
             disabled={killDisabled}
             tip={killed ? 'Kill switch is already active.' : 'Emergency stop: kill automation and close open paper positions.'}
             onClick={() => runAction('kill', 'Kill switch activated and positions flattened.', () => fetchJson('/api/risk/kill-switch', {method:'POST'}))}
           />
-          <ActionButton
-            label="Reset Kill → OFF"
-            disabled={resetDisabled}
-            tip={!killed ? 'Available only when the kill switch is active.' : 'Reset emergency kill switch. System returns to OFF.'}
-            onClick={() => runAction('reset', 'Kill switch reset. Mode is OFF.', () => fetchJson('/api/risk/reset-kill-switch', {method:'POST'}))}
-          />
         </div>
-        <p className="panel-note">Disabled controls are intentionally faded. Hover any control for its reason/action. Entry window: <b>{automation.tradeWindow}</b> • forced exit: <b>{automation.forceExit}</b> • research: <b>{automation.researchTime}</b>.</p>
+        <p className="panel-note">APEX runs its scheduled scan, research, entry and exit workflow automatically. This dashboard is monitor-only; emergency kill remains available. Entry window: <b>{automation.tradeWindow}</b> • forced exit: <b>{automation.forceExit}</b>.</p>
+ Hover any control for its reason/action. Entry window: <b>{automation.tradeWindow}</b> • forced exit: <b>{automation.forceExit}</b> • research: <b>{automation.researchTime}</b>.</p>
       </section>
 
       <section className="panel">
