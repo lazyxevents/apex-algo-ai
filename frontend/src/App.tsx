@@ -497,6 +497,7 @@ export default function App() {
   const [chartLoading, setChartLoading] = useState(true)
   const [chartErrorDialogOpen, setChartErrorDialogOpen] = useState(false)
   const [marketClosedOpen, setMarketClosedOpen] = useState(false)
+  const [tradeFlash, setTradeFlash] = useState<Trade | null>(null)
   const chartRetryAfterRef = useRef(0)
   const chartRateLimitCountRef = useRef(0)
   const chartRequestInFlightRef = useRef(false)
@@ -586,7 +587,7 @@ export default function App() {
 
   useEffect(() => {
     void loadAll()
-    const tradePoll = window.setInterval(() => void loadTrades(true), 1000)
+    const tradePoll = window.setInterval(() => void loadTrades(true), 5000)
     const statusPoll = window.setInterval(() => void loadStatus(true), 3000)
     const chartPoll = window.setInterval(() => { const d = new Date(); const open = d.getDay() >= 1 && d.getDay() <= 5 && ((d.getHours() > 9 || (d.getHours() === 9 && d.getMinutes() >= 20)) && (d.getHours() < 15 || (d.getHours() === 15 && d.getMinutes() < 30))); if (open) void loadChart(true) }, 30000)
     const clockPoll = window.setInterval(() => setClock(new Date()), 1000)
@@ -808,8 +809,20 @@ export default function App() {
     const previousIds = previousOpenTradeIdsRef.current
     if (previousIds) {
       const newlyOpened = openTrades.filter(t => !previousIds.has(t.id))
-      if (newlyOpened.length > 0 && pushSubscribed && pushPermission === 'granted') {
-        void playApexTradeChime(false)
+      if (newlyOpened.length > 0) {
+        const executed = newlyOpened[newlyOpened.length - 1]
+        setTradeFlash(executed)
+        if (pushSubscribed && pushPermission === 'granted') void playApexTradeChime(false)
+        if ('Notification' in window && Notification.permission === 'granted') {
+          try {
+            new Notification(`APEX TRADE EXECUTED • ${executed.direction}`, {
+              body: `${instrumentName(executed.symbol)} · Qty ${executed.quantity} · Entry ${money(executed.entry)}`,
+              tag: `apex-trade-ui-${executed.id}`,
+              icon: '/favicon.ico',
+            })
+          } catch { /* in-app confirmation remains available */ }
+        }
+        window.setTimeout(() => setTradeFlash(current => current?.id === executed.id ? null : current), 6500)
       }
     }
     previousOpenTradeIdsRef.current = currentIds
@@ -938,6 +951,17 @@ export default function App() {
   const resetDisabled = Boolean(busy || !killed)
 
   return <main className="shell apex-reference-shell">
+    {tradeFlash && <div role="status" aria-live="assertive" style={{position:'fixed',top:18,left:'50%',transform:'translateX(-50%)',zIndex:9999,width:'min(520px, calc(100vw - 28px))',padding:'16px 18px',border:'1px solid rgba(43,240,174,.8)',borderRadius:14,background:'linear-gradient(120deg, rgba(5,45,43,.98), rgba(9,24,43,.98))',boxShadow:'0 12px 48px rgba(0,0,0,.48)'}}>
+      <div style={{display:'flex',alignItems:'center',gap:12}}>
+        <span style={{fontSize:26,lineHeight:1}}>✓</span>
+        <div style={{minWidth:0,flex:1}}>
+          <strong style={{display:'block',fontSize:14,letterSpacing:'.12em',color:'#45f0b5'}}>TRADE EXECUTED</strong>
+          <b style={{display:'block',marginTop:4,color:'#fff'}}>{instrumentName(tradeFlash.symbol)} · {tradeFlash.direction}</b>
+          <small style={{display:'block',marginTop:3,color:'#c3d8dc'}}>Qty {tradeFlash.quantity} · Entry {money(tradeFlash.entry)} · SL {money(tradeFlash.stop)} · Target {money(tradeFlash.target)}</small>
+        </div>
+        <button type="button" aria-label="Dismiss trade alert" onClick={()=>setTradeFlash(null)} style={{background:'transparent',border:0,color:'#d7eeee',fontSize:20,cursor:'pointer'}}>×</button>
+      </div>
+    </div>}
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">A</span>
