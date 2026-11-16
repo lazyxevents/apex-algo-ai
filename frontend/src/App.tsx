@@ -1693,7 +1693,7 @@ export default function App() {
           />
         </div>
         <p className="panel-note">APEX runs its scheduled scan, research, entry and exit workflow automatically. This dashboard is monitor-only; emergency kill remains available. Entry window: <b>{automation.tradeWindow}</b> • forced exit: <b>{automation.forceExit}</b>.</p>
- Hover any control for its reason/action. Entry window: <b>{automation.tradeWindow}</b> • forced exit: <b>{automation.forceExit}</b> • research: <b>{automation.researchTime}</b>.</p>
+
       </section>
 
       <section className="panel">
