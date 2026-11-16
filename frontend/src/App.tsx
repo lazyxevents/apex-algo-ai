@@ -496,6 +496,7 @@ export default function App() {
   const [chartError, setChartError] = useState('')
   const [chartLoading, setChartLoading] = useState(true)
   const [chartErrorDialogOpen, setChartErrorDialogOpen] = useState(false)
+  const [marketClosedOpen, setMarketClosedOpen] = useState(false)
   const chartRetryAfterRef = useRef(0)
   const chartRateLimitCountRef = useRef(0)
   const chartRequestInFlightRef = useRef(false)
@@ -506,6 +507,24 @@ export default function App() {
     try { window.localStorage.setItem('apex-theme', theme) } catch { /* private mode */ }
   }, [theme])
   const toggleTheme = () => setTheme(current => current === 'dark' ? 'light' : 'dark')
+
+  useEffect(() => {
+    const checkSession = () => {
+      const now = new Date()
+      const weekday = now.getDay() >= 1 && now.getDay() <= 5
+      const afterClose = now.getHours() > 15 || (now.getHours() === 15 && now.getMinutes() >= 30)
+      const beforeOpen = now.getHours() < 9 || (now.getHours() === 9 && now.getMinutes() < 20)
+      const closed = !weekday || afterClose || beforeOpen
+      const key = `apex-market-closed-dismissed-${now.toLocaleDateString('en-CA')}`
+      let dismissed = false
+      try { dismissed = window.sessionStorage.getItem(key) === '1' } catch { /* storage unavailable */ }
+      if (closed && afterClose && !dismissed) setMarketClosedOpen(true)
+      if (!closed) setMarketClosedOpen(false)
+    }
+    checkSession()
+    const timer = window.setInterval(checkSession, 15000)
+    return () => window.clearInterval(timer)
+  }, [])
 
 
   const loadStatus = useCallback(async (silent = false) => {
@@ -569,7 +588,7 @@ export default function App() {
     void loadAll()
     const tradePoll = window.setInterval(() => void loadTrades(true), 1000)
     const statusPoll = window.setInterval(() => void loadStatus(true), 3000)
-    const chartPoll = window.setInterval(() => void loadChart(true), 30000)
+    const chartPoll = window.setInterval(() => { const d = new Date(); const open = d.getDay() >= 1 && d.getDay() <= 5 && ((d.getHours() > 9 || (d.getHours() === 9 && d.getMinutes() >= 20)) && (d.getHours() < 15 || (d.getHours() === 15 && d.getMinutes() < 30))); if (open) void loadChart(true) }, 30000)
     const clockPoll = window.setInterval(() => setClock(new Date()), 1000)
     return () => {
       window.clearInterval(tradePoll)
@@ -1758,6 +1777,26 @@ export default function App() {
         <pre>{JSON.stringify({qValues: learning.qValues, researchArms: learning.latestResearch?.arms}, null, 2)}</pre>
       </details>
     </section>
+
+
+    {marketClosedOpen && <div className="token-modal-backdrop" role="presentation">
+      <section className="token-modal" role="dialog" aria-modal="true" aria-labelledby="market-closed-title">
+        <div className="token-modal-icon">◷</div>
+        <small>APEX • DAILY MARKET CYCLE</small>
+        <h2 id="market-closed-title">Market Closed</h2>
+        <p>Live scanning is paused for today. APEX is switching to Planning & Learning Mode to review today's evidence and prepare tomorrow's scenarios.</p>
+        <div className="token-modal-steps"><b>Post-market research queue</b><ol>
+          <li>Today's price action, trend and market structure</li>
+          <li>SMC: BOS, CHOCH, liquidity sweeps and FVG</li>
+          <li>Gap behaviour, India VIX and index futures context</li>
+          <li>Global markets, verified news and event risks</li>
+          <li>Tomorrow's bullish, bearish and range scenarios</li>
+          <li>Compare prior predictions with actual outcomes</li>
+        </ol></div>
+        <p className="token-modal-note">Research outputs are hypotheses until validated against market data. No live-money orders are enabled by this mode.</p>
+        <div className="token-modal-actions"><button type="button" className="action-btn primary" onClick={() => { const d = new Date(); const key = `apex-market-closed-dismissed-${d.toLocaleDateString('en-CA')}`; try { window.sessionStorage.setItem(key, '1') } catch { /* storage unavailable */ } setMarketClosedOpen(false) }}>Start planning mode</button></div>
+      </section>
+    </div>}
 
     {chartErrorDialogOpen && chartError && <div className="token-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setChartErrorDialogOpen(false) }}>
       <section className="token-modal api-error-modal" role="alertdialog" aria-modal="true" aria-labelledby="api-error-title">
