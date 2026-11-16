@@ -148,9 +148,20 @@ class OllamaAdvisor:
             parsed["model"] = self.model
             return parsed
         except Exception as exc:
+            detail = str(exc)[:180]
+            status = "error"
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 401:
+                status = "auth_error"
+                detail = (
+                    "OpenRouter rejected OPENROUTER_API_KEY (HTTP 401). "
+                    "Update the key in Render Environment; technical rules remain independent."
+                )
+            elif isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 402:
+                status = "billing_error"
+                detail = "OpenRouter returned HTTP 402: check account credits or provider billing."
             return {
                 "enabled": True,
-                "status": "error",
+                "status": status,
                 "provider": self.provider,
                 "model": self.model,
                 "bias": "NEUTRAL",
@@ -158,7 +169,7 @@ class OllamaAdvisor:
                 "risk": "UNKNOWN",
                 "approveTechnicalSetup": True,
                 "reasons": [],
-                "warnings": [str(exc)[:180]],
+                "warnings": [detail],
             }
 
     def web_research(self, queries: list[str]) -> dict[str, Any]:
