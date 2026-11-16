@@ -75,12 +75,20 @@ class PatternReferenceService:
             # Up to 2,000 real examples. Exclude latest three unresolved candles.
             rows = parsed[-2004:]
             with SessionLocal() as db:
-                existing = set(db.scalars(select(CandlePatternReference.candle_time).where(
+                # Select model rows explicitly and extract the datetime column.
+                # Some SQLAlchemy result paths/adapters can yield model instances;
+                # calling tzinfo on the model itself caused the reported sync crash.
+                existing_records = db.scalars(select(CandlePatternReference).where(
                     CandlePatternReference.instrument == instrument,
                     CandlePatternReference.timeframe == "1m",
                     CandlePatternReference.candle_time >= rows[0][0],
-                )).all())
-                existing = {x.replace(tzinfo=timezone.utc) if x.tzinfo is None else x.astimezone(timezone.utc) for x in existing}
+                )).all()
+                existing = set()
+                for record in existing_records:
+                    value = record.candle_time if isinstance(record, CandlePatternReference) else record
+                    if isinstance(value, datetime):
+                        normalized = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+                        existing.add(normalized)
                 added = 0
                 for i in range(1, len(rows)-3):
                     stamp, bar = rows[i]
