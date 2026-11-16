@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     auto_scan_interval_seconds: int = 30
     position_monitor_interval_seconds: float = 2.0
     timezone: str = "Asia/Kolkata"
-    market_open_time: str = "09:15"
+    market_open_time: str = "09:20"
     market_close_time: str = "15:30"
     trade_start_time: str = "09:20"
     stop_new_trade_time: str = "15:15"
