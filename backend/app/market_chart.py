@@ -1,10 +1,56 @@
 from datetime import datetime, timedelta
+from threading import Lock
 from zoneinfo import ZoneInfo
 
 from .core import settings
 from .strategy import analyze_structure
 
 IST = ZoneInfo(settings.timezone)
+
+# Shared process cache: prevents concurrent dashboard tabs and timeframe views
+# from independently requesting identical candles from the broker.
+_CHART_CACHE: dict[tuple[str, int], tuple[datetime, dict]] = {}
+_CHART_LOCK = Lock()
+_CHART_TTL_SECONDS = {1: 12, 5: 25, 15: 45}
+_CHART_COOLDOWN_UNTIL: datetime | None = None
+_CHART_LAST_ERROR: str | None = None
+
+
+def _cached_chart(provider, timeframe: int, limit: int, trades: list[dict] | None) -> dict:
+    global _CHART_COOLDOWN_UNTIL, _CHART_LAST_ERROR
+    key = (str(settings.market_data_provider).lower(), timeframe)
+    now = datetime.now(IST)
+    with _CHART_LOCK:
+        cached = _CHART_CACHE.get(key)
+        if cached and (now - cached[0]).total_seconds() < _CHART_TTL_SECONDS[timeframe]:
+            result = dict(cached[1])
+            result["cache"] = {"hit": True, "ageSeconds": round((now - cached[0]).total_seconds(), 1)}
+            return result
+        if _CHART_COOLDOWN_UNTIL and now < _CHART_COOLDOWN_UNTIL:
+            if cached:
+                result = dict(cached[1])
+                result["cache"] = {"hit": True, "stale": True, "cooldownUntil": _CHART_COOLDOWN_UNTIL.isoformat(), "lastError": _CHART_LAST_ERROR}
+                return result
+            raise RuntimeError(f"Market data provider is in rate-limit cooldown until {_CHART_COOLDOWN_UNTIL.isoformat()}")
+        # Serialize fetches so simultaneous requests cannot create a request burst.
+        try:
+            result = _build_market_chart_uncached(provider, timeframe, limit, trades)
+            _CHART_CACHE[key] = (now, result)
+            _CHART_COOLDOWN_UNTIL = None
+            _CHART_LAST_ERROR = None
+            result["cache"] = {"hit": False, "ttlSeconds": _CHART_TTL_SECONDS[timeframe]}
+            return result
+        except Exception as exc:
+            message = str(exc)
+            _CHART_LAST_ERROR = message[:500]
+            if "429" in message or "rate limit" in message.lower() or "too many requests" in message.lower():
+                _CHART_COOLDOWN_UNTIL = now + timedelta(seconds=90)
+            if cached:
+                result = dict(cached[1])
+                result["cache"] = {"hit": True, "stale": True, "lastError": _CHART_LAST_ERROR,
+                                   "cooldownUntil": _CHART_COOLDOWN_UNTIL.isoformat() if _CHART_COOLDOWN_UNTIL else None}
+                return result
+            raise
 
 
 def _ema(values: list[float], period: int) -> list[float]:
@@ -52,7 +98,7 @@ def _freshness(candles: list[dict]) -> dict:
     }
 
 
-def build_market_chart(provider, timeframe: int = 1, limit: int = 160, trades: list[dict] | None = None) -> dict:
+def _build_market_chart_uncached(provider, timeframe: int = 1, limit: int = 160, trades: list[dict] | None = None) -> dict:
     underlying_key = settings.underlying_keys.get("SENSEX")
     if not underlying_key:
         raise RuntimeError("SENSEX is not enabled")
@@ -165,3 +211,9 @@ def build_market_chart(provider, timeframe: int = 1, limit: int = 160, trades: l
         "candles": chart_rows,
         "generatedAt": datetime.now(IST).isoformat(),
     }
+
+
+def build_market_chart(provider, timeframe: int = 1, limit: int = 160, trades: list[dict] | None = None) -> dict:
+    if timeframe not in _CHART_TTL_SECONDS:
+        raise ValueError("Supported chart timeframes are 1, 5 and 15 minutes")
+    return _cached_chart(provider, timeframe, limit, trades)
