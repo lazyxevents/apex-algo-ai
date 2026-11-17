@@ -174,3 +174,94 @@ def test_ema9_21_bullish_pullback_confirmation():
     assert result["strategy"] == "APEX_EMA9_21_PULLBACK_SCALP"
     assert result["confirmations"]["bullPullback"] is True
     assert result["confirmations"]["bullCandle"] is True
+
+def test_option_selector_can_choose_cheaper_otm_when_gamma_risk_is_lower():
+    from app.strategy import select_option
+    from app.core import settings
+
+    previous_itm = settings.max_option_itm_steps
+    previous_otm = settings.max_otm_steps
+    try:
+        settings.max_option_itm_steps = 2
+        settings.max_otm_steps = 2
+
+        def row(strike, premium, delta, gamma, theta, volume=4000):
+            return {
+                "strike_price": strike,
+                "call_options": {
+                    "instrument_key": f"BSE_FNO|{int(strike)}|OPTIDX",
+                    "market_data": {
+                        "ltp": premium,
+                        "bid_price": premium - 0.5,
+                        "ask_price": premium + 0.5,
+                        "volume": volume,
+                        "oi": 10000,
+                    },
+                    "option_greeks": {
+                        "delta": delta,
+                        "gamma": gamma,
+                        "theta": theta,
+                        "vega": 0.1,
+                        "iv": 12,
+                    },
+                },
+            }
+
+        chain = [
+            row(71500, 140, 0.60, 0.0002, -1),
+            row(71600, 100, 0.42, 0.0450, -10),
+            row(71700, 70, 0.40, 0.0005, -0.5),
+        ]
+        selected = select_option(
+            chain,
+            "CE",
+            71600,
+            36000,
+            reference_strikes=[71500, 71600, 71700],
+            underlying_stop_distance=20,
+            expected_hold_minutes=6,
+        )
+        assert selected is not None
+        assert selected["strike"] == 71700
+        assert selected["moneyness"] == "OTM"
+        assert selected["ltp"] == 70
+        assert selected["gamma"] < 0.04
+        assert selected["structureRiskPct"] < 18
+    finally:
+        settings.max_option_itm_steps = previous_itm
+        settings.max_otm_steps = previous_otm
+
+
+def test_option_selector_can_consider_slightly_itm_contracts():
+    from app.strategy import select_option
+
+    row = {
+        "strike_price": 71500,
+        "call_options": {
+            "instrument_key": "BSE_FNO|71500|OPTIDX",
+            "market_data": {
+                "ltp": 140,
+                "bid_price": 139,
+                "ask_price": 141,
+                "volume": 3000,
+                "oi": 8000,
+            },
+            "option_greeks": {
+                "delta": 0.60,
+                "gamma": 0.0002,
+                "theta": -1,
+            },
+        },
+    }
+    selected = select_option(
+        [row],
+        "CE",
+        71600,
+        36000,
+        reference_strikes=[71400, 71500, 71600, 71700],
+        underlying_stop_distance=20,
+    )
+    assert selected is not None
+    assert selected["strike"] == 71500
+    assert selected["moneyness"] == "ITM"
+

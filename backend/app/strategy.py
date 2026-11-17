@@ -509,21 +509,57 @@ def evaluate_mtf_continuation(candles: list[dict]) -> dict:
     }
 
 
-def select_option(chain: list[dict], direction: str, spot: float, deployable_capital: float, reference_strikes: list[float] | None = None) -> dict | None:
-    candidates: list[dict] = []
-    relaxed_candidates: list[dict] = []
-    strikes = sorted({float(row.get("strike_price") or 0) for row in chain if float(row.get("strike_price") or 0) > 0})
+def select_option(
+    chain: list[dict],
+    direction: str,
+    spot: float,
+    deployable_capital: float,
+    reference_strikes: list[float] | None = None,
+    underlying_stop_distance: float = 0.0,
+    expected_hold_minutes: float | None = None,
+) -> dict | None:
+    """Choose the best risk-adjusted ITM/ATM/OTM contract for a long option scalp.
+
+    Premium alone is never a reason to choose a contract. The selector compares
+    delta exposure, gamma-adjusted loss to the underlying invalidation level,
+    expected theta burn, spread, liquidity and strike distance.
+    """
+    direction = str(direction or "").upper()
+    if direction not in {"CE", "PE"} or spot <= 0 or deployable_capital <= 0:
+        return None
+
+    strikes = sorted({
+        float(row.get("strike_price") or 0)
+        for row in chain
+        if float(row.get("strike_price") or 0) > 0
+    })
     if reference_strikes is not None:
         strikes = sorted({float(x) for x in reference_strikes if float(x) > 0})
     if not strikes:
         return None
-    atm_index = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot))
-    if direction == "CE":
-        allowed_strikes = set(strikes[atm_index: atm_index + settings.max_otm_steps + 1])
-    else:
-        start = max(0, atm_index - settings.max_otm_steps)
-        allowed_strikes = set(strikes[start: atm_index + 1])
 
+    atm_index = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot))
+    itm_steps = max(0, int(settings.max_option_itm_steps))
+    otm_steps = max(0, int(settings.max_otm_steps))
+    if direction == "CE":
+        start = max(0, atm_index - itm_steps)
+        end = min(len(strikes), atm_index + otm_steps + 1)
+    else:
+        start = max(0, atm_index - otm_steps)
+        end = min(len(strikes), atm_index + itm_steps + 1)
+    allowed_strikes = set(strikes[start:end])
+
+    hold_minutes = max(
+        1.0,
+        float(expected_hold_minutes if expected_hold_minutes is not None
+              else settings.option_expected_hold_minutes),
+    )
+    underlying_move = max(0.0, float(underlying_stop_distance or 0.0))
+    max_structure_risk = max(1.0, float(settings.max_option_structure_risk_pct))
+    max_theta_burn = max(0.1, float(settings.max_option_theta_burn_pct))
+
+    candidates: list[dict] = []
+    relaxed_candidates: list[dict] = []
     for row in chain:
         strike = float(row.get("strike_price") or 0)
         if strike not in allowed_strikes:
@@ -531,48 +567,146 @@ def select_option(chain: list[dict], direction: str, spot: float, deployable_cap
         side = row.get("call_options") if direction == "CE" else row.get("put_options")
         if not side:
             continue
-        market, greeks = side.get("market_data") or {}, side.get("option_greeks") or {}
+
+        market = side.get("market_data") or {}
+        greeks = side.get("option_greeks") or {}
         ltp = float(market.get("ltp") or 0)
-        bid, ask = float(market.get("bid_price") or 0), float(market.get("ask_price") or 0)
-        volume, delta = int(market.get("volume") or 0), abs(float(greeks.get("delta") or 0))
+        bid = float(market.get("bid_price") or 0)
+        ask = float(market.get("ask_price") or 0)
+        volume = int(market.get("volume") or 0)
+        oi = int(market.get("oi") or 0)
+        delta = abs(float(greeks.get("delta") or 0))
+        gamma = abs(float(greeks.get("gamma") or 0))
+        theta = abs(float(greeks.get("theta") or 0))
+        vega = float(greeks.get("vega") or 0)
+        iv = float(greeks.get("iv") or 0)
         instrument_key = side.get("instrument_key")
         if not instrument_key or ltp <= 0:
             continue
-        spread_pct = ((ask - bid) / ltp * 100) if ask > 0 and bid > 0 and ask >= bid else 999.0
-        strict = spread_pct <= settings.max_option_spread_pct and volume >= settings.min_option_volume
-        relaxed = spread_pct <= settings.paper_fallback_max_spread_pct and volume >= settings.paper_fallback_min_volume
+
+        # Reject contracts whose delta is too small to respond reliably or so
+        # high that the premium/lot cost defeats the intended scalp profile.
+        if delta < 0.20 or delta > 0.75:
+            continue
+
+        spread_pct = (
+            (ask - bid) / ltp * 100
+            if ask > 0 and bid > 0 and ask >= bid else 999.0
+        )
+        strict = (
+            spread_pct <= settings.max_option_spread_pct
+            and volume >= settings.min_option_volume
+        )
+        relaxed = (
+            spread_pct <= settings.paper_fallback_max_spread_pct
+            and volume >= settings.paper_fallback_min_volume
+        )
         if not relaxed:
             continue
-        distance_pct = abs(strike - spot) / max(spot, 1) * 100
-        affordable = deployable_capital / ltp
-        delta_score = max(0.0, 1 - abs(delta - settings.target_delta) / max(settings.target_delta, 0.01))
-        spread_score = max(0.0, 1 - spread_pct / max(settings.max_option_spread_pct, 0.01))
-        liquidity_score = min(1.0, volume / max(settings.min_option_volume * 5, 1))
-        distance_score = max(0.0, 1 - distance_pct / 2.0)
-        affordability_score = min(1.0, affordable / 100.0)
-        score = 0.35 * delta_score + 0.25 * spread_score + 0.20 * liquidity_score + 0.10 * distance_score + 0.10 * affordability_score
+
+        # Greeks are conventionally quoted per underlying point and theta per
+        # day. Estimate the premium move to the underlying structural stop.
+        # This is a selection/risk estimate, not a guaranteed option-price model.
+        delta_loss = delta * underlying_move
+        gamma_loss = 0.5 * gamma * underlying_move * underlying_move
+        theta_burn = theta * hold_minutes / 375.0
+        estimated_premium_loss = delta_loss + gamma_loss + theta_burn
+        structure_risk_pct = (
+            estimated_premium_loss / ltp * 100 if underlying_move > 0 else 0.0
+        )
+        theta_burn_pct = theta_burn / ltp * 100
+
+        # If the contract would likely consume too much of its premium before
+        # the underlying invalidation level, skip it rather than forcing ATM.
+        if underlying_move > 0 and structure_risk_pct > max_structure_risk:
+            continue
+
+        distance_pct = abs(strike - spot) / max(spot, 1.0) * 100
+        intrinsic = (
+            max(spot - strike, 0.0) if direction == "CE"
+            else max(strike - spot, 0.0)
+        )
+        extrinsic_pct = max(0.0, ltp - intrinsic) / ltp * 100
+        delta_score = max(
+            0.0,
+            1.0 - abs(delta - settings.target_delta) / 0.35,
+        )
+        spread_score = max(
+            0.0,
+            1.0 - spread_pct / max(settings.max_option_spread_pct, 0.01),
+        )
+        liquidity_score = min(
+            1.0,
+            volume / max(settings.min_option_volume * 5, 1),
+        )
+        distance_score = max(0.0, 1.0 - distance_pct / 2.5)
+        structure_score = (
+            max(0.0, 1.0 - structure_risk_pct / max_structure_risk)
+            if underlying_move > 0 else 0.5
+        )
+        theta_score = max(0.0, 1.0 - theta_burn_pct / max_theta_burn)
+        # High extrinsic share is more exposed to time/IV decay; apply only a
+        # small penalty so valid OTM contracts are not automatically rejected.
+        premium_quality_score = max(0.0, 1.0 - extrinsic_pct / 200.0)
+        score = (
+            0.25 * delta_score
+            + 0.20 * spread_score
+            + 0.15 * liquidity_score
+            + 0.08 * distance_score
+            + 0.22 * structure_score
+            + 0.07 * theta_score
+            + 0.03 * premium_quality_score
+        )
+
+        moneyness = (
+            "ATM" if strike == strikes[atm_index]
+            else "ITM" if (
+                (direction == "CE" and strike < strikes[atm_index])
+                or (direction == "PE" and strike > strikes[atm_index])
+            )
+            else "OTM"
+        )
         candidate = {
-            "instrumentKey": instrument_key, "strike": strike, "ltp": ltp, "bid": bid, "ask": ask,
-            "volume": volume, "oi": int(market.get("oi") or 0), "delta": delta,
-            "gamma": float(greeks.get("gamma") or 0), "theta": float(greeks.get("theta") or 0),
-            "vega": float(greeks.get("vega") or 0), "iv": float(greeks.get("iv") or 0),
-            "spreadPct": round(spread_pct, 3), "selectionScore": round(score, 4),
+            "instrumentKey": instrument_key,
+            "strike": strike,
+            "ltp": ltp,
+            "bid": bid,
+            "ask": ask,
+            "volume": volume,
+            "oi": oi,
+            "delta": delta,
+            "gamma": gamma,
+            "theta": theta,
+            "vega": vega,
+            "iv": iv,
+            "moneyness": moneyness,
+            "intrinsicValue": round(intrinsic, 4),
+            "extrinsicPct": round(extrinsic_pct, 3),
+            "estimatedPremiumLoss": round(estimated_premium_loss, 4),
+            "structureRiskPct": round(structure_risk_pct, 3),
+            "thetaBurnPct": round(theta_burn_pct, 4),
+            "underlyingStopDistance": round(underlying_move, 4),
+            "spreadPct": round(spread_pct, 3),
+            "selectionScore": round(score, 4),
             "filterTier": "STRICT" if strict else "PAPER_FALLBACK",
         }
         (candidates if strict else relaxed_candidates).append(candidate)
+
     pool = candidates or relaxed_candidates
     if not pool:
         return None
-    # Keep the ATM strike as the first choice when it is valid and affordable.
-    # Only fall back to the nearest OTM strike when the ATM contract fails.
-    atm_strike = strikes[atm_index]
-    atm_options = [candidate for candidate in pool if candidate["strike"] == atm_strike]
-    if atm_options:
-        selected = max(atm_options, key=lambda item: item["selectionScore"])
-    else:
-        selected = min(pool, key=lambda item: (abs(item["strike"] - atm_strike), -item["selectionScore"]))
-    selected["moneyness"] = "ATM" if selected["strike"] == atm_strike else "OTM"
-    selected["atmStrike"] = atm_strike
+
+    # ATM wins only when its risk-adjusted score is genuinely best; a suitable
+    # ITM/OTM contract can win when gamma/theta or structural premium risk is lower.
+    selected = max(
+        pool,
+        key=lambda item: (
+            item["selectionScore"],
+            item["moneyness"] == "ATM",
+            -abs(item["strike"] - strikes[atm_index]),
+        ),
+    )
+    selected["atmStrike"] = strikes[atm_index]
     return selected
 
 

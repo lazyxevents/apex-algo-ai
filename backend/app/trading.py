@@ -1076,6 +1076,12 @@ class TradingEngine:
                     "volume": option.get("volume"),
                     "oi": option.get("oi"),
                     "delta": option.get("delta"),
+                    "gamma": option.get("gamma"),
+                    "theta": option.get("theta"),
+                    "iv": option.get("iv"),
+                    "estimatedPremiumLoss": option.get("estimatedPremiumLoss"),
+                    "structureRiskPct": option.get("structureRiskPct"),
+                    "thetaBurnPct": option.get("thetaBurnPct"),
                     "spreadPct": option.get("spreadPct"),
                     "filterTier": option.get("filterTier"),
                     "quoteTime": option.get("quoteTime") or now.isoformat(),
@@ -1238,7 +1244,28 @@ class TradingEngine:
             self._last_option_filter_diagnostics["reason"] = "NO_AFFORDABLE_LISTED_LOT"
             return None, 0, expiry
 
-        option = select_option(affordable_chain, best["action"], best["underlyingPrice"], deployable, reference_strikes=[float(x.get("strike_price") or 0) for x in chain])
+        spot = float(best.get("underlyingPrice") or 0)
+        buffer_points = max(0.0, float(settings.paper_stop_buffer_points))
+        if best["action"] == "CE":
+            underlying_stop_distance = max(
+                0.0, spot - float(best.get("previousLow") or spot) + buffer_points
+            )
+        else:
+            underlying_stop_distance = max(
+                0.0, float(best.get("previousHigh") or spot) - spot + buffer_points
+            )
+        self._last_option_filter_diagnostics["underlyingStopDistance"] = round(
+            underlying_stop_distance, 2
+        )
+        option = select_option(
+            affordable_chain,
+            best["action"],
+            spot,
+            deployable,
+            reference_strikes=[float(x.get("strike_price") or 0) for x in chain],
+            underlying_stop_distance=underlying_stop_distance,
+            expected_hold_minutes=settings.option_expected_hold_minutes,
+        )
         if not option:
             self._last_option_filter_diagnostics["reason"] = "SPREAD_VOLUME_OR_STRIKE_FILTER"
             self._last_option_filter_diagnostics.update(
@@ -1845,6 +1872,12 @@ class TradingEngine:
                 "volume": option.get("volume"),
                 "oi": option.get("oi"),
                 "delta": option.get("delta"),
+                "gamma": option.get("gamma"),
+                "theta": option.get("theta"),
+                "iv": option.get("iv"),
+                "estimatedPremiumLoss": option.get("estimatedPremiumLoss"),
+                "structureRiskPct": option.get("structureRiskPct"),
+                "thetaBurnPct": option.get("thetaBurnPct"),
                 "spreadPct": option.get("spreadPct"),
                 "filterTier": option.get("filterTier"),
                 "quoteTime": option.get("quoteTime") or datetime.now(IST).isoformat(),
@@ -1861,21 +1894,29 @@ class TradingEngine:
                 self.state.last_decision = decision
                 return decision
             delta = max(0.05, abs(float(option.get("delta") or settings.target_delta)))
+            gamma = abs(float(option.get("gamma") or 0.0))
+            theta = abs(float(option.get("theta") or 0.0))
             previous_low = float(best.get("previousLow") or best["underlyingPrice"])
             previous_high = float(best.get("previousHigh") or best["underlyingPrice"])
             spot = float(best["underlyingPrice"])
             buffer_points = max(0.0, settings.paper_stop_buffer_points)
             if best["action"] == "CE":
-                structure_distance = max(0.0, spot - previous_low + buffer_points) * delta
+                underlying_structure_distance = max(0.0, spot - previous_low + buffer_points)
             else:
-                structure_distance = max(0.0, previous_high - spot + buffer_points) * delta
+                underlying_structure_distance = max(0.0, previous_high - spot + buffer_points)
+            # Map the underlying invalidation move into option-premium points.
+            # Gamma adds convexity risk; theta adds expected decay over the scalp hold.
+            delta_component = delta * underlying_structure_distance
+            gamma_component = 0.5 * gamma * underlying_structure_distance ** 2
+            theta_component = theta * max(1.0, settings.option_expected_hold_minutes) / 375.0
+            structure_distance = delta_component + gamma_component + theta_component
             fallback_stop = max(entry * settings.option_stop_pct / 100, 0.05)
-            desired_distance = structure_distance if structure_distance > 0.05 else fallback_stop
+            desired_distance = structure_distance if underlying_structure_distance > 0.05 else fallback_stop
             premium_risk_cap = entry * max(0.0, settings.paper_trade_risk_pct_of_deployed) / 100
-            # Per-trade stop is capped at 1.5% of the deployed allocation.
-            # The final stop/target are recalculated after lot sizing so brokerage
-            # is included in the net-P&L objective rather than ignored.
-            stop_distance = min(desired_distance, entry * settings.paper_net_stop_pct_of_deployed / 100.0)
+            # Avoid the old 1.5%-of-premium micro-stop. Let structure/Greeks
+            # define the stop, with a premium-risk ceiling. Quantity is reduced
+            # to fit deterministic rupee risk and existing loss-lock limits.
+            stop_distance = min(desired_distance, premium_risk_cap)
             if is_scalp:
                 stop_distance = min(stop_distance, settings.scalp_max_stop_points)
             stop = round(max(0.05, entry - stop_distance), 2)
@@ -1906,6 +1947,7 @@ class TradingEngine:
                 )
                 per_trade_budget = min(
                     hard_headroom,
+                    max(0.0, float(limits["perTrade"])),
                     max(0.0, deployable * settings.paper_net_stop_pct_of_deployed / 100.0),
                 )
                 lots_cash = floor(deployable / max(entry * lot_size, 0.01))
@@ -2082,6 +2124,13 @@ class TradingEngine:
                 "selectionScore": option["selectionScore"],
                 "spreadPct": option["spreadPct"],
                 "delta": option["delta"],
+                "gamma": option.get("gamma"),
+                "theta": option.get("theta"),
+                "iv": option.get("iv"),
+                "estimatedPremiumLossToStructure": option.get("estimatedPremiumLoss"),
+                "structureRiskPct": option.get("structureRiskPct"),
+                "thetaBurnPct": option.get("thetaBurnPct"),
+                "underlyingStructureDistance": round(underlying_structure_distance, 2),
                 "initialRisk": initial_risk,
                 "riskLimit": round(risk_limit, 2),
                 "capitalAtEntry": round(capital, 2),
