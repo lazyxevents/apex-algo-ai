@@ -1020,7 +1020,11 @@ class TradingEngine:
         sensex = next((row for row in ranked if str(row.get("index") or "").upper() == "SENSEX"), None)
         if not sensex:
             return
-        direction = str(sensex.get("action") or sensex.get("directionCandidate") or "").upper()
+        # A confirmed CE/PE is handled by the execution path below, which fetches
+        # its own fresh quote once. This preview is only for WATCH candidates.
+        if str(sensex.get("action") or "").upper() in {"CE", "PE"}:
+            return
+        direction = str(sensex.get("directionCandidate") or "").upper()
         if direction not in {"CE", "PE"}:
             return
         underlying_key = sensex.get("underlyingKey")
@@ -1107,7 +1111,7 @@ class TradingEngine:
             }
         # Reference collection is observational only; never alters execution gates.
         pattern_reference_service.ingest(candles, instrument=name)
-        # Strict single-setup execution: EMA9/EMA200 + 1m liquidity sweep.
+        # Strict single-setup execution: EMA9/EMA21 pullback + completed 1m candle confirmation.
         # Research/neural models remain observational, never override entry.
         signal = evaluate_ema_liquidity_scalp(candles)
         signal.update({
