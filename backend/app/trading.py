@@ -1870,44 +1870,28 @@ class TradingEngine:
             fallback_stop = max(entry * settings.option_stop_pct / 100, 0.05)
             desired_distance = structure_distance if structure_distance > 0.05 else fallback_stop
             premium_risk_cap = entry * max(0.0, settings.paper_trade_risk_pct_of_deployed) / 100
-            stop_distance = min(desired_distance, premium_risk_cap)
+            # Per-trade stop is capped at 1.5% of the deployed allocation.
+            # The final stop/target are recalculated after lot sizing so brokerage
+            # is included in the net-P&L objective rather than ignored.
+            stop_distance = min(desired_distance, entry * settings.paper_net_stop_pct_of_deployed / 100.0)
             if is_scalp:
                 stop_distance = min(stop_distance, settings.scalp_max_stop_points)
             stop = round(max(0.05, entry - stop_distance), 2)
             stop_distance = round(entry - stop, 2)
-            # A fixed 10-15 premium-point exit range; fees/spread must fit.
             spread_pct = max(0.0, float(option.get("spreadPct") or 0.0))
             spread_points = entry * spread_pct / 100.0
-            target_distance = max(
-                float(settings.scalp_min_target_points),
-                min(float(settings.scalp_target_points), float(settings.scalp_max_target_points)),
-            )
-            target_distance = min(target_distance, float(settings.scalp_max_target_points))
-            estimated_lot_fees = float(estimate_paper_costs(
-                entry, entry + target_distance, lot_size, exchange="BSE",
-                synthetic=synthetic_demo,
-            )["total"]) / max(1, lot_size)
             execution_buffer = 2.0 * spread_points + max(0.05, entry * 0.001)
-            if (
-                stop_distance <= 0.0
-                or stop_distance > target_distance
-                or estimated_lot_fees + execution_buffer >= target_distance
-            ):
-                reason = "SCALP_COST_OR_STOP_EXCEEDS_10_15_POINT_TARGET"
+            if stop_distance <= 0.0:
+                reason = "INVALID_NET_STOP_DISTANCE"
                 decision.update({
                     "action": "NO_TRADE", "reason": reason,
                     "executionGate": self._mark_signal_block(
                         live_observations, best, stage="SCALP_TARGET_RISK",
-                        reason=reason, details={
-                            "stopPoints": stop_distance, "targetPoints": target_distance,
-                            "estimatedFeesPerUnit": round(estimated_lot_fees, 2),
-                            "spreadAndSlippage": round(execution_buffer, 2),
-                        }
+                        reason=reason, details={"stopPoints": stop_distance},
                     ),
                 })
                 self.state.last_decision = decision
                 return decision
-            target = round(entry + target_distance, 2)
             with SessionLocal() as db:
                 limits = self._limits(db)
                 day_pnl = self._period_pnl(db, "day")
@@ -1920,7 +1904,7 @@ class TradingEngine:
                 )
                 per_trade_budget = min(
                     hard_headroom,
-                    max(0.0, min(capital, 40000.0) * 0.01),
+                    max(0.0, deployable * settings.paper_net_stop_pct_of_deployed / 100.0),
                 )
                 lots_cash = floor(deployable / max(entry * lot_size, 0.01))
                 estimated_stop_fees = float(estimate_paper_costs(
@@ -1931,7 +1915,7 @@ class TradingEngine:
                 lots_risk = floor(per_trade_budget / max(effective_risk_per_unit * lot_size, 0.01))
                 qty = max(0, min(lots_cash, lots_risk)) * lot_size
                 risk_limit = per_trade_budget
-                sizing_details = {"cashLots": max(0, lots_cash), "riskLots": max(0, lots_risk), "selectedLots": qty // lot_size, "cashBudget": round(deployable, 2), "riskBudget": round(per_trade_budget, 2), "slippagePerUnit": round(slippage_per_unit, 2), "feesPerUnit": round(estimated_stop_fees, 2), "targetPoints": round(target_distance, 2)}
+                sizing_details = {"cashLots": max(0, lots_cash), "riskLots": max(0, lots_risk), "selectedLots": qty // lot_size, "cashBudget": round(deployable, 2), "riskBudget": round(per_trade_budget, 2), "slippagePerUnit": round(slippage_per_unit, 2), "feesPerUnit": round(estimated_stop_fees, 2), "netTargetPct": settings.paper_net_target_pct_of_deployed, "netStopPct": settings.paper_net_stop_pct_of_deployed}
             if qty <= 0:
                 one_lot_risk = round(max(0.0, entry - stop) * lot_size, 2)
                 one_lot_cost = round(entry * lot_size, 2)
@@ -1964,6 +1948,59 @@ class TradingEngine:
                 self.state.last_decision = decision
                 return decision
 
+            deployed_capital = round(entry * qty, 2)
+            net_target_budget = deployed_capital * settings.paper_net_target_pct_of_deployed / 100.0
+            net_stop_budget = deployed_capital * settings.paper_net_stop_pct_of_deployed / 100.0
+
+            # Solve exit prices iteratively because BSE brokerage, STT, GST and
+            # transaction charges depend on the estimated exit turnover.
+            target_distance = max(0.05, entry * settings.paper_net_target_pct_of_deployed / 100.0)
+            for _ in range(8):
+                target = round(entry + target_distance, 2)
+                target_costs = estimate_paper_costs(
+                    entry, target, qty, exchange="BSE", synthetic=synthetic_demo,
+                )
+                target_distance = max(0.05, (net_target_budget + float(target_costs["total"])) / qty)
+            target = round(entry + target_distance, 2)
+            target_costs = estimate_paper_costs(
+                entry, target, qty, exchange="BSE", synthetic=synthetic_demo,
+            )
+            expected_target_net = round((target - entry) * qty - float(target_costs["total"]), 2)
+
+            stop_distance = min(stop_distance, entry * settings.paper_net_stop_pct_of_deployed / 100.0)
+            for _ in range(8):
+                stop = round(max(0.05, entry - stop_distance), 2)
+                stop_costs = estimate_paper_costs(
+                    entry, stop, qty, exchange="BSE", synthetic=synthetic_demo,
+                )
+                allowed_stop_distance = (net_stop_budget - float(stop_costs["total"])) / qty
+                if allowed_stop_distance <= 0:
+                    break
+                stop_distance = min(stop_distance, allowed_stop_distance)
+            stop = round(max(0.05, entry - stop_distance), 2)
+            stop_costs = estimate_paper_costs(
+                entry, stop, qty, exchange="BSE", synthetic=synthetic_demo,
+            )
+            expected_stop_net = round((stop - entry) * qty - float(stop_costs["total"]), 2)
+            if expected_target_net < net_target_budget - 1.0 or expected_stop_net < -net_stop_budget - 1.0:
+                reason = "NET_TARGET_STOP_UNACHIEVABLE_AFTER_COSTS"
+                decision.update({
+                    "action": "NO_TRADE", "reason": reason,
+                    "executionGate": self._mark_signal_block(
+                        live_observations, best, stage="SCALP_NET_PNL",
+                        reason=reason, details={
+                            "deployedCapital": deployed_capital,
+                            "targetBudget": round(net_target_budget, 2),
+                            "expectedTargetNet": expected_target_net,
+                            "stopBudget": round(net_stop_budget, 2),
+                            "expectedStopNet": expected_stop_net,
+                            "targetCosts": target_costs,
+                            "stopCosts": stop_costs,
+                        },
+                    ),
+                })
+                self.state.last_decision = decision
+                return decision
             initial_risk = round((entry - stop) * qty, 2)
             context = best.get("context") or {}
             chart_symbol = "BSE:SENSEX" if best["index"] == "SENSEX" else ("NSE:BANKNIFTY" if best["index"] == "BANKNIFTY" else "NSE:NIFTY")
@@ -2002,8 +2039,17 @@ class TradingEngine:
                 "moneyness": option.get("moneyness", "UNKNOWN"),
                 "atmStrike": option.get("atmStrike"),
                 "lotSizing": sizing_details,
-                "paperRiskPctOfDeployed": settings.paper_trade_risk_pct_of_deployed,
-                "paperScalpPolicy": {"maxAllocationPct": min(90.0, max(0.0, settings.capital_usage_pct)), "maxRiskRupees": round(min(capital, 40000.0) * 0.01, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "cost_spread_and_rr_adjusted"},
+                "paperRiskPctOfDeployed": settings.paper_net_stop_pct_of_deployed,
+                "netTargetPctOfDeployed": settings.paper_net_target_pct_of_deployed,
+                "netStopPctOfDeployed": settings.paper_net_stop_pct_of_deployed,
+                "deployedCapital": deployed_capital,
+                "plannedNetTarget": round(net_target_budget, 2),
+                "expectedNetAtTarget": expected_target_net,
+                "plannedNetStop": round(net_stop_budget, 2),
+                "expectedNetAtStop": expected_stop_net,
+                "estimatedTargetCosts": target_costs,
+                "estimatedStopCosts": stop_costs,
+                "paperScalpPolicy": {"maxAllocationPct": min(90.0, max(0.0, settings.capital_usage_pct)), "maxRiskRupees": round(per_trade_budget, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "net_2.5pct_deployed_after_estimated_charges", "stop": "net_1.5pct_deployed_after_estimated_charges"},
                 "paperStopBufferPoints": buffer_points,
                 "remainingLossHeadroomAtEntry": round(hard_headroom, 2),
                 "firstTarget": target,
