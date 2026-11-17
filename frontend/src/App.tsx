@@ -183,6 +183,7 @@ function ScannerPanel({
 }) {
   const loop = automation?.scanLoop || {}
   const decision = automation?.lastDecision || {}
+  const optionCandidate = decision?.optionCandidate || {}
   const signals = Array.isArray(decision?.signals) ? decision.signals : []
   const interval = Math.max(15, Number(loop.intervalSeconds || 30))
   const lastAttempt = Date.parse(loop.lastAttemptAt || automation?.lastCycleAt || '')
@@ -266,6 +267,25 @@ function ScannerPanel({
         <div><small>EXPECTED HOLD</small><b>{holdEstimate.label || 'Collecting closed paper-trade history; no reliable estimate yet.'}</b></div>
       </div>
       <p>CALL/PUT candidate is not an order. Existing option liquidity, stop-loss, capital, timing and deterministic risk gates must all pass before a paper entry.</p>
+    </div>
+
+    <div className="scanner-option-candidate">
+      <div className="scanner-intel-heading"><b>SENSEX OPTION CONTRACT</b><span>{String(optionCandidate.status || 'WAITING FOR DIRECTION').replace(/_/g,' ')}</span></div>
+      {optionCandidate.status ? <>
+        <div className="scanner-option-main">
+          <div><small>TRADE SIDE</small><strong className={optionCandidate.direction==='CE'?'positive':'negative'}>{optionCandidate.direction || '—'}</strong></div>
+          <div><small>CONTRACT</small><strong>{optionCandidate.contract || 'Not selected'}</strong></div>
+          <div><small>STRIKE / EXPIRY</small><strong>{optionCandidate.strike != null ? Number(optionCandidate.strike).toLocaleString('en-IN') : '—'} · {optionCandidate.expiry || '—'}</strong></div>
+          <div><small>LIVE PREMIUM</small><strong>{optionCandidate.premium != null ? '₹'+Number(optionCandidate.premium).toFixed(2) : '—'}</strong></div>
+          <div><small>LOT SIZE / LOT VALUE</small><strong>{optionCandidate.lotSize || '—'} · {optionCandidate.lotValue != null ? '₹'+Number(optionCandidate.lotValue).toLocaleString('en-IN',{maximumFractionDigits:2}) : '—'}</strong></div>
+          <div><small>BID / ASK</small><strong>{optionCandidate.bid != null ? Number(optionCandidate.bid).toFixed(2) : '—'} / {optionCandidate.ask != null ? Number(optionCandidate.ask).toFixed(2) : '—'}</strong></div>
+          <div><small>VOLUME / OI</small><strong>{optionCandidate.volume ?? '—'} / {optionCandidate.oi ?? '—'}</strong></div>
+          <div><small>DELTA / SPREAD</small><strong>{optionCandidate.delta != null ? Number(optionCandidate.delta).toFixed(2) : '—'} / {optionCandidate.spreadPct != null ? Number(optionCandidate.spreadPct).toFixed(2)+'%' : '—'}</strong></div>
+        </div>
+        <p>{optionCandidate.reason || (optionCandidate.status==='SELECTED_FOR_PAPER_ENTRY' ? 'Selected for the current PAPER entry flow; deterministic risk checks still apply.' : 'Informational option preview only. It does not trigger an entry.')}</p>
+        {optionCandidate.diagnostics && <small className="scanner-footnote">Option filter: {optionCandidate.diagnostics.reason || 'blocked'} · Chain strikes {optionCandidate.diagnostics.chainStrikes ?? '—'} · Affordable contracts {optionCandidate.diagnostics.eligible ?? '—'}</small>}
+        <small className="scanner-footnote">Quote time: {formatDateTime(optionCandidate.quoteTime)} · {optionCandidate.filterTier || 'No liquidity tier'}</small>
+      </> : <div className="scanner-empty">No CE/PE direction yet. As soon as APEX identifies a directional SENSEX candidate, it will display the matching listed contract, strike and live premium here.</div>}
     </div>
 
     <div className="scanner-news">
