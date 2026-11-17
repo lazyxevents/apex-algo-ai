@@ -209,8 +209,8 @@ def test_option_selector_can_choose_cheaper_otm_when_gamma_risk_is_lower():
 
         chain = [
             row(71500, 140, 0.60, 0.0002, -1),
-            row(71600, 100, 0.42, 0.0400, -10),
-            row(71700, 70, 0.32, 0.0010, -1),
+            row(71600, 100, 0.42, 0.0450, -10),
+            row(71700, 70, 0.40, 0.0005, -0.5),
         ]
         selected = select_option(
             chain,
