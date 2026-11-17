@@ -832,7 +832,7 @@ export default function App() {
       if (newlyOpened.length > 0) {
         const executed = newlyOpened[newlyOpened.length - 1]
         setTradeFlash(executed)
-        if (pushSubscribed && pushPermission === 'granted') void playApexTradeChime(false)
+        if (pushPermission === 'granted') void playApexTradeChime(false)
         if ('Notification' in window && Notification.permission === 'granted') {
           try {
             new Notification(`APEX TRADE EXECUTED • ${executed.direction}`, {
