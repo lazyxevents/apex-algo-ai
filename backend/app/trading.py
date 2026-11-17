@@ -1020,11 +1020,7 @@ class TradingEngine:
         sensex = next((row for row in ranked if str(row.get("index") or "").upper() == "SENSEX"), None)
         if not sensex:
             return
-        # A confirmed CE/PE is handled by the execution path below, which fetches
-        # its own fresh quote once. This preview is only for WATCH candidates.
-        if str(sensex.get("action") or "").upper() in {"CE", "PE"}:
-            return
-        direction = str(sensex.get("directionCandidate") or "").upper()
+        direction = str(sensex.get("action") or sensex.get("directionCandidate") or "").upper()
         if direction not in {"CE", "PE"}:
             return
         underlying_key = sensex.get("underlyingKey")
@@ -1090,7 +1086,13 @@ class TradingEngine:
                 "reason": str(exc)[:240],
                 "diagnostics": getattr(self, "_last_option_filter_diagnostics", {}),
             }
-        self._option_preview_cache = {"key": cache_key, "at": now, "value": preview}
+        self._option_preview_cache = {
+            "key": cache_key, "at": now, "value": preview,
+            "option": option if "option" in locals() else None,
+            "lotSize": lot_size if "lot_size" in locals() else 0,
+            "expiry": expiry if "expiry" in locals() else None,
+            "diagnostics": getattr(self, "_last_option_filter_diagnostics", {}),
+        }
         decision["optionCandidate"] = preview
 
     def _scan_one(self, provider, name: str, key: str, capital: float) -> dict:
@@ -1761,16 +1763,28 @@ class TradingEngine:
                 lot_size = int(option.get("lotSize") or 1)
                 expiry = option.get("expiry")
             else:
-                try:
-                    option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
-                except Exception as exc:
-                    self._last_option_filter_diagnostics = {
-                        "reason": "OPTION_CHAIN_ERROR",
-                        "error": str(exc)[:240],
-                        "index": best.get("index"),
-                        "direction": best.get("action"),
-                    }
-                    option, lot_size, expiry = None, 0, None
+                preview_cache = getattr(self, "_option_preview_cache", None)
+                preview_key = (str(best.get("underlyingKey")), str(best.get("action")))
+                preview_age = (
+                    (datetime.now(IST) - preview_cache.get("at")).total_seconds()
+                    if preview_cache and isinstance(preview_cache.get("at"), datetime) else 999
+                )
+                if preview_cache and preview_cache.get("key") == preview_key and preview_age < 25:
+                    option = preview_cache.get("option")
+                    lot_size = int(preview_cache.get("lotSize") or 0)
+                    expiry = preview_cache.get("expiry")
+                    self._last_option_filter_diagnostics = dict(preview_cache.get("diagnostics") or {})
+                else:
+                    try:
+                        option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
+                    except Exception as exc:
+                        self._last_option_filter_diagnostics = {
+                            "reason": "OPTION_CHAIN_ERROR",
+                            "error": str(exc)[:240],
+                            "index": best.get("index"),
+                            "direction": best.get("action"),
+                        }
+                        option, lot_size, expiry = None, 0, None
                 if not option:
                     reason = "no liquid/affordable option contract passed filters"
                     decision["reason"] = reason
