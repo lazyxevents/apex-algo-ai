@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     paper_stop_buffer_points: float = 2.0
     target_delta: float = 0.42
     max_otm_steps: int = 3
+    max_option_itm_steps: int = 2
+    max_option_structure_risk_pct: float = 18.0
+    option_expected_hold_minutes: float = 6.0
+    max_option_theta_burn_pct: float = 2.0
     candle_confirmation_required: bool = True
 
     adaptive_learning_enabled: bool = True
