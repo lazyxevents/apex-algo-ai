@@ -1562,3 +1562,15 @@ html[data-theme="light"] .scanner-ai-warnings span{background:#fff8eb;color:#876
 /* APEX monitor-only dashboard: remove manual trade and position-edit controls. */
 .do-trade-card{display:none!important}
 .trade-actions{display:none!important}
+
+/* Live SENSEX option candidate / premium card. */
+.scanner-option-candidate{display:grid;gap:8px;padding:11px;border:1px solid rgba(70,115,220,.34);border-radius:10px;background:rgba(8,24,39,.58)}
+.scanner-option-main{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.scanner-option-main>div{display:grid;gap:4px;padding:8px;border:1px solid rgba(110,150,175,.14);border-radius:6px;min-width:0}
+.scanner-option-main small{color:#8199aa;font-size:8px}
+.scanner-option-main strong{color:#d6e6f0;font-size:10px;overflow-wrap:anywhere}
+.scanner-option-candidate>p{margin:0;color:#9bb0bf;font-size:9px;line-height:1.5}
+html[data-theme="light"] .scanner-option-candidate{background:#f8fbfd;border-color:#d8e5ed}
+html[data-theme="light"] .scanner-option-main>div{background:#fff;border-color:#e0e9ef}
+html[data-theme="light"] .scanner-option-main strong{color:#254257}
+html[data-theme="light"] .scanner-option-candidate>p{color:#61798b}
