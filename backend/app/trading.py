@@ -1011,6 +1011,84 @@ class TradingEngine:
         intelligence["timing"] = timing
         decision["marketIntelligence"] = intelligence
 
+    def _attach_option_preview(self, decision: dict, provider, ranked: list[dict], capital: float) -> None:
+        """Show a live, exchange-listed SENSEX option quote for the directional watch idea.
+
+        This is informational only. It never changes the executable scalp signal or
+        bypasses confirmation, affordability, liquidity, or deterministic risk gates.
+        """
+        sensex = next((row for row in ranked if str(row.get("index") or "").upper() == "SENSEX"), None)
+        if not sensex:
+            return
+        direction = str(sensex.get("action") or sensex.get("directionCandidate") or "").upper()
+        if direction not in {"CE", "PE"}:
+            return
+        underlying_key = sensex.get("underlyingKey")
+        if not underlying_key:
+            decision["optionCandidate"] = {"status": "UNAVAILABLE", "direction": direction, "reason": "SENSEX_UNDERLYING_KEY_MISSING"}
+            return
+
+        cache = getattr(self, "_option_preview_cache", None)
+        cache_key = (str(underlying_key), direction)
+        now = datetime.now(IST)
+        if cache and cache.get("key") == cache_key:
+            cached_at = cache.get("at")
+            if isinstance(cached_at, datetime) and (now - cached_at).total_seconds() < 25:
+                decision["optionCandidate"] = dict(cache.get("value") or {})
+                return
+
+        deployable = max(0.0, capital * min(90.0, max(0.0, settings.capital_usage_pct)) / 100)
+        preview_signal = {
+            **sensex,
+            "action": direction,
+            "index": "SENSEX",
+            "underlyingKey": underlying_key,
+            "underlyingPrice": float(sensex.get("underlyingPrice") or 0),
+        }
+        try:
+            option, lot_size, expiry = self._real_option_candidate(provider, preview_signal, deployable)
+            if not option:
+                preview = {
+                    "status": "NO_LIQUID_CONTRACT",
+                    "direction": direction,
+                    "expiry": expiry,
+                    "reason": (getattr(self, "_last_option_filter_diagnostics", {}) or {}).get("reason", "OPTION_FILTER_BLOCKED"),
+                    "diagnostics": getattr(self, "_last_option_filter_diagnostics", {}),
+                }
+            else:
+                preview = {
+                    "status": "WATCH_ONLY" if sensex.get("action") not in {"CE", "PE"} else "ENTRY_CANDIDATE",
+                    "direction": direction,
+                    "exchange": "BSE",
+                    "underlying": "SENSEX",
+                    "contract": option.get("displayName") or option.get("instrumentKey"),
+                    "instrumentKey": option.get("instrumentKey"),
+                    "expiry": expiry,
+                    "strike": option.get("strike"),
+                    "moneyness": option.get("moneyness"),
+                    "premium": round(float(option.get("ltp") or 0), 2),
+                    "bid": option.get("bid"),
+                    "ask": option.get("ask"),
+                    "lotSize": int(lot_size or 0),
+                    "lotValue": round(float(option.get("ltp") or 0) * int(lot_size or 0), 2),
+                    "volume": option.get("volume"),
+                    "oi": option.get("oi"),
+                    "delta": option.get("delta"),
+                    "spreadPct": option.get("spreadPct"),
+                    "filterTier": option.get("filterTier"),
+                    "quoteTime": option.get("quoteTime") or now.isoformat(),
+                    "reason": "Live option-chain preview only; entry still requires the completed scalp signal and all risk gates.",
+                }
+        except Exception as exc:
+            preview = {
+                "status": "QUOTE_ERROR",
+                "direction": direction,
+                "reason": str(exc)[:240],
+                "diagnostics": getattr(self, "_last_option_filter_diagnostics", {}),
+            }
+        self._option_preview_cache = {"key": cache_key, "at": now, "value": preview}
+        decision["optionCandidate"] = preview
+
     def _scan_one(self, provider, name: str, key: str, capital: float) -> dict:
         candles = provider.intraday_candles(key)
         freshness = self._candle_freshness(candles)
@@ -1576,6 +1654,7 @@ class TradingEngine:
                 decision["liveObservations"] = live_observations
                 decision["signals"] = ranked
                 self._attach_trade_finder_intelligence(decision, ranked)
+                self._attach_option_preview(decision, provider, ranked, observation_capital)
 
             risk = self.risk_snapshot()
             if risk["monthlyTargetLocked"]:
@@ -1619,6 +1698,7 @@ class TradingEngine:
                 decision["liveObservations"] = live_observations
                 decision["signals"] = ranked
                 self._attach_trade_finder_intelligence(decision, ranked)
+                self._attach_option_preview(decision, provider, ranked, capital)
             # Automated entries are SENSEX scalp only. No forced trade.
             ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
             decision["executionStrategy"] = "APEX_EMA9_21_PULLBACK_SCALP"
@@ -1677,10 +1757,26 @@ class TradingEngine:
                 lot_size = int(option.get("lotSize") or 1)
                 expiry = option.get("expiry")
             else:
-                option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
+                try:
+                    option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
+                except Exception as exc:
+                    self._last_option_filter_diagnostics = {
+                        "reason": "OPTION_CHAIN_ERROR",
+                        "error": str(exc)[:240],
+                        "index": best.get("index"),
+                        "direction": best.get("action"),
+                    }
+                    option, lot_size, expiry = None, 0, None
                 if not option:
                     reason = "no liquid/affordable option contract passed filters"
                     decision["reason"] = reason
+                    decision["optionCandidate"] = {
+                        "status": "BLOCKED",
+                        "direction": best.get("action"),
+                        "expiry": expiry,
+                        "reason": (getattr(self, "_last_option_filter_diagnostics", {}) or {}).get("reason", "OPTION_FILTER_BLOCKED"),
+                        "diagnostics": getattr(self, "_last_option_filter_diagnostics", {}),
+                    }
                     decision["executionGate"] = self._mark_signal_block(
                         live_observations,
                         best,
@@ -1711,6 +1807,28 @@ class TradingEngine:
                     return decision
 
             entry = float(option["ltp"])
+            decision["optionCandidate"] = {
+                "status": "SELECTED_FOR_PAPER_ENTRY",
+                "direction": best.get("action"),
+                "exchange": "BSE",
+                "underlying": "SENSEX",
+                "contract": option.get("displayName") or option.get("instrumentKey"),
+                "instrumentKey": option.get("instrumentKey"),
+                "expiry": expiry,
+                "strike": option.get("strike"),
+                "moneyness": option.get("moneyness"),
+                "premium": round(entry, 2),
+                "bid": option.get("bid"),
+                "ask": option.get("ask"),
+                "lotSize": int(lot_size or 0),
+                "lotValue": round(entry * int(lot_size or 0), 2),
+                "volume": option.get("volume"),
+                "oi": option.get("oi"),
+                "delta": option.get("delta"),
+                "spreadPct": option.get("spreadPct"),
+                "filterTier": option.get("filterTier"),
+                "quoteTime": option.get("quoteTime") or datetime.now(IST).isoformat(),
+            }
             strategy_name = str(best.get("chosenStrategy") or best.get("strategy") or "")
             is_scalp = "SCALP" in strategy_name.upper()
             if not is_scalp:
