@@ -192,8 +192,8 @@ def test_option_selector_can_choose_cheaper_otm_when_gamma_risk_is_lower():
                     "instrument_key": f"BSE_FNO|{int(strike)}|OPTIDX",
                     "market_data": {
                         "ltp": premium,
-                        "bid_price": premium - 1,
-                        "ask_price": premium + 1,
+                        "bid_price": premium - 0.5,
+                        "ask_price": premium + 0.5,
                         "volume": volume,
                         "oi": 10000,
                     },
