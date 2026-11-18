@@ -221,3 +221,122 @@ def assess_index_candidate(
         "blockers": [] if score >= min_ranking_score else ["RANKING_SCORE_BELOW_THRESHOLD"],
     })
     return base
+
+
+
+def build_multi_index_selection(engine, provider, ranked: list[dict], capital: float, settings, updated_at) -> tuple[dict, dict | None]:
+    """Fetch eligible option chains and return one risk-adjusted PAPER candidate."""
+    deployable = max(0.0, capital * min(90.0, max(0.0, settings.capital_usage_pct)) / 100)
+    synthetic_demo = not bool(getattr(provider, "supports_option_chain", True))
+    candidate_rows: list[dict] = []
+    executable: list[dict] = []
+
+    # Candle/SMC/MTF agents already ran concurrently. Keep option-chain requests
+    # sequential so the broker does not receive a burst of parallel chain calls.
+    ordered = sorted(ranked, key=lambda row: float(row.get("score") or 0), reverse=True)
+    for signal in ordered:
+        kwargs = {
+            "stop_buffer_points": settings.paper_stop_buffer_points,
+            "max_structure_risk_atr": settings.multi_index_max_structure_risk_atr,
+            "max_previous_range_atr": settings.multi_index_max_previous_range_atr,
+            "max_option_structure_risk_pct": settings.max_option_structure_risk_pct,
+            "max_option_theta_burn_pct": settings.max_option_theta_burn_pct,
+            "max_option_spread_pct": settings.max_option_spread_pct,
+            "min_option_volume": settings.min_option_volume,
+            "min_ranking_score": settings.multi_index_min_ranking_score,
+        }
+        preflight = assess_index_candidate(signal, option_required=False, **kwargs)
+        if preflight.get("status") != "SIGNAL_READY":
+            candidate_rows.append(preflight)
+            continue
+
+        option = None
+        lot_size = 0
+        expiry = None
+        diagnostics: dict = {}
+        option_error = None
+        try:
+            if synthetic_demo:
+                option = provider.synthetic_option_candidate(
+                    signal["index"], signal["underlyingKey"],
+                    signal["action"], signal["underlyingPrice"],
+                )
+                lot_size = int(option.get("lotSize") or 1)
+                expiry = option.get("expiry")
+            else:
+                option, lot_size, expiry = engine._real_option_candidate(provider, signal, deployable)
+                diagnostics = dict(getattr(engine, "_last_option_filter_diagnostics", {}) or {})
+        except Exception as exc:
+            option_error = f"OPTION_CHAIN_ERROR: {str(exc)[:180]}"
+            diagnostics = {
+                "reason": "OPTION_CHAIN_ERROR", "error": str(exc)[:240],
+                "index": signal.get("index"), "direction": signal.get("action"),
+            }
+
+        if not option or lot_size <= 0:
+            if option_error is None:
+                option_error = str(diagnostics.get("reason") or "NO_LIQUID_AFFORDABLE_OPTION_CONTRACT")
+            assessment = assess_index_candidate(
+                signal, option_required=True, option_error=option_error,
+                synthetic_demo=synthetic_demo, **kwargs,
+            )
+            assessment["diagnostics"] = diagnostics
+            candidate_rows.append(assessment)
+            continue
+
+        assessment = assess_index_candidate(
+            signal, option, option_required=True, synthetic_demo=synthetic_demo, **kwargs,
+        )
+        exchange = "BSE" if str(signal.get("index") or "").upper() == "SENSEX" else "NSE"
+        assessment.update({
+            "exchange": exchange,
+            "expiry": expiry or option.get("expiry"),
+            "strike": option.get("strike"),
+            "moneyness": option.get("moneyness"),
+            "lotSize": int(lot_size),
+            "lotValue": round(float(option.get("ltp") or 0) * int(lot_size), 2),
+            "bid": option.get("bid"),
+            "ask": option.get("ask"),
+            "oi": option.get("oi"),
+            "diagnostics": diagnostics,
+            "quoteTime": option.get("quoteTime") or updated_at.isoformat(),
+            "priceSource": option.get("priceSource") or ("synthetic_estimate" if synthetic_demo else "exchange_option_chain"),
+        })
+        candidate_rows.append(assessment)
+        if assessment.get("status") == "READY":
+            executable.append({
+                "signal": signal, "option": option, "lotSize": int(lot_size),
+                "expiry": expiry or option.get("expiry"), "syntheticDemo": synthetic_demo,
+                "assessment": assessment,
+            })
+
+    candidate_rows.sort(
+        key=lambda row: (
+            row.get("status") == "READY",
+            float(row.get("rankingScore") or 0),
+            float(row.get("signalScore") or 0),
+        ),
+        reverse=True,
+    )
+    selected = max(
+        executable, key=lambda row: float(row["assessment"].get("rankingScore") or 0)
+    ) if executable else None
+    selection = {
+        "status": "SELECTED" if selected else "NO_ELIGIBLE_INDEX",
+        "selectedIndex": selected["signal"].get("index") if selected else None,
+        "selectedDirection": selected["signal"].get("action") if selected else None,
+        "selectedContract": selected["assessment"].get("contract") if selected else None,
+        "rankingScore": selected["assessment"].get("rankingScore") if selected else None,
+        "rankingScorePct": selected["assessment"].get("rankingScorePct") if selected else None,
+        "analyzedIndices": [str(row.get("index") or "UNKNOWN") for row in ranked],
+        "agentMode": "PARALLEL_CANDLE_ANALYSIS_CENTRAL_RISK_RANKING",
+        "optionChainMode": "SEQUENTIAL_RATE_LIMIT_SAFE" if not synthetic_demo else "SYNTHETIC_DEMO",
+        "candidates": candidate_rows,
+        "reason": (
+            f"{selected['signal'].get('index')} {selected['signal'].get('action')} selected by risk-adjusted cross-index ranking."
+            if selected else
+            "No index passed fresh-candle, market-regime, structure-risk, option-liquidity and capital filters."
+        ),
+        "updatedAt": updated_at.isoformat(),
+    }
+    return selection, selected
