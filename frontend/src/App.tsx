@@ -1,3 +1,4 @@
+import IntelligencePanel from './IntelligencePanel'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 type Status = any
@@ -1867,6 +1868,8 @@ export default function App() {
         </div>
       </section>
     </div>}
+
+    <IntelligencePanel />
 
     <footer className="apex-footer">
       <span>APEX Algo AI • Testing dashboard</span>
