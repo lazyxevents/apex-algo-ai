@@ -1196,8 +1196,8 @@ export default function App() {
         <b>{feedStale ? 'Market data too old for a new trade' : 'Market data is delayed but still inside the live-entry limit'}</b>
         <span>
           {selectedIndex || 'Selected index'} candle {selectedFreshness.candleTime ? formatDateTime(selectedFreshness.candleTime) : '—'}
-          {' • '}age {sensexFreshness.ageSeconds != null ? `${Math.max(0, Number(sensexFreshness.ageSeconds)).toFixed(0)}s` : '—'}
-          {' • '}max {sensexFreshness.maxAgeSeconds ?? '—'}s.
+          {' • '}age {selectedFreshness.ageSeconds != null ? `${Math.max(0, Number(selectedFreshness.ageSeconds)).toFixed(0)}s` : '—'}
+          {' • '}max {selectedFreshness.maxAgeSeconds ?? '—'}s.
           {feedStale ? ` APEX will not score/execute this candle; scan loop keeps retrying every ${scanLoop.intervalSeconds ?? 30}s.` : ''}
         </span>
       </div>
@@ -1570,7 +1570,7 @@ export default function App() {
       </div>
       {feedStale && !marketResearchOnly && <div className="live-feed-freeze">
         <b>Fresh-feed capture waiting — scan loop is still running</b>
-        <span>APEX is retrying the provider every {scanLoop.intervalSeconds ?? 30}s. Last scan attempt: <strong>{formatDateTime(scanLoop.lastAttemptAt || automation.lastCycleAt)}</strong> • last verified candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'} • no new learning moment or trade is allowed until a fresh candle arrives.</span>
+        <span>APEX is retrying the provider every {scanLoop.intervalSeconds ?? 30}s. Last scan attempt: <strong>{formatDateTime(scanLoop.lastAttemptAt || automation.lastCycleAt)}</strong> • last verified candle {selectedFreshness.candleTime ? formatDateTime(selectedFreshness.candleTime) : '—'} • no new learning moment or trade is allowed until a fresh candle arrives.</span>
       </div>}
       <div className="learning-grid">
         <SystemItem label="Mode" value={marketResearchOnly ? 'MARKET_CLOSED_RESEARCH' : feedStale ? 'STALE_FEED_RETRYING' : (liveLearning.mode || 'waiting')} good={Boolean(liveLearning.enabled && !feedStale)} />
@@ -1692,7 +1692,7 @@ export default function App() {
           <SystemItem label="Strategy loop" value={automation.running ? 'Running' : 'Stopped'} good={automation.running} />
           <SystemItem label="Position monitor" value={positionMonitor.running ? 'Running' : 'Stopped'} good={positionMonitor.running} />
           <SystemItem label="Market data" value={feedStale ? 'STALE — blocked' : feedDelayed ? 'Delayed' : providerReady ? 'Ready' : 'Not ready'} good={providerReady && !feedStale} />
-          <SystemItem label="Candle age" value={sensexFreshness.ageSeconds != null ? `${Math.max(0, Number(sensexFreshness.ageSeconds)).toFixed(0)}s / ${sensexFreshness.maxAgeSeconds ?? '—'}s` : 'Waiting'} good={Boolean(sensexFreshness.fresh)} />
+          <SystemItem label="Candle age" value={selectedFreshness.ageSeconds != null ? `${Math.max(0, Number(selectedFreshness.ageSeconds)).toFixed(0)}s / ${selectedFreshness.maxAgeSeconds ?? '—'}s` : 'Waiting'} good={Boolean(selectedFreshness.fresh)} />
           <SystemItem label="Provider" value={market.provider || 'unknown'} />
           <SystemItem label="Paper broker" value={market.paperBroker || 'internal'} />
           <SystemItem label="Phase" value={phase.reason || 'Waiting'} />
@@ -1729,7 +1729,7 @@ export default function App() {
             <button type="button" disabled={doTradeDisabled} onClick={() => void doTradeNow()}>
               {busy === 'do-trade' ? 'SCANNING…' : '⚠ DO TRADE'}
             </button>
-            <small>{busy === 'do-trade' ? 'Scanning current market setup…' : manualDoTrade.last?.status === 'REFUSED' ? `Last refused: ${manualDoTrade.last.reason || 'safety/market gate'}` : feedStale ? 'Waiting for fresh candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
+            <small>{busy === 'do-trade' ? 'Scanning current market setup…' : manualDoTrade.last?.status === 'REFUSED' ? `Last refused: ${manualDoTrade.last.reason || 'safety/market gate'}` : sensexFeedStale ? 'Waiting for fresh SENSEX candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
           </div>
         </div>
 
