@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     signal_min_score: float = 0.65
     smc_override_min_score: float = 0.55
     reward_risk_ratio: float = 1.8
-    active_indices_raw: str = "SENSEX"
+    active_indices_raw: str = "NIFTY,BANKNIFTY,SENSEX"
     sensex_lot_size: int = 20
     scalp_target_points: float = 12.0
     scalp_entry_pullback_points: float = 10.0
@@ -80,6 +80,9 @@ class Settings(BaseSettings):
     max_option_structure_risk_pct: float = 18.0
     option_expected_hold_minutes: float = 6.0
     max_option_theta_burn_pct: float = 2.0
+    multi_index_min_ranking_score: float = 0.56
+    multi_index_max_structure_risk_atr: float = 1.75
+    multi_index_max_previous_range_atr: float = 2.25
     candle_confirmation_required: bool = True
 
     adaptive_learning_enabled: bool = True
