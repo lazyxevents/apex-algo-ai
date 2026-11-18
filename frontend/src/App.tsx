@@ -185,6 +185,8 @@ function ScannerPanel({
   const decision = automation?.lastDecision || {}
   const optionCandidate = decision?.optionCandidate || {}
   const signals = Array.isArray(decision?.signals) ? decision.signals : []
+  const marketSelection = decision?.marketSelection || {}
+  const indexCandidates = Array.isArray(marketSelection.candidates) ? marketSelection.candidates : []
   const interval = Math.max(15, Number(loop.intervalSeconds || 30))
   const lastAttempt = Date.parse(loop.lastAttemptAt || automation?.lastCycleAt || '')
   const nextScan = Date.parse(loop.nextScanAt || '')
@@ -224,7 +226,7 @@ function ScannerPanel({
       <div><small>SCAN INTERVAL</small><b>{interval}s</b></div></div>
     <div className="scanner-progress"><span style={{width:`${progressPct}%`}}/></div>
     <div className="scanner-meta"><span>Last attempt <b>{formatDateTime(loop.lastAttemptAt||automation?.lastCycleAt)}</b></span>
-      <span>Market <b>SENSEX • 1m feed / derived 5m-15m</b></span><span>Open paper trades <b>{openTrades.length}</b></span></div>
+      <span>Markets <b>NIFTY · BANK NIFTY · SENSEX • parallel 1m scans / derived 5m-15m</b></span><span>Open paper trades <b>{openTrades.length}</b></span></div>
 
     <div className="scanner-market-intel">
       <div className="scanner-intel-heading"><b>AI MARKET READ</b><span>{marketIntel.updatedAt ? formatDateTime(marketIntel.updatedAt) : 'Awaiting live scan'}</span></div>
@@ -270,7 +272,7 @@ function ScannerPanel({
     </div>
 
     <div className="scanner-option-candidate">
-      <div className="scanner-intel-heading"><b>SENSEX OPTION CONTRACT</b><span>{String(optionCandidate.status || 'WAITING FOR DIRECTION').replace(/_/g,' ')}</span></div>
+      <div className="scanner-intel-heading"><b>{String(optionCandidate.underlying || marketSelection.selectedIndex || "INDEX")} OPTION CONTRACT</b><span>{String(optionCandidate.status || 'WAITING FOR DIRECTION').replace(/_/g,' ')}</span></div>
       {optionCandidate.status ? <>
         <div className="scanner-option-main">
           <div><small>TRADE SIDE</small><strong className={optionCandidate.direction==='CE'?'positive':'negative'}>{optionCandidate.direction || '—'}</strong></div>
@@ -285,7 +287,7 @@ function ScannerPanel({
         <p>{optionCandidate.reason || (optionCandidate.status==='SELECTED_FOR_PAPER_ENTRY' ? 'Selected for the current PAPER entry flow; deterministic risk checks still apply.' : 'Informational option preview only. It does not trigger an entry.')}</p>
         {optionCandidate.diagnostics && <small className="scanner-footnote">Option filter: {optionCandidate.diagnostics.reason || 'blocked'} · Chain strikes {optionCandidate.diagnostics.chainStrikes ?? '—'} · Affordable contracts {optionCandidate.diagnostics.eligible ?? '—'}</small>}
         <small className="scanner-footnote">Quote time: {formatDateTime(optionCandidate.quoteTime)} · {optionCandidate.filterTier || 'No liquidity tier'}</small>
-      </> : <div className="scanner-empty">No CE/PE direction yet. As soon as APEX identifies a directional SENSEX candidate, it will display the matching listed contract, strike and live premium here.</div>}
+      </> : <div className="scanner-empty">No eligible CE/PE contract has passed the cross-index filters yet. APEX will show the best listed contract only after all three index agents are compared.</div>}
     </div>
 
     <div className="scanner-news">
@@ -305,6 +307,45 @@ function ScannerPanel({
         <strong className={signal.action==='CE'?'positive':signal.action==='PE'?'negative':'neutral'}>{signal.action||'NO TRADE'}</strong>
         <span>{Math.round(Number(signal.score||0)*100)}%</span></div>)
       :<div className="scanner-empty">No fresh candidate result yet. APEX will show evaluated markets after the next backend scan.</div>}</div>
+    <div className="multi-index-selection">
+      <div className="scanner-subhead">
+        <b>PARALLEL INDEX AGENTS · CENTRAL RANKING</b>
+        <span>{marketSelection.selectedIndex ? "SELECTED: " + marketSelection.selectedIndex + " " + (marketSelection.selectedDirection || "") : (marketSelection.status || "WAITING")}</span>
+      </div>
+      {indexCandidates.length ? <div className="multi-index-grid">
+        {indexCandidates.map((candidate:any) => {
+          const selected = candidate.index === marketSelection.selectedIndex
+          const score = candidate.rankingScorePct != null ? Number(candidate.rankingScorePct).toFixed(1) + "%" : "—"
+          const blockers = Array.isArray(candidate.blockers) ? candidate.blockers : []
+          return <article className={"multi-index-card " + (selected ? "selected " : "") + String(candidate.status || "").toLowerCase()} key={candidate.index}>
+            <div className="multi-index-card-head">
+              <b>{candidate.index}</b>
+              <span className={selected ? "selected-tag" : "candidate-state"}>{selected ? "DEPLOY CANDIDATE" : String(candidate.status || "WAITING").replace(/_/g," ")}</span>
+            </div>
+            <div className="multi-index-score-row">
+              <strong className={candidate.action==="CE" ? "positive" : candidate.action==="PE" ? "negative" : "neutral"}>{candidate.action || "NO TRADE"}</strong>
+              <b>{score}</b>
+            </div>
+            <div className="multi-index-metrics">
+              <span><small>VOLATILITY</small><b>{candidate.volatility || "—"}</b></span>
+              <span><small>REGIME</small><b>{String(candidate.regime || "—").replace(/_/g," ")}</b></span>
+              <span><small>STOP / ATR</small><b>{candidate.structureRiskAtr != null ? Number(candidate.structureRiskAtr).toFixed(2)+"x" : "—"}</b></span>
+              <span><small>PREV CANDLE RANGE</small><b>{candidate.previousCandleRangeAtr != null ? Number(candidate.previousCandleRangeAtr).toFixed(2)+"x ATR" : "—"}</b></span>
+              <span><small>PREMIUM</small><b>{candidate.premium != null ? "₹"+Number(candidate.premium).toFixed(2) : "—"}</b></span>
+              <span><small>DELTA / GAMMA</small><b>{candidate.delta != null ? Number(candidate.delta).toFixed(2) : "—"} / {candidate.gamma != null ? Number(candidate.gamma).toFixed(4) : "—"}</b></span>
+              <span><small>THETA BURN</small><b>{candidate.thetaBurnPct != null ? Number(candidate.thetaBurnPct).toFixed(2)+"%" : "—"}</b></span>
+            </div>
+            <p>{candidate.reason || "Waiting for a fresh completed candle."}</p>
+            {candidate.patterns?.length>0 && <small className="multi-index-blockers">Patterns: {candidate.patterns.slice(0,3).join(" · ")}</small>}
+            <small className="multi-index-blockers">News context: {candidate.newsStatus || "UNAVAILABLE"}</small>
+            {blockers.length>0 && <small className="multi-index-blockers">{blockers.slice(0,3).map((x:string)=>x.replace(/_/g," ")).join(" · ")}</small>}
+            {candidate.contract && <small className="multi-index-contract">{candidate.contract} · {candidate.lotSize || "—"} qty · {candidate.filterTier || "—"}</small>}
+          </article>
+        })}
+      </div> : <div className="scanner-empty">All active index agents are waiting for fresh candles. Once scans complete, NIFTY, BANK NIFTY and SENSEX will be ranked side by side.</div>}
+      <small className="scanner-footnote">Ranking score is a relative quality score, not a win probability. Option-chain checks are sequential to respect broker rate limits; only one index can be selected for a PAPER entry.</small>
+    </div>
+
     <div className="scanner-decision"><small>LAST DECISION / WHY NO TRADE</small><p>{resultText}</p>
       {Array.isArray(decision?.scalpScan?.blockedBy)&&decision.scalpScan.blockedBy.length>0&&<div className="scanner-tags">{decision.scalpScan.blockedBy.map((reason:string)=><span key={reason}>{reason.replace(/_/g,' ')}</span>)}</div>}</div>
     <small className="scanner-footnote">Countdown refreshes every second; broker/strategy scans run on the backend interval above to respect provider rate limits. No scan is claimed while the engine is paused.</small>
@@ -876,6 +917,7 @@ export default function App() {
   const latestDecision = automation.lastDecision || {}
   const setupState = openTrades.length > 0 ? 'TRADE ACTIVE'
     : latestDecision.setupStatus === 'SETUP_FOUND' ? 'SETUP FOUND'
+    : latestDecision.setupStatus === 'NO_ELIGIBLE_INDEX' ? 'NO SAFE INDEX'
     : latestDecision.setupStatus === 'NO_SETUP_FOUND' ? 'NO SETUP FOUND'
     : automation.running ? 'SCANNING FOR SETUP' : 'SCANNER STOPPED'
   const marketResearch = status.marketResearch || {}
@@ -910,18 +952,27 @@ export default function App() {
   const phase = automation.lastDecision?.phase || {}
   const manualDoTrade = automation.manualDoTrade || {}
   const freshnessMap = automation.marketDataFreshness || {}
-  const latestSignal = Array.isArray(automation.lastDecision?.signals) ? automation.lastDecision.signals[0] : null
-  const sensexFreshness = freshnessMap.SENSEX || latestSignal?.dataFreshness || {}
-  const freshnessState = String(sensexFreshness.state || 'UNKNOWN').toUpperCase()
-  const feedStale = ['STALE', 'MISSING', 'INVALID_TIMESTAMP'].includes(freshnessState)
+  const marketSelection = latestDecision.marketSelection || {}
+  const selectedIndex = String(marketSelection.selectedIndex || '')
+  const signalRows = Array.isArray(latestDecision.signals) ? latestDecision.signals : []
+  const latestSignal = signalRows.find((row:any) => row.index === selectedIndex) || signalRows[0] || null
+  const freshnessEntries = Object.entries(freshnessMap) as [string, any][]
+  const selectedFreshness = freshnessMap[selectedIndex] || latestSignal?.dataFreshness || freshnessMap.SENSEX || {}
+  const sensexFreshness = freshnessMap.SENSEX || {}
+  const freshnessState = String(selectedFreshness.state || 'UNKNOWN').toUpperCase()
+  const staleStates = ['STALE', 'MISSING', 'INVALID_TIMESTAMP']
+  const feedStale = freshnessEntries.length
+    ? freshnessEntries.every(([, value]) => value?.fresh !== true || staleStates.includes(String(value?.state || '').toUpperCase()))
+    : staleStates.includes(freshnessState)
   const feedDelayed = freshnessState === 'DELAYED'
+  const sensexFeedStale = staleStates.includes(String(sensexFreshness.state || 'UNKNOWN').toUpperCase())
   const marketResearchOnly = Boolean(phase?.researchPhase && !phase?.tradable && !phase?.liveScan)
   const showFeedWarning = !marketResearchOnly && (feedStale || feedDelayed)
   const lastMoment = liveMoments[0] || {}
   const lastVerifiedTrend = String(
     latestSignal?.context?.trend ||
     lastMoment?.context?.trend ||
-    researchMarkets?.SENSEX?.frames?.['1m']?.trend ||
+    researchMarkets?.[selectedIndex || 'SENSEX']?.frames?.['1m']?.trend ||
     'UNKNOWN'
   ).toUpperCase()
   const targetAmount = Number(mt.targetAmount || 0)
@@ -961,7 +1012,7 @@ export default function App() {
     killed ||
     status.mode !== 'PAPER' ||
     !providerReady ||
-    feedStale ||
+    sensexFeedStale ||
     !manualDoTrade.enabled ||
     !manualDoTrade.timeEligible ||
     openTrades.length > 0
@@ -987,7 +1038,7 @@ export default function App() {
         <span className="brand-mark">A</span>
         <div>
           <h1>APEX Algo AI</h1>
-          <p>SENSEX Scalping Intelligence • PAPER only</p>
+          <p>Multi-Index Scalping Intelligence • PAPER only</p>
         </div>
       </div>
       <div className="top-meta"><button type="button" className="theme-toggle" aria-label="Toggle light and dark theme" onClick={toggleTheme}>{theme === "dark" ? "☀ Light mode" : "☾ Dark mode"}</button>
@@ -1105,7 +1156,7 @@ export default function App() {
     <section className="apex-v3-hero" aria-label="APEX scalping command center">
       <div className="apex-v3-avatar" aria-hidden="true"><span className="apex-v3-orbit">✦</span><span className="apex-v3-face">◈</span><span className="apex-v3-core">AI</span><span className="neural-avatar-ring ring-one"/><span className="neural-avatar-ring ring-two"/><span className="neural-avatar-spark s1"/><span className="neural-avatar-spark s2"/></div>
       <div className="apex-v3-message">
-        <small>APEX / INTELLIGENCE CORE / SENSEX 1M</small>
+        <small>APEX / MULTI-INDEX INTELLIGENCE / 1M</small>
         <h2>NEURAL <em>SCALP OS</em><span className="neural-os-version"> / V4</span></h2>
         <p>Autonomous-looking intelligence workspace, deterministic PAPER decisions. SMC structure + 1m execution, 5m/15m confirmation, neural shadow evaluation and cost-aware exits.</p>
         <div className="apex-v3-tags"><span>● {automation.running ? 'SCANNER RUNNING' : 'SCANNER OFFLINE'}</span><span>{status.mode === 'PAPER' ? 'PAPER ACTIVE' : 'PAPER INACTIVE'}</span><span>{providerReady ? 'MARKET FEED READY' : 'CHECK MARKET FEED'}</span></div>
@@ -1113,7 +1164,7 @@ export default function App() {
       <div className="apex-v3-targets">
         <div><small>DAILY NET PROFIT MILESTONE</small><strong>₹1,500</strong><span>Goal only · not guaranteed</span></div>
         <div><small>DAILY LOSS SAFETY LOCK</small><strong className="apex-v3-red">₹800</strong><span>At ₹40k baseline · real fills may slip</span></div>
-        <div><small>CAPITAL / RISK / FREQUENCY</small><b>70% / 1% / 5</b><span>Max allocation / risk per trade / trades per day</span></div>
+        <div><small>CAPITAL / RISK / FREQUENCY</small><b>90% / 1% / 5</b><span>Max allocation / risk per trade / trades per day</span></div>
       </div>
     </section>
 
@@ -1126,7 +1177,7 @@ export default function App() {
         <div>
           <small>MARKET DATA PROVIDER</small>
           <b>{marketProviderName(market)}</b>
-          <span>{market.realMarketData ? 'Real broker market data' : 'Provider connected'} • SENSEX • Option chain enabled</span>
+          <span>{market.realMarketData ? 'Real broker market data' : 'Provider connected'} • NIFTY / BANK NIFTY / SENSEX • option-chain selection enabled</span>
         </div>
       </div>
       <div className="provider-status-grid">
@@ -1144,9 +1195,9 @@ export default function App() {
       <div>
         <b>{feedStale ? 'Market data too old for a new trade' : 'Market data is delayed but still inside the live-entry limit'}</b>
         <span>
-          SENSEX candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'}
-          {' • '}age {sensexFreshness.ageSeconds != null ? `${Math.max(0, Number(sensexFreshness.ageSeconds)).toFixed(0)}s` : '—'}
-          {' • '}max {sensexFreshness.maxAgeSeconds ?? '—'}s.
+          {selectedIndex || 'Selected index'} candle {selectedFreshness.candleTime ? formatDateTime(selectedFreshness.candleTime) : '—'}
+          {' • '}age {selectedFreshness.ageSeconds != null ? `${Math.max(0, Number(selectedFreshness.ageSeconds)).toFixed(0)}s` : '—'}
+          {' • '}max {selectedFreshness.maxAgeSeconds ?? '—'}s.
           {feedStale ? ` APEX will not score/execute this candle; scan loop keeps retrying every ${scanLoop.intervalSeconds ?? 30}s.` : ''}
         </span>
       </div>
@@ -1171,8 +1222,8 @@ export default function App() {
     </div>
 
     <section className="ref-compact-strip" aria-label="APEX risk and neural indicators">
-      <div className="ref-mini-card"><small>◉ TRADE RADAR</small><strong>{automation.running?'ACTIVE':'PAUSED'}</strong><span>SENSEX • 1M / 5M / 15M</span></div>
-      <div className="ref-mini-card"><small>◇ PAPER EXPOSURE</small><strong>{money(runningDeployed)}</strong><span>70% cash ceiling</span></div>
+      <div className="ref-mini-card"><small>◉ TRADE RADAR</small><strong>{automation.running?'ACTIVE':'PAUSED'}</strong><span>NIFTY · BANK NIFTY · SENSEX</span></div>
+      <div className="ref-mini-card"><small>◇ PAPER EXPOSURE</small><strong>{money(runningDeployed)}</strong><span>90% max allocation ceiling</span></div>
       <div className="ref-mini-card"><small>◈ RISK METER</small><strong>{money(r.riskPerTrade)}</strong><span>Planned per trade</span></div>
       <div className="ref-mini-card"><small>⊞ SCALPS TODAY</small><strong>{r.tradesToday || 0} / 5</strong><span>Never force entries</span></div>
       <div className="ref-mini-card"><small>♢ DAILY SAFETY</small><strong>₹800</strong><span>Loss guardrail, not guaranteed</span></div>
@@ -1423,13 +1474,13 @@ export default function App() {
         <SystemItem label="LLM model" value={ollama.model || '—'} />
       </div>
 
-      <section style={{border:'1px solid rgba(62,180,150,.45)',background:'rgba(25,125,105,.08)',borderRadius:16,padding:'16px 18px',marginBottom:18}} aria-label="APEX SENSEX scalping policy">
+      <section style={{border:'1px solid rgba(62,180,150,.45)',background:'rgba(25,125,105,.08)',borderRadius:16,padding:'16px 18px',marginBottom:18}} aria-label="APEX multi-index scalping policy">
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,flexWrap:'wrap'}}>
-          <div><small style={{letterSpacing:'.12em',opacity:.8}}>PAPER MODE · SENSEX</small><h3 style={{margin:'4px 0'}}>Scalping Risk Desk</h3></div>
+          <div><small style={{letterSpacing:'.12em',opacity:.8}}>PAPER MODE · MULTI-INDEX</small><h3 style={{margin:'4px 0'}}>Scalping Risk Desk</h3></div>
           <strong style={{fontSize:12,border:'1px solid currentColor',padding:'5px 10px',borderRadius:20}}>NO LIVE ORDERS</strong>
         </div>
         <div className="core-stat-grid" style={{marginTop:12}}>
-          <span><small>Allocation ceiling</small><b>70% capital</b></span>
+          <span><small>Allocation ceiling</small><b>90% capital</b></span>
           <span><small>Planned risk ceiling</small><b>1% / ₹400 baseline</b></span>
           <span><small>Daily trades</small><b>Max 5</b></span>
           <span><small>Exit logic</small><b>Dynamic SL / cost-adjusted TP</b></span>
@@ -1514,12 +1565,12 @@ export default function App() {
 
     <section className="panel live-learning-panel">
       <div className="section-head compact">
-        <div><div className="eyebrow">LIVE MARKET LEARNING</div><h2>SENSEX 1m Moment Memory</h2><p>09:20–15:15 only. Valid-price SMC/price-action moments are stored before outcomes are known; after cutoff the worker switches to deep research instead of creating after-hours noise.</p></div>
+        <div><div className="eyebrow">LIVE MARKET LEARNING</div><h2>Multi-Index 1m Moment Memory</h2><p>09:20–15:15 only. Valid-price SMC/price-action moments are stored before outcomes are known; after cutoff the worker switches to deep research instead of creating after-hours noise.</p></div>
         <span className="badge subtle">{liveLearning.totalObservations ?? 0} OBSERVATIONS</span>
       </div>
       {feedStale && !marketResearchOnly && <div className="live-feed-freeze">
         <b>Fresh-feed capture waiting — scan loop is still running</b>
-        <span>APEX is retrying the provider every {scanLoop.intervalSeconds ?? 30}s. Last scan attempt: <strong>{formatDateTime(scanLoop.lastAttemptAt || automation.lastCycleAt)}</strong> • last verified candle {sensexFreshness.candleTime ? formatDateTime(sensexFreshness.candleTime) : '—'} • no new learning moment or trade is allowed until a fresh candle arrives.</span>
+        <span>APEX is retrying the provider every {scanLoop.intervalSeconds ?? 30}s. Last scan attempt: <strong>{formatDateTime(scanLoop.lastAttemptAt || automation.lastCycleAt)}</strong> • last verified candle {selectedFreshness.candleTime ? formatDateTime(selectedFreshness.candleTime) : '—'} • no new learning moment or trade is allowed until a fresh candle arrives.</span>
       </div>}
       <div className="learning-grid">
         <SystemItem label="Mode" value={marketResearchOnly ? 'MARKET_CLOSED_RESEARCH' : feedStale ? 'STALE_FEED_RETRYING' : (liveLearning.mode || 'waiting')} good={Boolean(liveLearning.enabled && !feedStale)} />
@@ -1531,7 +1582,7 @@ export default function App() {
         <SystemItem label="Standard entry" value={automation.entryPolicy?.standardMinScore != null ? `≥ ${Number(automation.entryPolicy.standardMinScore).toFixed(2)}` : '—'} />
         <SystemItem label="Strong SMC entry" value={automation.entryPolicy?.smcOverrideMinScore != null ? `≥ ${Number(automation.entryPolicy.smcOverrideMinScore).toFixed(2)}` : '—'} />
       </div>
-      {liveMoments.length === 0 ? <div className="empty-line">Waiting for the next live SENSEX scan.</div> :
+      {liveMoments.length === 0 ? <div className="empty-line">Waiting for the next live NIFTY / BANK NIFTY / SENSEX scan.</div> :
       <div className="table-scroll">
         <table className="trade-table">
           <thead><tr><th>Time</th><th>Market</th><th>Action</th><th>Executed Score</th><th>Strategy</th><th>SMC / Context</th><th>Blocked By</th><th>Execution</th><th>Ollama</th><th>Outcome</th></tr></thead>
@@ -1641,7 +1692,7 @@ export default function App() {
           <SystemItem label="Strategy loop" value={automation.running ? 'Running' : 'Stopped'} good={automation.running} />
           <SystemItem label="Position monitor" value={positionMonitor.running ? 'Running' : 'Stopped'} good={positionMonitor.running} />
           <SystemItem label="Market data" value={feedStale ? 'STALE — blocked' : feedDelayed ? 'Delayed' : providerReady ? 'Ready' : 'Not ready'} good={providerReady && !feedStale} />
-          <SystemItem label="Candle age" value={sensexFreshness.ageSeconds != null ? `${Math.max(0, Number(sensexFreshness.ageSeconds)).toFixed(0)}s / ${sensexFreshness.maxAgeSeconds ?? '—'}s` : 'Waiting'} good={Boolean(sensexFreshness.fresh)} />
+          <SystemItem label="Candle age" value={selectedFreshness.ageSeconds != null ? `${Math.max(0, Number(selectedFreshness.ageSeconds)).toFixed(0)}s / ${selectedFreshness.maxAgeSeconds ?? '—'}s` : 'Waiting'} good={Boolean(selectedFreshness.fresh)} />
           <SystemItem label="Provider" value={market.provider || 'unknown'} />
           <SystemItem label="Paper broker" value={market.paperBroker || 'internal'} />
           <SystemItem label="Phase" value={phase.reason || 'Waiting'} />
@@ -1678,7 +1729,7 @@ export default function App() {
             <button type="button" disabled={doTradeDisabled} onClick={() => void doTradeNow()}>
               {busy === 'do-trade' ? 'SCANNING…' : '⚠ DO TRADE'}
             </button>
-            <small>{busy === 'do-trade' ? 'Scanning current market setup…' : manualDoTrade.last?.status === 'REFUSED' ? `Last refused: ${manualDoTrade.last.reason || 'safety/market gate'}` : feedStale ? 'Waiting for fresh candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
+            <small>{busy === 'do-trade' ? 'Scanning current market setup…' : manualDoTrade.last?.status === 'REFUSED' ? `Last refused: ${manualDoTrade.last.reason || 'safety/market gate'}` : sensexFeedStale ? 'Waiting for fresh SENSEX candle' : !manualDoTrade.timeEligible ? `Available until ${manualDoTrade.cutoffTime ?? '15:20'}` : openTrades.length ? 'Close current position first' : status.mode !== 'PAPER' ? 'Switch to PAPER first' : 'Fresh SMC setup required'}</small>
           </div>
         </div>
 

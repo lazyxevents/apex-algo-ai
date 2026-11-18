@@ -1574,3 +1574,26 @@ html[data-theme="light"] .scanner-option-candidate{background:#f8fbfd;border-col
 html[data-theme="light"] .scanner-option-main>div{background:#fff;border-color:#e0e9ef}
 html[data-theme="light"] .scanner-option-main strong{color:#254257}
 html[data-theme="light"] .scanner-option-candidate>p{color:#61798b}
+
+
+/* Multi-index APEX decision surface */
+.multi-index-selection{margin-top:16px;padding:14px;border:1px solid rgba(108,145,180,.28);border-radius:16px;background:rgba(80,110,145,.055)}
+.multi-index-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:12px}
+.multi-index-card{min-width:0;padding:13px;border:1px solid rgba(120,145,170,.24);border-radius:13px;background:rgba(110,135,160,.055)}
+.multi-index-card.selected{border-color:rgba(44,204,151,.72);background:rgba(28,155,115,.10);box-shadow:inset 0 0 0 1px rgba(44,204,151,.12)}
+.multi-index-card.blocked,.multi-index-card.option_blocked{border-color:rgba(230,145,95,.28)}
+.multi-index-card-head,.multi-index-score-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.multi-index-card-head>b{font-size:14px;letter-spacing:.04em}
+.multi-index-card-head>span{font-size:9px;letter-spacing:.08em;font-weight:800;opacity:.8}
+.multi-index-card .selected-tag{color:#35d9a3}
+.multi-index-card .candidate-state{color:var(--muted,#91a1b3)}
+.multi-index-score-row{margin:12px 0 10px}
+.multi-index-score-row>strong{font-size:18px}
+.multi-index-score-row>b{font-size:20px;font-variant-numeric:tabular-nums}
+.multi-index-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.multi-index-metrics span{display:flex;flex-direction:column;gap:3px;min-width:0}
+.multi-index-metrics small{font-size:9px;letter-spacing:.08em;opacity:.65}
+.multi-index-metrics b{font-size:11px;overflow-wrap:anywhere}
+.multi-index-card p{font-size:11px;line-height:1.5;opacity:.82;margin:11px 0 0}
+.multi-index-blockers,.multi-index-contract{display:block;margin-top:8px;font-size:10px;line-height:1.45;opacity:.72;overflow-wrap:anywhere}
+.multi-index-contract{color:var(--accent,#56c8ad)}

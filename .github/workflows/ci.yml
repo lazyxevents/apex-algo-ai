@@ -33,6 +33,7 @@ jobs:
           MONGODB_URI: mongodb://localhost:27017
           MONGODB_DATABASE: apgoai
           MARKET_DATA_PROVIDER: dhan
+          ACTIVE_INDICES_RAW: NIFTY,BANKNIFTY,SENSEX
         run: pytest -q
 
   frontend:
