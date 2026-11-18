@@ -16,6 +16,7 @@ def _signal(index="NIFTY", action="CE", volatility="NORMAL", atr_pct=0.20,
         "underlyingPrice": 10000,
         "previousLow": previous_low,
         "previousHigh": previous_high,
+        "previousCandle": {"low": 9995, "high": 10003, "close": 10001},
         "dataFreshness": {"fresh": True, "state": "FRESH"},
         "marketContext": {"volatility": volatility, "atrPct": atr_pct},
         "marketIntelligence": {
@@ -94,3 +95,12 @@ def test_safer_option_candidate_ranks_above_high_decay_contract():
     assert safer["status"] == "READY"
     assert risky["status"] in {"READY", "BLOCKED"}
     assert safer["rankingScore"] > (risky["rankingScore"] or 0)
+
+
+
+def test_multi_index_rejects_oversized_previous_completed_candle():
+    signal = _signal()
+    signal["previousCandle"] = {"low": 9950, "high": 10050, "close": 10000}
+    result = assess_index_candidate(signal, option_required=False)
+    assert result["status"] == "BLOCKED"
+    assert "PREVIOUS_CANDLE_RANGE_TOO_WIDE" in result["blockers"]
