@@ -248,3 +248,8 @@ Dhan Web access tokens last 24 hours. APEX can renew an **active Dhan Web-genera
 5. Keep `TRADING_MODE=PAPER` and `ALLOW_LIVE_ORDERS=false` until data, fills and safety controls are verified.
 
 Dhan API documentation: https://dhanhq.co/docs/v2/authentication/
+
+
+## Performance and learning intelligence
+
+The English dashboard includes a read-only scorecard at `GET /api/intelligence/scorecard`. It summarizes closed valid PAPER trades by index, strategy and recorded market regime, including win rate, expectancy, profit factor, net P&L and drawdown. Sample-size labels distinguish low-sample observations from larger history; these are descriptive statistics, not calibrated forecasts or guarantees. New trades persist market-intelligence, market-context, timeframe and selected-option metadata so future scorecards can attribute outcomes more accurately.
