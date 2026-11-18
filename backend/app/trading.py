@@ -1884,7 +1884,7 @@ class TradingEngine:
                 )
                 lots_cash = floor(deployable / max(entry * lot_size, 0.01))
                 estimated_stop_fees = float(estimate_paper_costs(
-                    entry, stop, lot_size, exchange="BSE", synthetic=synthetic_demo,
+                    entry, stop, lot_size, exchange=exchange, synthetic=synthetic_demo,
                 )["total"]) / max(1, lot_size)
                 slippage_per_unit = max(0.05, entry * max(0.0, float(option.get("spreadPct") or 0)) / 100.0)
                 effective_risk_per_unit = stop_distance + estimated_stop_fees + slippage_per_unit
@@ -1900,7 +1900,7 @@ class TradingEngine:
                     reason = f"one index lot risks ₹{one_lot_risk:.2f}, above per-trade limit ₹{float(risk_limit):.2f}"
                 elif one_lot_cost > float(deployable):
                     stage = "CAPITAL_LOT"
-                    reason = f"one SENSEX lot costs ₹{one_lot_cost:.2f}, above deployable capital ₹{float(deployable):.2f}"
+                    reason = f"one index lot costs ₹{one_lot_cost:.2f}, above deployable capital ₹{float(deployable):.2f}"
                 else:
                     stage = "RISK_CAPITAL"
                     reason = "one valid paper lot does not fit current capital/risk budget"
@@ -1939,7 +1939,7 @@ class TradingEngine:
                 target_distance = max(0.05, (net_target_budget + float(target_costs["total"])) / qty)
             target = round(entry + target_distance, 2)
             target_costs = estimate_paper_costs(
-                entry, target, qty, exchange="BSE", synthetic=synthetic_demo,
+                entry, target, qty, exchange=exchange, synthetic=synthetic_demo,
             )
             expected_target_net = round((target - entry) * qty - float(target_costs["total"]), 2)
 
@@ -1955,7 +1955,7 @@ class TradingEngine:
                 stop_distance = min(stop_distance, allowed_stop_distance)
             stop = round(max(0.05, entry - stop_distance), 2)
             stop_costs = estimate_paper_costs(
-                entry, stop, qty, exchange="BSE", synthetic=synthetic_demo,
+                entry, stop, qty, exchange=exchange, synthetic=synthetic_demo,
             )
             expected_stop_net = round((stop - entry) * qty - float(stop_costs["total"]), 2)
             if expected_target_net < net_target_budget - 1.0 or expected_stop_net < -net_stop_budget - 1.0:
