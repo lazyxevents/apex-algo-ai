@@ -71,6 +71,10 @@ def assess_index_candidate(
         "structureStopPoints": None,
         "structureRiskAtr": None,
         "previousRangeAtr": None,
+        "previousCandleRangeAtr": None,
+        "previousCandleStopAtr": None,
+        "previousCandleRangePoints": None,
+        "previousCandleStopPoints": None,
         "atrPoints": None,
         "thetaBurnPct": None,
         "structureRiskPct": None,
@@ -129,6 +133,26 @@ def assess_index_candidate(
     atr_points = spot * atr_pct / 100.0 if spot > 0 and atr_pct > 0 else 0.0
     structure_risk_atr = structure_stop / atr_points if atr_points > 0 else None
     previous_range_atr = previous_range / atr_points if atr_points > 0 else None
+    previous_candle = signal.get("previousCandle") or {}
+    previous_candle_range_atr = None
+    previous_candle_stop_atr = None
+    previous_candle_range = None
+    previous_candle_stop = None
+    if previous_candle.get("low") is not None and previous_candle.get("high") is not None:
+        candle_low = _number(previous_candle.get("low"))
+        candle_high = _number(previous_candle.get("high"))
+        previous_candle_range = max(0.0, candle_high - candle_low)
+        previous_candle_stop = (
+            max(0.0, spot - candle_low + stop_buffer)
+            if action == "CE" else max(0.0, candle_high - spot + stop_buffer)
+        )
+        if atr_points > 0:
+            previous_candle_range_atr = previous_candle_range / atr_points
+            previous_candle_stop_atr = previous_candle_stop / atr_points
+        if previous_candle_range_atr is not None and previous_candle_range_atr > max_previous_range_atr:
+            blockers.append("PREVIOUS_CANDLE_RANGE_TOO_WIDE")
+        if previous_candle_stop_atr is not None and previous_candle_stop_atr > max_structure_risk_atr:
+            blockers.append("PREVIOUS_CANDLE_STOP_TOO_WIDE")
     if structure_risk_atr is not None and structure_risk_atr > max_structure_risk_atr:
         blockers.append("PREVIOUS_STRUCTURE_STOP_TOO_WIDE")
     if previous_range_atr is not None and previous_range_atr > max_previous_range_atr:
@@ -141,6 +165,10 @@ def assess_index_candidate(
         "atrPoints": round(atr_points, 2) if atr_points > 0 else None,
         "structureRiskAtr": round(structure_risk_atr, 3) if structure_risk_atr is not None else None,
         "previousRangeAtr": round(previous_range_atr, 3) if previous_range_atr is not None else None,
+        "previousCandleRangeAtr": round(previous_candle_range_atr, 3) if previous_candle_range_atr is not None else None,
+        "previousCandleStopAtr": round(previous_candle_stop_atr, 3) if previous_candle_stop_atr is not None else None,
+        "previousCandleRangePoints": round(previous_candle_range, 2) if previous_candle_range is not None else None,
+        "previousCandleStopPoints": round(previous_candle_stop, 2) if previous_candle_stop is not None else None,
     })
 
     if blockers:
