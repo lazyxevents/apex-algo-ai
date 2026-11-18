@@ -330,6 +330,7 @@ function ScannerPanel({
               <span><small>VOLATILITY</small><b>{candidate.volatility || "—"}</b></span>
               <span><small>REGIME</small><b>{String(candidate.regime || "—").replace(/_/g," ")}</b></span>
               <span><small>STOP / ATR</small><b>{candidate.structureRiskAtr != null ? Number(candidate.structureRiskAtr).toFixed(2)+"x" : "—"}</b></span>
+              <span><small>PREV CANDLE RANGE</small><b>{candidate.previousCandleRangeAtr != null ? Number(candidate.previousCandleRangeAtr).toFixed(2)+"x ATR" : "—"}</b></span>
               <span><small>PREMIUM</small><b>{candidate.premium != null ? "₹"+Number(candidate.premium).toFixed(2) : "—"}</b></span>
               <span><small>DELTA / GAMMA</small><b>{candidate.delta != null ? Number(candidate.delta).toFixed(2) : "—"} / {candidate.gamma != null ? Number(candidate.gamma).toFixed(4) : "—"}</b></span>
               <span><small>THETA BURN</small><b>{candidate.thetaBurnPct != null ? Number(candidate.thetaBurnPct).toFixed(2)+"%" : "—"}</b></span>
