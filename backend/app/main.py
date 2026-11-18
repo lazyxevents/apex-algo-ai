@@ -13,6 +13,7 @@ from .dataset_model import dataset_model_service
 from .dhan import dhan_service
 from .kite import kite_service
 from .learning_worker import learning_worker
+from .intelligence import intelligence_service
 from .live_learning import live_learning_service
 from .market_chart import build_market_chart
 from .neural_model import neural_model_service
@@ -312,6 +313,12 @@ def reset_kill_switch():
 @app.get("/api/risk/status")
 def risk_status():
     return trading_engine.risk_snapshot()
+
+
+@app.get("/api/intelligence/scorecard")
+def intelligence_scorecard():
+    """Read-only, evidence-based performance breakdown by index, strategy and regime."""
+    return intelligence_service.snapshot()
 
 
 @app.get("/api/performance")
