@@ -1062,6 +1062,7 @@ export default function App() {
       <div className="ref-ticker-item ref-ticker-paper"><b>◉ {status.mode}</b><small>SIMULATION ONLY</small></div>
     </nav>
 
+    <IntelligencePanel />
 
     <section className="apex-setup-banner" aria-live="polite">
       <div><small>DAILY SETUP STATUS • EMA 9/21 PULLBACK SCALP</small>
@@ -1868,8 +1869,6 @@ export default function App() {
         </div>
       </section>
     </div>}
-
-    <IntelligencePanel />
 
     <footer className="apex-footer">
       <span>APEX Algo AI • Testing dashboard</span>
