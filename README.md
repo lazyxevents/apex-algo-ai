@@ -165,6 +165,14 @@ KITE_ACCESS_TOKEN=
 
 Do not enable real-money execution after only a few demo trades. First validate the system over a larger paper/backtest sample and reconcile real option pricing/fees.
 
+## Multi-index adaptive selection
+
+The live scanner runs independent NIFTY, BANK NIFTY and SENSEX candle/SMC/MTF analyses concurrently when all three are enabled. A central selector compares each directional scalp candidate using fresh-data checks, 5m/15m alignment, volatility, recent structural-stop distance relative to ATR, previous-candle range, option-chain liquidity/spread and Delta/Gamma/Theta risk.
+
+Option-chain checks are deliberately sequential after the parallel candle agents to avoid broker rate-limit bursts. If one index fails its option, lot-size, premium-risk or ranking gate, APEX evaluates the next eligible index. At most one index is selected for a PAPER entry per cycle; if none passes, it does not force a trade. Ranking scores are relative selection scores, not calibrated win probabilities.
+
+Pattern-reference ingestion and the existing timestamped news/research pipeline continue to provide context. External research and LLM output remain advisory and cannot override deterministic execution or risk gates. The current deployment remains PAPER-only with live broker orders disabled.
+
 ## Safety controls
 
 Default trading window:
