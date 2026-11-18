@@ -24,6 +24,7 @@ from .paper_costs import estimate_paper_costs
 from .research_engine import research_engine
 from .pattern_references import pattern_reference_service
 from .strategy import ARMS, adaptive_learner, evaluate_ema_liquidity_scalp, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
+from .multi_index import assess_index_candidate, build_multi_index_selection
 
 IST = ZoneInfo(settings.timezone)
 
@@ -1442,7 +1443,7 @@ class TradingEngine:
         )
         # Whole-lot sizing includes the estimated stop exit cost and slippage.
         estimated_stop_fees = float(estimate_paper_costs(
-            entry, stop, lot_size, exchange="BSE", synthetic=synthetic_demo,
+            entry, stop, lot_size, exchange=exchange, synthetic=synthetic_demo,
         )["total"]) / max(1, lot_size)
         slippage_per_unit = max(0.05, entry * max(0.0, float(option.get("spreadPct") or 0)) / 100.0)
         effective_risk_per_unit = stop_distance + estimated_stop_fees + slippage_per_unit
@@ -1689,7 +1690,6 @@ class TradingEngine:
                 decision["liveObservations"] = live_observations
                 decision["signals"] = ranked
                 self._attach_trade_finder_intelligence(decision, ranked)
-                self._attach_option_preview(decision, provider, ranked, observation_capital)
 
             risk = self.risk_snapshot()
             if risk["monthlyTargetLocked"]:
@@ -1733,132 +1733,64 @@ class TradingEngine:
                 decision["liveObservations"] = live_observations
                 decision["signals"] = ranked
                 self._attach_trade_finder_intelligence(decision, ranked)
-                self._attach_option_preview(decision, provider, ranked, capital)
-            # Automated entries are SENSEX scalp only. No forced trade.
-            ranked = [candidate for candidate in ranked if candidate.get("index") == "SENSEX"]
-            decision["executionStrategy"] = "APEX_EMA9_21_PULLBACK_SCALP"
-            decision["setupStatus"] = "SEARCHING"
-            # Choose an executable scalp before high-score NO_TRADE candidates.
-            scalp_candidates = [
-                candidate for candidate in ranked
-                if candidate.get("action") in {"CE", "PE"}
-                and "SCALP" in str(candidate.get("chosenStrategy") or candidate.get("strategy") or "").upper()
-            ]
-            best = max(scalp_candidates, key=lambda row: float(row.get("score") or 0)) if scalp_candidates else (ranked[0] if ranked else {"action": "NO_TRADE", "score": 0})
-            if best.get("action") not in {"CE", "PE"}:
-                decision["reason"] = best.get("reason") or "NO_SETUP_FOUND"
-                decision["setupStatus"] = "NO_SETUP_FOUND"
-                decision["scalpScan"] = {
-                    "status": "NO_ENTRY", "strategy": "APEX_EMA9_21_PULLBACK_SCALP",
-                    "directionCandidate": best.get("directionCandidate"),
-                    "score": best.get("score"),
-                    "blockedBy": best.get("blockedBy") or [],
-                }
-                decision["executionGate"] = {
-                    "status": "BLOCKED", "stage": "SIGNAL_QUALITY",
-                    "reason": decision["reason"],
-                    "details": {"score": best.get("score"), "blockedBy": best.get("blockedBy") or [],
-                                "directionCandidate": best.get("directionCandidate")},
-                }
-                self.state.last_decision = decision
-                return decision
 
-            decision["setupStatus"] = "SETUP_FOUND"
+            # Compare all active indices; the central selector deploys at most one PAPER candidate.
+            decision["executionStrategy"] = "APEX_MULTI_INDEX_EMA9_21_PULLBACK_SCALP"
+            decision["setupStatus"] = "SEARCHING"
             try:
                 with SessionLocal() as db:
                     self._authorize(db)
             except ValueError as exc:
                 reason = str(exc)
                 decision["reason"] = reason
-                decision["executionGate"] = self._mark_signal_block(
-                    live_observations,
-                    best,
-                    stage="RISK_AUTHORIZATION",
-                    reason=reason,
-                    details={"capital": round(capital, 2), "deployableCapital": round(deployable, 2)},
-                )
+                decision["setupStatus"] = "RISK_BLOCKED"
+                decision["executionGate"] = {
+                    "status": "BLOCKED", "stage": "RISK_AUTHORIZATION", "reason": reason,
+                }
                 self.state.last_decision = decision
                 return decision
 
-            synthetic_demo = not bool(getattr(provider, "supports_option_chain", True))
-            expiry = None
-            if synthetic_demo:
-                option = provider.synthetic_option_candidate(
-                    best["index"],
-                    best["underlyingKey"],
-                    best["action"],
-                    best["underlyingPrice"],
-                )
-                lot_size = int(option.get("lotSize") or 1)
-                expiry = option.get("expiry")
-            else:
-                preview_cache = getattr(self, "_option_preview_cache", None)
-                preview_key = (str(best.get("underlyingKey")), str(best.get("action")))
-                preview_age = (
-                    (datetime.now(IST) - preview_cache.get("at")).total_seconds()
-                    if preview_cache and isinstance(preview_cache.get("at"), datetime) else 999
-                )
-                if preview_cache and preview_cache.get("key") == preview_key and preview_age < 25:
-                    option = preview_cache.get("option")
-                    lot_size = int(preview_cache.get("lotSize") or 0)
-                    expiry = preview_cache.get("expiry")
-                    self._last_option_filter_diagnostics = dict(preview_cache.get("diagnostics") or {})
-                else:
-                    try:
-                        option, lot_size, expiry = self._real_option_candidate(provider, best, deployable)
-                    except Exception as exc:
-                        self._last_option_filter_diagnostics = {
-                            "reason": "OPTION_CHAIN_ERROR",
-                            "error": str(exc)[:240],
-                            "index": best.get("index"),
-                            "direction": best.get("action"),
-                        }
-                        option, lot_size, expiry = None, 0, None
-                if not option:
-                    reason = "no liquid/affordable option contract passed filters"
-                    decision["reason"] = reason
-                    decision["optionCandidate"] = {
-                        "status": "BLOCKED",
-                        "direction": best.get("action"),
-                        "expiry": expiry,
-                        "reason": (getattr(self, "_last_option_filter_diagnostics", {}) or {}).get("reason", "OPTION_FILTER_BLOCKED"),
-                        "diagnostics": getattr(self, "_last_option_filter_diagnostics", {}),
-                    }
-                    decision["executionGate"] = self._mark_signal_block(
-                        live_observations,
-                        best,
-                        stage="OPTION_FILTER",
-                        reason=reason,
-                        details={
-                            "maxSpreadPct": settings.max_option_spread_pct,
-                            "minVolume": settings.min_option_volume,
-                            "maxOtmSteps": settings.max_otm_steps,
-                            "deployableCapital": round(deployable, 2),
-                            "expiry": expiry,
-                            "diagnostics": getattr(self, "_last_option_filter_diagnostics", {}),
-                        },
-                    )
-                    self.state.last_decision = decision
-                    return decision
-                if lot_size <= 0:
-                    reason = "selected option has invalid/missing exchange lot size"
-                    decision["reason"] = reason
-                    decision["executionGate"] = self._mark_signal_block(
-                        live_observations,
-                        best,
-                        stage="LOT_SIZE",
-                        reason=reason,
-                        details={"expiry": expiry, "instrumentKey": option.get("instrumentKey")},
-                    )
-                    self.state.last_decision = decision
-                    return decision
+            market_selection, selected_entry = build_multi_index_selection(
+                self, provider, ranked, capital, settings, datetime.now(IST)
+            )
+            decision["marketSelection"] = market_selection
+            if not selected_entry:
+                directional = [row for row in ranked if row.get("action") in {"CE", "PE"}]
+                decision["reason"] = market_selection["reason"]
+                decision["setupStatus"] = "NO_ELIGIBLE_INDEX" if directional else "NO_SETUP_FOUND"
+                decision["scalpScan"] = {
+                    "status": "NO_ENTRY",
+                    "strategy": "APEX_MULTI_INDEX_EMA9_21_PULLBACK_SCALP",
+                    "directionalCandidates": len(directional),
+                    "selectedIndex": None,
+                    "blockedBy": [
+                        blocker
+                        for row in market_selection.get("candidates", [])
+                        for blocker in (row.get("blockers") or [])
+                    ][:12],
+                }
+                decision["executionGate"] = {
+                    "status": "BLOCKED", "stage": "MULTI_INDEX_SELECTION",
+                    "reason": decision["reason"], "details": market_selection,
+                }
+                self.state.last_decision = decision
+                return decision
 
+            best = selected_entry["signal"]
+            option = selected_entry["option"]
+            lot_size = int(selected_entry["lotSize"])
+            expiry = selected_entry.get("expiry")
+            synthetic_demo = bool(selected_entry.get("syntheticDemo"))
+            exchange = "BSE" if str(best.get("index") or "").upper() == "SENSEX" else "NSE"
+            decision["setupStatus"] = "SETUP_FOUND"
+            decision["selectedIndex"] = best.get("index")
+            decision["marketIntelligence"] = best.get("marketIntelligence") or {}
             entry = float(option["ltp"])
             decision["optionCandidate"] = {
                 "status": "SELECTED_FOR_PAPER_ENTRY",
                 "direction": best.get("action"),
-                "exchange": "BSE",
-                "underlying": "SENSEX",
+                "exchange": exchange,
+                "underlying": best.get("index"),
                 "contract": option.get("displayName") or option.get("instrumentKey"),
                 "instrumentKey": option.get("instrumentKey"),
                 "expiry": expiry,
@@ -1965,7 +1897,7 @@ class TradingEngine:
                 one_lot_cost = round(entry * lot_size, 2)
                 if one_lot_risk > float(risk_limit):
                     stage = "RISK_LOT"
-                    reason = f"one SENSEX lot risks ₹{one_lot_risk:.2f}, above per-trade limit ₹{float(risk_limit):.2f}"
+                    reason = f"one index lot risks ₹{one_lot_risk:.2f}, above per-trade limit ₹{float(risk_limit):.2f}"
                 elif one_lot_cost > float(deployable):
                     stage = "CAPITAL_LOT"
                     reason = f"one SENSEX lot costs ₹{one_lot_cost:.2f}, above deployable capital ₹{float(deployable):.2f}"
@@ -2002,7 +1934,7 @@ class TradingEngine:
             for _ in range(8):
                 target = round(entry + target_distance, 2)
                 target_costs = estimate_paper_costs(
-                    entry, target, qty, exchange="BSE", synthetic=synthetic_demo,
+                    entry, target, qty, exchange=exchange, synthetic=synthetic_demo,
                 )
                 target_distance = max(0.05, (net_target_budget + float(target_costs["total"])) / qty)
             target = round(entry + target_distance, 2)
@@ -2015,7 +1947,7 @@ class TradingEngine:
             for _ in range(8):
                 stop = round(max(0.05, entry - stop_distance), 2)
                 stop_costs = estimate_paper_costs(
-                    entry, stop, qty, exchange="BSE", synthetic=synthetic_demo,
+                    entry, stop, qty, exchange=exchange, synthetic=synthetic_demo,
                 )
                 allowed_stop_distance = (net_stop_budget - float(stop_costs["total"])) / qty
                 if allowed_stop_distance <= 0:
@@ -2093,6 +2025,7 @@ class TradingEngine:
                 "expectedNetAtStop": expected_stop_net,
                 "estimatedTargetCosts": target_costs,
                 "estimatedStopCosts": stop_costs,
+                "exchange": exchange,
                 "paperScalpPolicy": {"maxAllocationPct": min(90.0, max(0.0, settings.capital_usage_pct)), "maxRiskRupees": round(per_trade_budget, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "net_2.5pct_deployed_after_estimated_charges", "stop": "net_1.5pct_deployed_after_estimated_charges"},
                 "paperStopBufferPoints": buffer_points,
                 "remainingLossHeadroomAtEntry": round(hard_headroom, 2),
