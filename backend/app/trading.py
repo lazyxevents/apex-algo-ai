@@ -1145,6 +1145,16 @@ class TradingEngine:
             live_context = market_context(normalized_candles)
         except Exception:
             live_context = {"trend": "UNKNOWN", "volatility": "UNKNOWN", "atrPct": None}
+        ordered_candles = sorted(normalized_candles, key=lambda row: row.get("timestamp") or "")
+        previous_candle = ordered_candles[-2] if len(ordered_candles) >= 2 else {}
+        signal["previousCandle"] = {
+            "timestamp": previous_candle.get("timestamp"),
+            "open": previous_candle.get("open"),
+            "high": previous_candle.get("high"),
+            "low": previous_candle.get("low"),
+            "close": previous_candle.get("close"),
+            "volume": previous_candle.get("volume", 0),
+        }
         latest_candle_time = candles[-1].get("time") or candles[-1].get("timestamp") or candles[-1].get("date") if candles else None
         signal["candleTime"] = latest_candle_time
         signal["dataFreshness"] = freshness
