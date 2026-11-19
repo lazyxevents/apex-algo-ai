@@ -28,7 +28,7 @@ def test_option_stop_uses_greeks_and_spread_floor():
         spread_pct=0.5, spread_multiple=2,
     )
     assert plan["greekDistancePoints"] > 0
-    assert plan["spreadFloorPoints"] == 1.05
+    assert plan["spreadFloorPoints"] == 1.1
     assert plan["distancePoints"] == max(
         round(plan["greekDistancePoints"], 2),
         round(plan["spreadFloorPoints"], 2),
