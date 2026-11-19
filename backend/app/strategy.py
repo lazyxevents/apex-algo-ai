@@ -10,6 +10,7 @@ from sqlalchemy import select
 from .core import SessionLocal, settings
 from .models import LearningRewardEvent, ResearchRun, StrategyState, Trade
 from .market_research import _patterns as research_patterns, analyze_structure
+from .risk import calculate_execution_learning_penalties
 
 IST = ZoneInfo(settings.timezone)
 
@@ -879,7 +880,8 @@ class AdaptiveLearner:
                     continue
                 outcome_adjustment = 0.10 if trade.status == "TARGET" else -0.10 if trade.status == "STOPPED" else -0.03 if trade.status == "FORCED_EXIT" else 0.0
                 late_penalty = -0.05 if "|LATE|" in str(context) else 0.0
-                reward = max(-2.0, min(2.0, raw_reward + outcome_adjustment + late_penalty))
+                execution_feedback = calculate_execution_learning_penalties(meta, trade.status, trade.pnl)
+                reward = max(-2.0, min(2.0, raw_reward + outcome_adjustment + late_penalty + execution_feedback["total"]))
                 for key in (arm, f"{context}::{arm}"):
                     old = float(q_values.get(key, 0.0))
                     q_values[key] = round(old + settings.learning_rate * (reward - old), 6)
@@ -889,6 +891,7 @@ class AdaptiveLearner:
                     "shaped": round(reward, 6),
                     "outcomeAdjustment": outcome_adjustment,
                     "latePenalty": late_penalty,
+                    "executionFeedback": execution_feedback,
                     "learnedAt": datetime.now(IST).isoformat(),
                 }
                 trade.reason = json.dumps(meta, default=str)
