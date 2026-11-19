@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from math import isfinite
 
+from .risk import calculate_underlying_stop_distance
+
 
 def _number(value, default: float = 0.0) -> float:
     try:
@@ -31,6 +33,7 @@ def assess_index_candidate(
     synthetic_demo: bool = False,
     stop_buffer_points: float = 2.0,
     max_structure_risk_atr: float = 1.75,
+    min_stop_atr: float = 0.55,
     max_previous_range_atr: float = 2.25,
     max_option_structure_risk_pct: float = 18.0,
     max_option_theta_burn_pct: float = 2.0,
@@ -69,6 +72,8 @@ def assess_index_candidate(
         "rankingScorePct": None,
         "optionScore": None,
         "structureStopPoints": None,
+        "rawStructureStopPoints": None,
+        "minimumAtrStopPoints": None,
         "structureRiskAtr": None,
         "previousRangeAtr": None,
         "previousCandleRangeAtr": None,
@@ -124,13 +129,14 @@ def assess_index_candidate(
     previous_low = _number(signal.get("previousLow"), spot)
     previous_high = _number(signal.get("previousHigh"), spot)
     stop_buffer = max(0.0, _number(stop_buffer_points))
-    structure_stop = (
-        max(0.0, spot - previous_low + stop_buffer)
-        if action == "CE" else max(0.0, previous_high - spot + stop_buffer)
-    )
-    previous_range = max(0.0, previous_high - previous_low)
     atr_pct = _number(context.get("atrPct"))
     atr_points = spot * atr_pct / 100.0 if spot > 0 and atr_pct > 0 else 0.0
+    stop_plan = calculate_underlying_stop_distance(
+        action, spot, previous_low, previous_high, stop_buffer,
+        atr_points, min_stop_atr,
+    )
+    structure_stop = float(stop_plan["distancePoints"])
+    previous_range = max(0.0, previous_high - previous_low)
     structure_risk_atr = structure_stop / atr_points if atr_points > 0 else None
     previous_range_atr = previous_range / atr_points if atr_points > 0 else None
     previous_candle = signal.get("previousCandle") or {}
@@ -161,6 +167,8 @@ def assess_index_candidate(
     base.update({
         "trendAlignment": round(trend_alignment, 4),
         "structureStopPoints": round(structure_stop, 2),
+        "rawStructureStopPoints": round(stop_plan["structuralPoints"], 2),
+        "minimumAtrStopPoints": round(stop_plan["atrFloorPoints"], 2),
         "previousRangePoints": round(previous_range, 2),
         "atrPoints": round(atr_points, 2) if atr_points > 0 else None,
         "structureRiskAtr": round(structure_risk_atr, 3) if structure_risk_atr is not None else None,
@@ -266,6 +274,7 @@ def build_multi_index_selection(engine, provider, ranked: list[dict], capital: f
         kwargs = {
             "stop_buffer_points": settings.paper_stop_buffer_points,
             "max_structure_risk_atr": settings.multi_index_max_structure_risk_atr,
+            "min_stop_atr": settings.multi_index_min_stop_atr,
             "max_previous_range_atr": settings.multi_index_max_previous_range_atr,
             "max_option_structure_risk_pct": settings.max_option_structure_risk_pct,
             "max_option_theta_burn_pct": settings.max_option_theta_burn_pct,
