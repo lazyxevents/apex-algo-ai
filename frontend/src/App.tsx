@@ -1817,8 +1817,8 @@ export default function App() {
             <td><div className="instrument">{instrumentName(t.symbol)}</div><small>#{t.id}</small></td>
             <td><span className={`side ${t.direction}`}>{t.direction}</span></td>
             <td>{t.quantity}</td>
-            <td>{money(t.entry)}</td>
-            <td>{money(t.currentPrice)}</td>
+            <td>{money(t.entry)}<br/><small>{t.meta?.entryPriceSource || '—'}</small></td>
+            <td>{money(t.currentPrice)}<br/><small>{t.meta?.exitQuote?.source || '—'}</small></td>
             <td>{money(t.meta?.initialStop ?? t.stop)}</td>
             <td><b>{Number(t.meta?.initialStopDistance ?? (t.entry - (t.meta?.initialStop ?? t.stop))).toFixed(2)}</b><small> premium pts</small></td>
             <td>
