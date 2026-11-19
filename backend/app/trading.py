@@ -446,13 +446,19 @@ class TradingEngine:
             push_notification_service.notify_trade_opened_async(trade_data)
             return trade_data
 
-    def mark_trade(self, trade_id: int, ltp: float, force_status: str | None = None) -> dict:
+    def mark_trade(self, trade_id: int, ltp: float, force_status: str | None = None, quote_meta: dict | None = None) -> dict:
         with SessionLocal() as db:
             trade = db.get(Trade, trade_id)
             if not trade or trade.status != "OPEN":
                 raise ValueError("Open trade not found")
             trade.current_price = float(ltp)
             meta = self._meta(trade)
+            if quote_meta:
+                meta["lastExitQuote"] = {
+                    key: quote_meta.get(key)
+                    for key in ("source", "ltp", "bid", "bidQty", "ask", "askQty", "timestamp", "quoteAgeSeconds", "lastTradeTime", "lastTradeAgeSeconds")
+                    if quote_meta.get(key) is not None
+                }
             meta.setdefault("initialStop", trade.stop)
             meta.setdefault("initialTarget", trade.target)
             meta.setdefault("initialStopDistance", round(trade.entry - float(meta["initialStop"]), 2))
@@ -506,6 +512,7 @@ class TradingEngine:
                     "exitGrossPnl": round(gross_pnl, 2),
                     "exitNetPnl": round(trade.pnl, 2),
                     "exitCosts": float(costs["total"]),
+                    "exitQuote": meta.get("lastExitQuote"),
                     "closedAt": trade.closed_at.isoformat() if trade.closed_at else None,
                 })
             trade.reason = json.dumps(meta, default=str)
@@ -516,13 +523,34 @@ class TradingEngine:
                 self._audit("trade.closed", {"tradeId": trade.id, "status": trade.status, "pnl": trade.pnl})
             return self._trade_dict(trade)
 
-    def _trade_ltp(self, provider, trade: Trade) -> float:
+    def _trade_quote(self, provider, trade: Trade, snapshot: dict | None = None) -> dict:
         meta = self._meta(trade)
         if meta.get("syntheticDemo"):
             if not hasattr(provider, "synthetic_option_ltp"):
                 raise RuntimeError("Synthetic paper trade requires a synthetic-capable market provider")
-            return float(provider.synthetic_option_ltp(meta))
-        return float(provider.quote_ltp(trade.symbol))
+            return {"price": float(provider.synthetic_option_ltp(meta)), "source": "SYNTHETIC_MODEL"}
+        if snapshot is None and hasattr(provider, "quote_snapshot"):
+            snapshot = provider.quote_snapshot(trade.symbol)
+        if snapshot:
+            quote_age = snapshot.get("quoteAgeSeconds")
+            if quote_age is not None and float(quote_age) > 10.0:
+                raise RuntimeError(f"Stale option quote ({quote_age}s) for {trade.symbol}")
+            bid = float(snapshot.get("bid") or 0.0)
+            bid_qty = int(snapshot.get("bidQty") or 0)
+            ltp = float(snapshot.get("ltp") or 0.0)
+            if bid > 0 and bid_qty > 0:
+                return {**snapshot, "price": bid, "source": "BEST_BID"}
+            last_trade_age = snapshot.get("lastTradeAgeSeconds")
+            if ltp > 0 and last_trade_age is not None and float(last_trade_age) <= 10.0:
+                return {**snapshot, "price": ltp, "source": "FRESH_LTP_FALLBACK"}
+            raise RuntimeError(
+                f"No executable bid or fresh last trade for {trade.symbol}; "
+                f"bid={bid}, bidQty={bid_qty}, lttAge={last_trade_age}"
+            )
+        return {"price": float(provider.quote_ltp(trade.symbol)), "source": "LTP_FALLBACK_UNVERIFIED"}
+
+    def _trade_ltp(self, provider, trade: Trade) -> float:
+        return float(self._trade_quote(provider, trade)["price"])
 
     def _best_exit_price(self, provider, trade: Trade) -> tuple[float, bool, str | None]:
         last_error = None
@@ -653,6 +681,17 @@ class TradingEngine:
         actions = []
         with SessionLocal() as db:
             open_rows = self._open_rows(db)
+        quote_snapshots: dict[str, dict] = {}
+        if hasattr(provider, "quote_snapshots"):
+            symbols = [
+                trade.symbol for trade in open_rows
+                if not self._meta(trade).get("syntheticDemo")
+            ]
+            if symbols:
+                try:
+                    quote_snapshots = provider.quote_snapshots(symbols)
+                except Exception as exc:
+                    self._audit("trade.quote_batch_error", {"symbols": symbols[:10], "error": str(exc)})
         for trade in open_rows:
             try:
                 invalid = self._invalidate_legacy_lot_if_needed(trade)
@@ -660,8 +699,8 @@ class TradingEngine:
                     actions.append({"exit": invalid, "reason": "legacy invalid SENSEX lot size"})
                     self._audit("trade.invalid_contract_closed", {"tradeId": trade.id, "quantity": trade.quantity, "lotSize": trade.lot_size})
                     continue
-                ltp = self._trade_ltp(provider, trade)
-                result = self.mark_trade(trade.id, ltp)
+                quote = self._trade_quote(provider, trade, quote_snapshots.get(trade.symbol))
+                result = self.mark_trade(trade.id, float(quote["price"]), quote_meta=quote)
                 if result["status"] != "OPEN":
                     sandbox = provider.sandbox_exit_with_retry(
                         trade.symbol,
@@ -1838,7 +1877,9 @@ class TradingEngine:
             decision["setupStatus"] = "SETUP_FOUND"
             decision["selectedIndex"] = best.get("index")
             decision["marketIntelligence"] = best.get("marketIntelligence") or {}
-            entry = float(option["ltp"])
+            ask_price = float(option.get("ask") or 0.0)
+            entry = ask_price if ask_price > 0 else float(option["ltp"])
+            entry_price_source = "BEST_ASK" if ask_price > 0 else "LTP_FALLBACK"
             decision["optionCandidate"] = {
                 "status": "SELECTED_FOR_PAPER_ENTRY",
                 "direction": best.get("action"),
@@ -1850,6 +1891,8 @@ class TradingEngine:
                 "strike": option.get("strike"),
                 "moneyness": option.get("moneyness"),
                 "premium": round(entry, 2),
+                "lastTradedPremium": option.get("ltp"),
+                "entryPriceSource": entry_price_source,
                 "bid": option.get("bid"),
                 "ask": option.get("ask"),
                 "lotSize": int(lot_size or 0),
@@ -2120,6 +2163,10 @@ class TradingEngine:
                 "contractName": option.get("displayName") or option["instrumentKey"],
                 "priceSource": option.get("priceSource") or ("synthetic_estimate" if synthetic_demo else "exchange_option_chain"),
                 "quoteTime": option.get("quoteTime") or datetime.now(IST).isoformat(),
+                "entryPriceSource": entry_price_source,
+                "entryBid": float(option.get("bid") or 0.0),
+                "entryAsk": ask_price,
+                "lastTradedPremium": float(option.get("ltp") or entry),
                 "entryTime": datetime.now(IST).isoformat(),
                 "tradeStyle": "SCALP" if is_scalp else "SWING",
                 "stopModel": "ATR-floored swing structure mapped through delta/gamma/theta with spread buffer; whole-lot quantity reduced to fit rupee risk; stop never compressed to fit capital",
