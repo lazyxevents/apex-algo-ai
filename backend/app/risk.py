@@ -101,3 +101,32 @@ def calculate_scalp_target_distance(
     if required > maximum_target:
         return None
     return round(required, 2)
+
+
+
+def calculate_execution_learning_penalties(meta: dict, status: str, net_pnl: float) -> dict:
+    """Small, bounded learning penalties for repeatable execution-quality failures."""
+    entry = max(0.0, _number(meta.get("entryPremium") or meta.get("entry")))
+    spread_points = entry * max(0.0, _number(meta.get("spreadPct"))) / 100.0
+    duration = meta.get("holdingSeconds")
+    try:
+        duration = float(duration) if duration is not None else None
+    except (TypeError, ValueError):
+        duration = None
+    exit_slippage = max(0.0, _number(meta.get("exitSlippagePoints")))
+    gross_pnl = _number(meta.get("grossPnl"))
+    status = str(status or "").upper()
+
+    fast_stop_penalty = -0.15 if status == "STOPPED" and duration is not None and duration <= 5 else 0.0
+    slippage_penalty = (
+        -0.20 if status == "STOPPED"
+        and exit_slippage > max(spread_points * 2.0, entry * 0.005)
+        else 0.0
+    )
+    cost_erosion_penalty = -0.10 if gross_pnl > 0 and _number(net_pnl) < 0 else 0.0
+    return {
+        "fastStopPenalty": fast_stop_penalty,
+        "slippagePenalty": slippage_penalty,
+        "costErosionPenalty": cost_erosion_penalty,
+        "total": round(fast_stop_penalty + slippage_penalty + cost_erosion_penalty, 4),
+    }
