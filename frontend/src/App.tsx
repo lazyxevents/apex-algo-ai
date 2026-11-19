@@ -1492,6 +1492,8 @@ export default function App() {
         <SystemItem label="LLM last status" value={llmDiagnostics.lastStatus || (ollama.configured ? 'NOT CALLED YET' : 'NOT CONFIGURED')} good={llmDiagnostics.lastStatus === 'ok'} />
         <SystemItem label="LLM calls / successes" value={`${llmDiagnostics.calls ?? 0} / ${llmDiagnostics.successes ?? 0}`} />
         <SystemItem label="LLM rate limits" value={llmDiagnostics.rateLimits ?? 0} />
+        <SystemItem label="LLM last call" value={formatDateTime(llmDiagnostics.lastCallAt)} />
+        <SystemItem label="LLM last issue" value={llmDiagnostics.lastError || 'None'} good={!llmDiagnostics.lastError} />
       </div>
 
       <section style={{border:'1px solid rgba(62,180,150,.45)',background:'rgba(25,125,105,.08)',borderRadius:16,padding:'16px 18px',marginBottom:18}} aria-label="APEX multi-index scalping policy">
