@@ -1560,6 +1560,7 @@ export default function App() {
           </div>
           <div className="core-stat-grid">
             <span><small>Reward updates</small><b>{learning.rewardUpdates ?? 0}</b></span>
+            <span><small>Learning version</small><b>V{learning.learningVersion ?? 1}</b></span>
             <span><small>Learning rate</small><b>{learning.learningRate != null ? Number(learning.learningRate).toFixed(2) : '—'}</b></span>
             <span><small>Exploration</small><b>{learning.explorationRate != null ? `${Math.round(Number(learning.explorationRate)*100)}%` : '—'}</b></span>
             <span><small>Latest reward</small><b>{rewardEvents[0]?.shapedReward != null ? Number(rewardEvents[0].shapedReward).toFixed(2)+'R' : '—'}</b></span>
