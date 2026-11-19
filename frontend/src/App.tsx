@@ -63,7 +63,9 @@ function formatDateTime(value?: string | null) {
 function formatDuration(openedAt?: string | null, closedAt?: string | null, recordedSeconds?: unknown) {
   const opened = openedAt ? new Date(openedAt).getTime() : NaN
   const closed = closedAt ? new Date(closedAt).getTime() : NaN
-  const recorded = Number(recordedSeconds)
+  const recorded = recordedSeconds === null || recordedSeconds === undefined || recordedSeconds === ''
+    ? NaN
+    : Number(recordedSeconds)
   const seconds = Number.isFinite(recorded) && recorded >= 0
     ? recorded
     : Number.isFinite(opened) && Number.isFinite(closed) ? Math.max(0, (closed - opened) / 1000) : NaN
