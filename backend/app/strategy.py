@@ -796,7 +796,8 @@ class AdaptiveLearner:
             total_rewards = sum(global_counts.values())
             return {
                 "enabled": settings.adaptive_learning_enabled,
-                "method": "contextual epsilon-greedy reinforcement bandit + shaped net-R reward + daily OOS research prior",
+                "learningVersion": int(counts.get("__meta__learningVersion", 0)),
+                "method": "contextual epsilon-greedy reinforcement bandit + shaped net-R reward + execution-quality feedback + daily OOS research prior",
                 "qValues": global_q,
                 "counts": global_counts,
                 "contextQ": contextual,
@@ -855,11 +856,23 @@ class AdaptiveLearner:
             state = self._get_state(db)
             q_values = json.loads(state.q_values_json or "{}")
             counts = json.loads(state.counts_json or "{}")
-            rows = db.execute(select(Trade).where(
-                Trade.status != "OPEN",
-                Trade.status != "INVALID_CONTRACT",
-                Trade.id > state.last_processed_trade_id,
-            ).order_by(Trade.id.asc())).scalars().all()
+            replay_history = int(counts.get("__meta__learningVersion", 0)) < 2
+            if replay_history:
+                # One-time replay re-scores the already-closed history with execution-quality
+                # feedback. Existing reward rows are updated, not duplicated.
+                q_values = {}
+                counts = {}
+                state.last_processed_trade_id = 0
+                rows = db.execute(select(Trade).where(
+                    Trade.status != "OPEN",
+                    Trade.status != "INVALID_CONTRACT",
+                ).order_by(Trade.id.asc())).scalars().all()
+            else:
+                rows = db.execute(select(Trade).where(
+                    Trade.status != "OPEN",
+                    Trade.status != "INVALID_CONTRACT",
+                    Trade.id > state.last_processed_trade_id,
+                ).order_by(Trade.id.asc())).scalars().all()
             processed = 0
             for trade in rows:
                 state.last_processed_trade_id = max(state.last_processed_trade_id, trade.id)
@@ -880,7 +893,17 @@ class AdaptiveLearner:
                     continue
                 outcome_adjustment = 0.10 if trade.status == "TARGET" else -0.10 if trade.status == "STOPPED" else -0.03 if trade.status == "FORCED_EXIT" else 0.0
                 late_penalty = -0.05 if "|LATE|" in str(context) else 0.0
-                execution_feedback = calculate_execution_learning_penalties(meta, trade.status, trade.pnl)
+                feedback_meta = dict(meta)
+                feedback_meta.setdefault("entryPremium", trade.entry)
+                if feedback_meta.get("holdingSeconds") is None and trade.opened_at and trade.closed_at:
+                    opened = trade.opened_at.replace(tzinfo=timezone.utc) if trade.opened_at.tzinfo is None else trade.opened_at
+                    closed = trade.closed_at.replace(tzinfo=timezone.utc) if trade.closed_at.tzinfo is None else trade.closed_at
+                    feedback_meta["holdingSeconds"] = max(0.0, (closed - opened).total_seconds())
+                if feedback_meta.get("exitSlippagePoints") is None and trade.status == "STOPPED":
+                    feedback_meta["exitSlippagePoints"] = max(0.0, float(trade.stop or 0.0) - float(trade.current_price or 0.0))
+                if feedback_meta.get("grossPnl") is None:
+                    feedback_meta["grossPnl"] = float(trade.pnl or 0.0) + float(meta.get("estimatedCharges") or 0.0)
+                execution_feedback = calculate_execution_learning_penalties(feedback_meta, trade.status, trade.pnl)
                 reward = max(-2.0, min(2.0, raw_reward + outcome_adjustment + late_penalty + execution_feedback["total"]))
                 for key in (arm, f"{context}::{arm}"):
                     old = float(q_values.get(key, 0.0))
@@ -895,7 +918,17 @@ class AdaptiveLearner:
                     "learnedAt": datetime.now(IST).isoformat(),
                 }
                 trade.reason = json.dumps(meta, default=str)
-                if not db.scalar(select(LearningRewardEvent.id).where(LearningRewardEvent.trade_id == trade.id)):
+                event = db.scalar(select(LearningRewardEvent).where(LearningRewardEvent.trade_id == trade.id))
+                if event:
+                    event.strategy = arm
+                    event.context_key = str(context)
+                    event.status = trade.status
+                    event.pnl = float(trade.pnl)
+                    event.initial_risk = initial_risk
+                    event.raw_reward = round(raw_reward, 6)
+                    event.shaped_reward = round(reward, 6)
+                    event.detail_json = json.dumps(meta["learningReward"])
+                else:
                     db.add(LearningRewardEvent(
                         trade_id=trade.id,
                         strategy=arm,
@@ -908,12 +941,13 @@ class AdaptiveLearner:
                         detail_json=json.dumps(meta["learningReward"]),
                     ))
                 processed += 1
-            if rows:
-                state.q_values_json = json.dumps(q_values)
-                state.counts_json = json.dumps(counts)
-                state.updated_at = datetime.now(timezone.utc)
+            counts["__meta__learningVersion"] = 2
+            state.q_values_json = json.dumps(q_values)
+            state.counts_json = json.dumps(counts)
+            state.updated_at = datetime.now(timezone.utc)
+            if rows or replay_history:
                 db.commit()
-            return {"processed": processed, "qValues": q_values, "counts": counts}
+            return {"processed": processed, "replayedHistory": replay_history, "learningVersion": 2, "qValues": q_values, "counts": counts}
 
     def daily_research(self, provider) -> dict:
         if not settings.daily_research_enabled or not provider.market_ready:
