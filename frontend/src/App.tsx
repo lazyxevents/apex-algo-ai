@@ -60,6 +60,19 @@ function formatDateTime(value?: string | null) {
   })
 }
 
+function formatDuration(openedAt?: string | null, closedAt?: string | null, recordedSeconds?: unknown) {
+  const opened = openedAt ? new Date(openedAt).getTime() : NaN
+  const closed = closedAt ? new Date(closedAt).getTime() : NaN
+  const recorded = Number(recordedSeconds)
+  const seconds = Number.isFinite(recorded) && recorded >= 0
+    ? recorded
+    : Number.isFinite(opened) && Number.isFinite(closed) ? Math.max(0, (closed - opened) / 1000) : NaN
+  if (!Number.isFinite(seconds)) return '—'
+  if (seconds < 60) return `${seconds.toFixed(1)}s`
+  if (seconds < 3600) return `${(seconds / 60).toFixed(1)}m`
+  return `${(seconds / 3600).toFixed(1)}h`
+}
+
 function formatClock(value: Date) {
   return value.toLocaleString('en-IN', {
     timeZone: 'Asia/Kolkata',
@@ -927,6 +940,7 @@ export default function App() {
   const scanLoop = automation.scanLoop || {}
   const worker = status.learningWorker || {}
   const ollama = status.ollama || {}
+  const llmDiagnostics = status.llmDiagnostics || {}
   const liveLearning = status.liveLearning || {}
   const liveMoments = Array.isArray(liveLearning.latest) ? liveLearning.latest : []
   const intelligence = status.researchIntelligence || {}
@@ -1473,6 +1487,9 @@ export default function App() {
         <SystemItem label="Candidate score" value={worker.candidateScore != null ? Number(worker.candidateScore).toFixed(2) : '—'} />
         <SystemItem label="LLM provider" value={ollama.configured ? (ollama.provider || 'Connected') : 'Not configured'} good={ollama.configured} />
         <SystemItem label="LLM model" value={ollama.model || '—'} />
+        <SystemItem label="LLM last status" value={llmDiagnostics.lastStatus || (ollama.configured ? 'NOT CALLED YET' : 'NOT CONFIGURED')} good={llmDiagnostics.lastStatus === 'ok'} />
+        <SystemItem label="LLM calls / successes" value={`${llmDiagnostics.calls ?? 0} / ${llmDiagnostics.successes ?? 0}`} />
+        <SystemItem label="LLM rate limits" value={llmDiagnostics.rateLimits ?? 0} />
       </div>
 
       <section style={{border:'1px solid rgba(62,180,150,.45)',background:'rgba(25,125,105,.08)',borderRadius:16,padding:'16px 18px',marginBottom:18}} aria-label="APEX multi-index scalping policy">
@@ -1794,13 +1811,15 @@ export default function App() {
       {closedTrades.length === 0 ? <div className="empty-line">No closed paper trades yet.</div> :
       <div className="table-scroll">
         <table className="trade-table history-table">
-          <thead><tr><th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Status</th><th>Gross</th><th>Costs</th><th>Net P&L</th><th>Opened</th><th>Closed</th></tr></thead>
+          <thead><tr><th>Instrument</th><th>Side</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Initial SL</th><th>SL Points</th><th>Status</th><th>Gross</th><th>Costs</th><th>Net P&amp;L</th><th>Hold / Exit</th><th>Opened</th><th>Closed</th><th>Post-trade AI</th></tr></thead>
           <tbody>{closedTrades.map(t => <tr key={t.id}>
             <td><div className="instrument">{instrumentName(t.symbol)}</div><small>#{t.id}</small></td>
             <td><span className={`side ${t.direction}`}>{t.direction}</span></td>
             <td>{t.quantity}</td>
             <td>{money(t.entry)}</td>
             <td>{money(t.currentPrice)}</td>
+            <td>{money(t.meta?.initialStop ?? t.stop)}</td>
+            <td><b>{Number(t.meta?.initialStopDistance ?? (t.entry - (t.meta?.initialStop ?? t.stop))).toFixed(2)}</b><small> premium pts</small></td>
             <td>
               <span className={`trade-status ${t.status}`}>{t.status}</span>
               {t.status === 'INVALID_CONTRACT' ? <><br/><small className="negative">Excluded from stats / learning</small></> : null}
@@ -1808,8 +1827,10 @@ export default function App() {
             <td>{money((t as any).grossPnl ?? t.pnl)}</td>
             <td>{money((t as any).estimatedCharges ?? 0)}</td>
             <td className={`pnl ${pnlClass(t.pnl)}`}>{Number(t.pnl) > 0 ? '+' : ''}{money(t.pnl)}{t.status === 'INVALID_CONTRACT' ? <><br/><small>Audit only</small></> : null}</td>
+            <td><b>{formatDuration(t.openedAt, t.closedAt, t.meta?.holdingSeconds)}</b><br/><small>{String(t.meta?.exitReason || t.status).replace(/_/g, ' ')}</small></td>
             <td className="time-cell">{formatDateTime(t.openedAt)}</td>
             <td className="time-cell">{formatDateTime(t.closedAt)}</td>
+            <td><b>{String(t.meta?.postTradeReview?.status || 'PENDING').replace(/_/g, ' ')}</b><br/><small>{t.meta?.postTradeReview?.llm?.rootCause || t.meta?.postTradeReview?.deterministic?.rootCause || 'Review queued / unavailable'}</small></td>
           </tr>)}</tbody>
         </table>
       </div>}
