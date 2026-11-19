@@ -1821,8 +1821,8 @@ export default function App() {
             <td>{t.quantity}</td>
             <td>{money(t.entry)}<br/><small>{t.meta?.entryPriceSource || '—'}</small></td>
             <td>{money(t.currentPrice)}<br/><small>{t.meta?.exitQuote?.source || '—'}</small></td>
-            <td>{money(t.meta?.initialStop ?? t.stop)}</td>
-            <td><b>{Number(t.meta?.initialStopDistance ?? (t.entry - (t.meta?.initialStop ?? t.stop))).toFixed(2)}</b><small> premium pts</small></td>
+            <td>{money(t.meta?.initialStop ?? t.stop)}<br/><small>{t.meta?.initialStop != null ? 'INITIAL' : 'STORED'}</small></td>
+            <td><b>{Math.abs(Number(t.meta?.initialStopDistance ?? (t.entry - (t.meta?.initialStop ?? t.stop)))).toFixed(2)}</b><small> premium pts</small></td>
             <td>
               <span className={`trade-status ${t.status}`}>{t.status}</span>
               {t.status === 'INVALID_CONTRACT' ? <><br/><small className="negative">Excluded from stats / learning</small></> : null}
