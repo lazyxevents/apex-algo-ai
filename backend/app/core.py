@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     max_option_theta_burn_pct: float = 2.0
     multi_index_min_ranking_score: float = 0.56
     multi_index_max_structure_risk_atr: float = 1.75
+    multi_index_min_stop_atr: float = 0.55
+    minimum_stop_spread_multiple: float = 2.0
     multi_index_max_previous_range_atr: float = 2.25
     candle_confirmation_required: bool = True
 
