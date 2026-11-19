@@ -117,7 +117,7 @@ class LiveLearningService:
                     meta = {}
                 review = meta.get("postTradeReview") or {}
                 status = str(review.get("status") or "")
-                if status in {"ok", "not_configured", "rate_limited", "error"}:
+                if status in {"ok", "not_configured", "rate_limited", "auth_error", "billing_error", "error"}:
                     continue
                 retry_after = review.get("retryAfter")
                 if retry_after:
