@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from threading import Lock, Thread
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -8,11 +9,209 @@ from sqlalchemy import func, select, update
 
 from .core import SessionLocal
 from .llm_advisor import ollama_advisor
-from .models import LiveMarketObservation
+from .models import LiveMarketObservation, Trade
 
 
 class LiveLearningService:
-    """Persist pre-trade market observations. LLM is advisory; deterministic risk stays authoritative."""
+    """Persist pre-trade observations and post-trade diagnostics without changing risk authority."""
+
+    def __init__(self) -> None:
+        self._review_lock = Lock()
+        self._reviews_inflight: set[int] = set()
+
+    @staticmethod
+    def _deterministic_trade_review(trade: Trade, meta: dict[str, Any]) -> dict[str, Any]:
+        entry = float(trade.entry or 0.0)
+        exit_price = float(trade.current_price or 0.0)
+        gross = float(meta.get("grossPnl") or 0.0)
+        net = float(trade.pnl or 0.0)
+        costs = float(meta.get("estimatedCharges") or 0.0)
+        stop_distance = float(meta.get("initialStopDistance") or max(0.0, entry - float(meta.get("initialStop") or trade.stop or 0.0)))
+        spread_pct = max(0.0, float(meta.get("spreadPct") or 0.0))
+        spread_points = entry * spread_pct / 100.0
+        duration = meta.get("holdingSeconds")
+        if duration is None:
+            try:
+                opened = trade.opened_at
+                closed = trade.closed_at
+                if opened and closed:
+                    if opened.tzinfo is None:
+                        opened = opened.replace(tzinfo=timezone.utc)
+                    if closed.tzinfo is None:
+                        closed = closed.replace(tzinfo=timezone.utc)
+                    duration = max(0.0, (closed - opened).total_seconds())
+            except Exception:
+                duration = None
+        duration = float(duration) if duration is not None else None
+        exit_slippage = float(meta.get("exitSlippagePoints") or 0.0)
+        flags: list[str] = []
+        lessons: list[str] = []
+
+        if str(trade.status).upper() == "STOPPED" and duration is not None and duration <= 5:
+            flags.append("FAST_STOP_OUT")
+            lessons.append("A stop-out within five seconds needs tick/quote and spread review; duration alone does not prove the stop was too tight.")
+        if stop_distance > 0 and spread_points > 0 and stop_distance <= spread_points * 2.0 + 0.05:
+            flags.append("STOP_DISTANCE_NEAR_SPREAD")
+            lessons.append("The planned premium stop was close to the quoted spread; validate a spread buffer before accepting similar contracts.")
+        if str(trade.status).upper() == "STOPPED" and exit_slippage > max(spread_points * 2.0, entry * 0.005):
+            flags.append("STOP_OVERRUN_OR_GAP")
+            lessons.append("The recorded exit was materially beyond the stop; inspect quote timestamps, polling delay, gaps and fill simulation before widening the stop.")
+        if gross > 0 and net < 0:
+            flags.append("COST_EROSION")
+            lessons.append("Gross profit did not cover estimated round-trip charges; require a larger cost-aware target or skip the trade.")
+        if not meta.get("stopPlan"):
+            flags.append("LEGACY_TRADE_MISSING_RISK_PLAN")
+            lessons.append("This trade predates the full ATR/Greeks stop-plan audit fields; do not infer the exact stop calculation.")
+        if not flags:
+            flags.append("NO_CLEAR_ANOMALY_FROM_RECORDED_DATA")
+            lessons.append("No single root cause is proven by the stored trade fields; retain the sample for aggregate analysis.")
+
+        if "STOP_OVERRUN_OR_GAP" in flags:
+            root_cause = "Exit materially exceeded the stored stop; execution/quote gap requires investigation."
+        elif "STOP_DISTANCE_NEAR_SPREAD" in flags:
+            root_cause = "Planned premium stop may have been too close to spread noise."
+        elif "FAST_STOP_OUT" in flags:
+            root_cause = "Very fast stop-out; compare planned stop with ATR, spread and tick-by-tick prices."
+        elif "COST_EROSION" in flags:
+            root_cause = "Transaction costs erased the gross result."
+        else:
+            root_cause = "No definitive loss cause can be established from the available fields."
+
+        return {
+            "rootCause": root_cause,
+            "flags": flags,
+            "lessons": lessons,
+            "holdingSeconds": round(duration, 2) if duration is not None else None,
+            "initialStopDistance": round(stop_distance, 2),
+            "spreadPoints": round(spread_points, 4),
+            "exitSlippagePoints": round(exit_slippage, 2),
+            "grossPnl": round(gross, 2),
+            "netPnl": round(net, 2),
+            "estimatedCosts": round(costs, 2),
+            "evidenceLimit": "A final entry/exit snapshot cannot prove the intratrade price path; tick-level data is needed to distinguish a tight stop from a gap or delayed quote.",
+        }
+
+    def queue_post_trade_review(self, trade_id: int) -> None:
+        with self._review_lock:
+            if trade_id in self._reviews_inflight:
+                return
+            self._reviews_inflight.add(trade_id)
+        Thread(target=self._review_closed_trade, args=(trade_id,), daemon=True).start()
+
+    def _review_closed_trade(self, trade_id: int) -> None:
+        try:
+            with SessionLocal() as db:
+                trade = db.get(Trade, trade_id)
+                if not trade or trade.status == "OPEN":
+                    return
+                try:
+                    meta = json.loads(trade.reason or "{}")
+                except json.JSONDecodeError:
+                    meta = {}
+                existing = meta.get("postTradeReview") or {}
+                if existing.get("status") in {"ok", "not_configured"}:
+                    return
+                deterministic = self._deterministic_trade_review(trade, meta)
+                snapshot = {
+                    "phase": "CLOSED_TRADE_REVIEW",
+                    "trade": {
+                        "tradeId": trade.id,
+                        "instrument": meta.get("index") or trade.symbol,
+                        "contract": meta.get("displayName") or trade.symbol,
+                        "direction": trade.direction,
+                        "strategy": meta.get("strategy") or meta.get("learningArm"),
+                        "status": trade.status,
+                        "exitReason": meta.get("exitReason"),
+                        "entry": trade.entry,
+                        "exit": trade.current_price,
+                        "initialStop": meta.get("initialStop"),
+                        "finalStop": meta.get("finalStop") or trade.stop,
+                        "target": meta.get("initialTarget") or trade.target,
+                        "quantity": trade.quantity,
+                        "holdingSeconds": deterministic.get("holdingSeconds"),
+                        "grossPnl": deterministic.get("grossPnl"),
+                        "netPnl": deterministic.get("netPnl"),
+                        "estimatedCosts": deterministic.get("estimatedCosts"),
+                        "initialStopDistance": deterministic.get("initialStopDistance"),
+                        "exitSlippagePoints": deterministic.get("exitSlippagePoints"),
+                        "spreadPct": meta.get("spreadPct"),
+                        "delta": meta.get("delta"),
+                        "gamma": meta.get("gamma"),
+                        "theta": meta.get("theta"),
+                        "iv": meta.get("iv"),
+                        "underlyingStructureDistance": meta.get("underlyingStructureDistance"),
+                        "underlyingAtrPoints": meta.get("underlyingAtrPoints"),
+                        "stopPlan": meta.get("stopPlan"),
+                        "context": meta.get("context"),
+                        "patterns": meta.get("patterns"),
+                        "smc": meta.get("smc"),
+                        "entryReason": meta.get("entryReason"),
+                        "signalScore": meta.get("signalScore"),
+                    },
+                    "deterministicReview": deterministic,
+                    "instruction": (
+                        "Perform a post-trade root-cause review using only supplied evidence. "
+                        "Separate entry quality, stop placement, option Greeks, spread, slippage, "
+                        "quote delay and transaction-cost effects. Do not invent tick history. "
+                        "If the cause is not proven, say UNKNOWN. Lessons and recommended changes "
+                        "are hypotheses for later validation, never automatic risk overrides."
+                    ),
+                }
+                db.commit()
+
+            llm = ollama_advisor.analyze_trade(snapshot) if ollama_advisor.configured else {
+                "enabled": False, "status": "not_configured", "provider": "none",
+                "warnings": ["LLM provider is not configured; deterministic trade diagnostics were still recorded."],
+            }
+            review = {
+                "status": str(llm.get("status") or "unknown"),
+                "reviewedAt": datetime.now(timezone.utc).isoformat(),
+                "provider": llm.get("provider"),
+                "model": llm.get("model"),
+                "deterministic": deterministic,
+                "llm": {
+                    "diagnosis": llm.get("diagnosis"),
+                    "rootCause": llm.get("rootCause"),
+                    "stopAssessment": llm.get("stopAssessment"),
+                    "entryAssessment": llm.get("entryAssessment"),
+                    "executionAssessment": llm.get("executionAssessment"),
+                    "lessons": llm.get("lessons") or [],
+                    "recommendedChanges": llm.get("recommendedChanges") or [],
+                    "reasons": llm.get("reasons") or [],
+                    "warnings": llm.get("warnings") or [],
+                },
+            }
+            with SessionLocal() as db:
+                trade = db.get(Trade, trade_id)
+                if trade:
+                    try:
+                        meta = json.loads(trade.reason or "{}")
+                    except json.JSONDecodeError:
+                        meta = {}
+                    meta["postTradeReview"] = review
+                    trade.reason = json.dumps(meta, default=str)
+                    db.commit()
+        except Exception as exc:
+            try:
+                with SessionLocal() as db:
+                    trade = db.get(Trade, trade_id)
+                    if trade:
+                        try:
+                            meta = json.loads(trade.reason or "{}")
+                        except json.JSONDecodeError:
+                            meta = {}
+                        meta["postTradeReview"] = {
+                            "status": "error",
+                            "reviewedAt": datetime.now(timezone.utc).isoformat(),
+                            "error": str(exc)[:220],
+                        }
+                        trade.reason = json.dumps(meta, default=str)
+                        db.commit()
+            except Exception:
+                pass
+        finally:
+            with self._review_lock:
+                self._reviews_inflight.discard(trade_id)
 
     def observe(self, signal: dict[str, Any], *, candle_time: datetime | None = None) -> dict[str, Any]:
         context = signal.get("context") or {}
@@ -143,7 +342,8 @@ class LiveLearningService:
                 row.outcome = outcome
                 row.outcome_pnl = float(pnl)
             db.commit()
-            return len(rows)
+        self.queue_post_trade_review(trade_id)
+        return len(rows)
 
     def snapshot(self, limit: int = 12) -> dict[str, Any]:
         with SessionLocal() as db:
