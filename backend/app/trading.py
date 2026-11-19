@@ -1690,6 +1690,7 @@ class TradingEngine:
         decision: dict = {"phase": phase, "action": "NO_TRADE", "provider": provider.status()}
         try:
             adaptive_learner.learn()
+            decision["postTradeReviewsQueued"] = live_learning_service.queue_unreviewed_closed_trades(limit=1)
             now_ist = datetime.now(IST)
             today_key = now_ist.date().isoformat()
             hm = now_ist.strftime("%H:%M")
