@@ -225,22 +225,79 @@ class UpstoxService:
             self._check_response(res)
             return res.json().get("data", []) or []
 
-    def quote_ltp(self, instrument_key: str) -> float:
+    def quote_snapshots(self, instrument_keys: list[str]) -> dict[str, dict]:
+        """Fetch executable bid/ask depth and quote timestamps in one exchange snapshot."""
+        keys = [str(key).strip() for key in instrument_keys if str(key).strip()]
+        if not keys:
+            return {}
         if not self.market_ready:
             raise RuntimeError("UPSTOX_ANALYTICS_TOKEN (recommended) or UPSTOX_ACCESS_TOKEN is missing")
         with httpx.Client(timeout=12) as client:
             res = client.get(
                 f"{self.api_v3}/market-quote/quotes",
-                params={"instrument_key": instrument_key},
+                params={"instrument_key": ",".join(keys)},
                 headers=self._headers(self._market_token()),
             )
             self._check_response(res)
             data = res.json().get("data", {}) or {}
-        for item in data.values():
-            for key in ("last_price", "ltp"):
-                if item.get(key) is not None:
-                    return float(item[key])
-        raise RuntimeError(f"No LTP returned for {instrument_key}")
+
+        snapshots: dict[str, dict] = {}
+        requested = set(keys)
+        for response_key, item in data.items():
+            instrument_key = str(item.get("instrument_token") or response_key)
+            if instrument_key not in requested:
+                continue
+            depth = item.get("depth") or {}
+            bids = depth.get("buy") or []
+            asks = depth.get("sell") or []
+            best_bid = next((row for row in bids if float(row.get("price") or 0) > 0), {}) if bids else {}
+            best_ask = next((row for row in asks if float(row.get("price") or 0) > 0), {}) if asks else {}
+            ltp = float(item.get("last_price") or 0)
+            timestamp = item.get("timestamp")
+            quote_age = None
+            if timestamp:
+                try:
+                    quote_dt = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+                    if quote_dt.tzinfo is None:
+                        quote_dt = quote_dt.replace(tzinfo=timezone.utc)
+                    quote_age = max(0.0, (datetime.now(timezone.utc) - quote_dt.astimezone(timezone.utc)).total_seconds())
+                except (TypeError, ValueError):
+                    quote_age = None
+            last_trade_time = item.get("last_trade_time")
+            last_trade_age = None
+            if last_trade_time not in (None, "", "0", 0):
+                try:
+                    trade_dt = datetime.fromtimestamp(float(last_trade_time) / 1000.0, tz=timezone.utc)
+                    last_trade_age = max(0.0, (datetime.now(timezone.utc) - trade_dt).total_seconds())
+                except (TypeError, ValueError, OverflowError):
+                    last_trade_age = None
+            snapshots[instrument_key] = {
+                "instrumentKey": instrument_key,
+                "ltp": ltp,
+                "bid": float(best_bid.get("price") or 0),
+                "bidQty": int(best_bid.get("quantity") or 0),
+                "ask": float(best_ask.get("price") or 0),
+                "askQty": int(best_ask.get("quantity") or 0),
+                "timestamp": timestamp,
+                "quoteAgeSeconds": round(quote_age, 3) if quote_age is not None else None,
+                "lastTradeTime": last_trade_time,
+                "lastTradeAgeSeconds": round(last_trade_age, 3) if last_trade_age is not None else None,
+                "volume": int(item.get("volume") or 0),
+                "source": "UPSTOX_FULL_MARKET_QUOTE",
+            }
+        missing = [key for key in keys if key not in snapshots]
+        if missing:
+            raise RuntimeError("No full market quote returned for: " + ", ".join(missing[:3]))
+        return snapshots
+
+    def quote_snapshot(self, instrument_key: str) -> dict:
+        return self.quote_snapshots([instrument_key])[instrument_key]
+
+    def quote_ltp(self, instrument_key: str) -> float:
+        snapshot = self.quote_snapshot(instrument_key)
+        if snapshot["ltp"] <= 0:
+            raise RuntimeError(f"No LTP returned for {instrument_key}")
+        return float(snapshot["ltp"])
 
     def place_sandbox_order(self, instrument_key: str, quantity: int, side: str, tag: str) -> dict:
         if settings.paper_broker != "upstox_sandbox":
