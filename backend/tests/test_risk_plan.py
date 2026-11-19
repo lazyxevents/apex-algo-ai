@@ -55,7 +55,7 @@ def test_execution_learning_penalizes_fast_stop_slippage_and_cost_erosion():
             "entryPremium": 100,
             "spreadPct": 0.5,
             "holdingSeconds": 2,
-            "exitSlippagePoints": 1.0,
+            "exitSlippagePoints": 1.2,
             "grossPnl": 20,
         },
         "STOPPED",
