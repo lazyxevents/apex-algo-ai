@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from threading import Lock, Thread
 from datetime import datetime, timedelta, timezone
+import time
 from typing import Any
 
 from sqlalchemy import func, select, update
@@ -18,6 +19,7 @@ class LiveLearningService:
     def __init__(self) -> None:
         self._review_lock = Lock()
         self._reviews_inflight: set[int] = set()
+        self._last_llm_review_at = 0.0
 
     @staticmethod
     def _deterministic_trade_review(trade: Trade, meta: dict[str, Any]) -> dict[str, Any]:
@@ -98,6 +100,39 @@ class LiveLearningService:
             self._reviews_inflight.add(trade_id)
         Thread(target=self._review_closed_trade, args=(trade_id,), daemon=True).start()
 
+    def queue_unreviewed_closed_trades(self, limit: int = 1) -> int:
+        now = datetime.now(timezone.utc)
+        with SessionLocal() as db:
+            rows = list(db.execute(
+                select(Trade).where(
+                    Trade.status != "OPEN",
+                    Trade.status != "INVALID_CONTRACT",
+                ).order_by(Trade.id.asc())
+            ).scalars().all())
+            pending: list[int] = []
+            for trade in rows:
+                try:
+                    meta = json.loads(trade.reason or "{}")
+                except json.JSONDecodeError:
+                    meta = {}
+                review = meta.get("postTradeReview") or {}
+                status = str(review.get("status") or "")
+                if status in {"ok", "not_configured", "rate_limited", "error"}:
+                    continue
+                retry_after = review.get("retryAfter")
+                if retry_after:
+                    try:
+                        if datetime.fromisoformat(str(retry_after).replace("Z", "+00:00")) > now:
+                            continue
+                    except ValueError:
+                        pass
+                pending.append(int(trade.id))
+                if len(pending) >= max(1, int(limit)):
+                    break
+        for trade_id in pending:
+            self.queue_post_trade_review(trade_id)
+        return len(pending)
+
     def _review_closed_trade(self, trade_id: int) -> None:
         try:
             with SessionLocal() as db:
@@ -159,12 +194,31 @@ class LiveLearningService:
                 }
                 db.commit()
 
-            llm = ollama_advisor.analyze_trade(snapshot) if ollama_advisor.configured else {
-                "enabled": False, "status": "not_configured", "provider": "none",
-                "warnings": ["LLM provider is not configured; deterministic trade diagnostics were still recorded."],
-            }
+            retry_after = None
+            if ollama_advisor.configured:
+                minimum_interval = 300.0 if ollama_advisor.provider == "openrouter" else 30.0
+                with self._review_lock:
+                    now_mono = time.monotonic()
+                    can_call_llm = now_mono - self._last_llm_review_at >= minimum_interval
+                    if can_call_llm:
+                        self._last_llm_review_at = now_mono
+                if can_call_llm:
+                    llm = ollama_advisor.analyze_trade(snapshot)
+                else:
+                    retry_after = (datetime.now(timezone.utc) + timedelta(seconds=minimum_interval)).isoformat()
+                    llm = {
+                        "enabled": True, "status": "queued_for_llm",
+                        "provider": ollama_advisor.provider, "model": ollama_advisor.model,
+                        "warnings": ["Post-trade LLM review is queued to protect provider quota; deterministic diagnostics are already saved."],
+                    }
+            else:
+                llm = {
+                    "enabled": False, "status": "not_configured", "provider": "none",
+                    "warnings": ["LLM provider is not configured; deterministic trade diagnostics were still recorded."],
+                }
             review = {
                 "status": str(llm.get("status") or "unknown"),
+                "retryAfter": retry_after,
                 "reviewedAt": datetime.now(timezone.utc).isoformat(),
                 "provider": llm.get("provider"),
                 "model": llm.get("model"),
