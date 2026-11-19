@@ -250,8 +250,8 @@ class UpstoxService:
             depth = item.get("depth") or {}
             bids = depth.get("buy") or []
             asks = depth.get("sell") or []
-            best_bid = next((row for row in bids if float(row.get("price") or 0) > 0), {}) if bids else {}
-            best_ask = next((row for row in asks if float(row.get("price") or 0) > 0), {}) if asks else {}
+            best_bid = next((row for row in bids if float(row.get("price") or 0) > 0 and int(row.get("quantity") or 0) > 0), {}) if bids else {}
+            best_ask = next((row for row in asks if float(row.get("price") or 0) > 0 and int(row.get("quantity") or 0) > 0), {}) if asks else {}
             ltp = float(item.get("last_price") or 0)
             timestamp = item.get("timestamp")
             quote_age = None
