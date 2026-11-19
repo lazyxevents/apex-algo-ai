@@ -2376,6 +2376,7 @@ class TradingEngine:
                 "model": ollama_advisor.model,
                 "freeQuotaAware": ollama_advisor.provider == "openrouter",
             },
+            "llmDiagnostics": ollama_advisor.snapshot(),
         }
 
 
