@@ -46,6 +46,8 @@ class LiveLearningService:
                 duration = None
         duration = float(duration) if duration is not None else None
         exit_slippage = float(meta.get("exitSlippagePoints") or 0.0)
+        exit_quote = meta.get("exitQuote") or meta.get("lastExitQuote") or {}
+        exit_quote_source = str(exit_quote.get("source") or "")
         flags: list[str] = []
         lessons: list[str] = []
 
@@ -58,6 +60,9 @@ class LiveLearningService:
         if str(trade.status).upper() == "STOPPED" and exit_slippage > max(spread_points * 2.0, entry * 0.005):
             flags.append("STOP_OVERRUN_OR_GAP")
             lessons.append("The recorded exit was materially beyond the stop; inspect quote timestamps, polling delay, gaps and fill simulation before widening the stop.")
+        if exit_quote_source == "LTP_FALLBACK_UNVERIFIED":
+            flags.append("UNVERIFIED_EXIT_QUOTE")
+            lessons.append("Exit used an unverified last-traded-price fallback rather than executable bid depth; do not treat this fill as fully reliable.")
         if gross > 0 and net < 0:
             flags.append("COST_EROSION")
             lessons.append("Gross profit did not cover estimated round-trip charges; require a larger cost-aware target or skip the trade.")
@@ -169,6 +174,11 @@ class LiveLearningService:
                         "estimatedCosts": deterministic.get("estimatedCosts"),
                         "initialStopDistance": deterministic.get("initialStopDistance"),
                         "exitSlippagePoints": deterministic.get("exitSlippagePoints"),
+                        "entryPriceSource": meta.get("entryPriceSource"),
+                        "entryBid": meta.get("entryBid"),
+                        "entryAsk": meta.get("entryAsk"),
+                        "lastTradedPremium": meta.get("lastTradedPremium"),
+                        "exitQuote": meta.get("exitQuote") or meta.get("lastExitQuote"),
                         "spreadPct": meta.get("spreadPct"),
                         "delta": meta.get("delta"),
                         "gamma": meta.get("gamma"),
