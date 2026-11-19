@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.risk import (
+    calculate_execution_learning_penalties,
     calculate_option_premium_stop_distance,
     calculate_scalp_target_distance,
     calculate_underlying_stop_distance,
@@ -45,3 +46,31 @@ def test_target_requires_reward_risk_and_rejects_unachievable_target():
         reward_risk_ratio=1.8, minimum_target_points=10,
         maximum_target_points=15,
     ) is None
+
+
+
+def test_execution_learning_penalizes_fast_stop_slippage_and_cost_erosion():
+    feedback = calculate_execution_learning_penalties(
+        {
+            "entryPremium": 100,
+            "spreadPct": 0.5,
+            "holdingSeconds": 2,
+            "exitSlippagePoints": 1.0,
+            "grossPnl": 20,
+        },
+        "STOPPED",
+        net_pnl=-5,
+    )
+    assert feedback["fastStopPenalty"] < 0
+    assert feedback["slippagePenalty"] < 0
+    assert feedback["costErosionPenalty"] < 0
+    assert feedback["total"] == -0.45
+
+
+def test_execution_learning_does_not_penalize_normal_target_trade():
+    feedback = calculate_execution_learning_penalties(
+        {"entryPremium": 100, "holdingSeconds": 30, "grossPnl": 100},
+        "TARGET",
+        net_pnl=70,
+    )
+    assert feedback["total"] == 0
