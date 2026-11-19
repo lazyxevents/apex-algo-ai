@@ -25,6 +25,7 @@ from .research_engine import research_engine
 from .pattern_references import pattern_reference_service
 from .strategy import ARMS, adaptive_learner, evaluate_ema_liquidity_scalp, evaluate_mtf_continuation, evaluate_signal, market_context, select_option
 from .multi_index import assess_index_candidate, build_multi_index_selection
+from .risk import calculate_option_premium_stop_distance, calculate_scalp_target_distance, calculate_underlying_stop_distance
 
 IST = ZoneInfo(settings.timezone)
 
@@ -415,6 +416,15 @@ class TradingEngine:
                 raise ValueError("Quantity must be one or more valid whole lots")
             if qty > allowed_qty:
                 raise ValueError(f"Risk/capital budget permits at most {allowed_qty} units")
+            try:
+                trade_meta = json.loads(payload.get("reason") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                trade_meta = {}
+            trade_meta.setdefault("initialStop", stop)
+            trade_meta.setdefault("initialTarget", target)
+            trade_meta.setdefault("initialStopDistance", round(entry - stop, 2))
+            trade_meta.setdefault("initialRisk", round((entry - stop) * qty, 2))
+            trade_meta.setdefault("entryPremium", entry)
             trade = Trade(
                 symbol=payload["symbol"],
                 direction=payload["direction"],
@@ -426,7 +436,7 @@ class TradingEngine:
                 current_price=entry,
                 pnl=0,
                 status="OPEN",
-                reason=payload.get("reason", "{}"),
+                reason=json.dumps(trade_meta, default=str),
             )
             db.add(trade)
             db.commit()
@@ -443,6 +453,9 @@ class TradingEngine:
                 raise ValueError("Open trade not found")
             trade.current_price = float(ltp)
             meta = self._meta(trade)
+            meta.setdefault("initialStop", trade.stop)
+            meta.setdefault("initialTarget", trade.target)
+            meta.setdefault("initialStopDistance", round(trade.entry - float(meta["initialStop"]), 2))
             gross_pnl = (trade.current_price - trade.entry) * trade.quantity
             exchange = "BSE" if str(meta.get("index") or "").upper() == "SENSEX" else "NSE"
             costs = estimate_paper_costs(
@@ -456,7 +469,6 @@ class TradingEngine:
             meta["grossPnl"] = round(gross_pnl, 2)
             meta["estimatedCharges"] = float(costs["total"])
             meta["costModel"] = costs
-            trade.reason = json.dumps(meta, default=str)
             reward_distance = max(0.01, trade.target - trade.entry)
             progress = (trade.current_price - trade.entry) / reward_distance
             if progress >= 0.75:
@@ -473,6 +485,30 @@ class TradingEngine:
             elif trade.current_price >= trade.target:
                 trade.status = "TARGET"
                 trade.closed_at = datetime.now(timezone.utc)
+
+            if trade.status != "OPEN":
+                opened = self._as_ist(trade.opened_at)
+                closed = self._as_ist(trade.closed_at)
+                duration_seconds = max(0.0, (closed - opened).total_seconds()) if opened and closed else None
+                exit_reason = (
+                    "STOP_LOSS" if trade.status == "STOPPED"
+                    else "TARGET_HIT" if trade.status == "TARGET"
+                    else "MANUAL_EXIT" if trade.status == "MANUAL_EXIT"
+                    else "FORCED_EXIT" if trade.status == "FORCED_EXIT"
+                    else str(trade.status)
+                )
+                meta.update({
+                    "exitReason": exit_reason,
+                    "exitPrice": round(trade.current_price, 2),
+                    "finalStop": round(trade.stop, 2),
+                    "holdingSeconds": round(duration_seconds, 2) if duration_seconds is not None else None,
+                    "exitSlippagePoints": round(max(0.0, trade.stop - trade.current_price), 2) if trade.status == "STOPPED" else 0.0,
+                    "exitGrossPnl": round(gross_pnl, 2),
+                    "exitNetPnl": round(trade.pnl, 2),
+                    "exitCosts": float(costs["total"]),
+                    "closedAt": trade.closed_at.isoformat() if trade.closed_at else None,
+                })
+            trade.reason = json.dumps(meta, default=str)
             db.commit()
             db.refresh(trade)
             if trade.status != "OPEN":
@@ -1257,14 +1293,20 @@ class TradingEngine:
 
         spot = float(best.get("underlyingPrice") or 0)
         buffer_points = max(0.0, float(settings.paper_stop_buffer_points))
-        if best["action"] == "CE":
-            underlying_stop_distance = max(
-                0.0, spot - float(best.get("previousLow") or spot) + buffer_points
-            )
-        else:
-            underlying_stop_distance = max(
-                0.0, float(best.get("previousHigh") or spot) - spot + buffer_points
-            )
+        market_context = best.get("marketContext") or {}
+        atr_pct = max(0.0, float(market_context.get("atrPct") or 0.0))
+        atr_points = spot * atr_pct / 100.0
+        underlying_stop_plan = calculate_underlying_stop_distance(
+            best["action"],
+            spot,
+            float(best.get("previousLow") or spot),
+            float(best.get("previousHigh") or spot),
+            buffer_points,
+            atr_points,
+            settings.multi_index_min_stop_atr,
+        )
+        underlying_stop_distance = float(underlying_stop_plan["distancePoints"])
+        self._last_option_filter_diagnostics["underlyingStopPlan"] = underlying_stop_plan
         self._last_option_filter_diagnostics["underlyingStopDistance"] = round(
             underlying_stop_distance, 2
         )
@@ -1842,37 +1884,59 @@ class TradingEngine:
             previous_high = float(best.get("previousHigh") or best["underlyingPrice"])
             spot = float(best["underlyingPrice"])
             buffer_points = max(0.0, settings.paper_stop_buffer_points)
-            if best["action"] == "CE":
-                underlying_structure_distance = max(0.0, spot - previous_low + buffer_points)
-            else:
-                underlying_structure_distance = max(0.0, previous_high - spot + buffer_points)
-            # Map the underlying invalidation move into option-premium points.
-            # Gamma adds convexity risk; theta adds expected decay over the scalp hold.
-            delta_component = delta * underlying_structure_distance
-            gamma_component = 0.5 * gamma * underlying_structure_distance ** 2
-            theta_component = theta * max(1.0, settings.option_expected_hold_minutes) / 375.0
-            structure_distance = delta_component + gamma_component + theta_component
-            fallback_stop = max(entry * settings.option_stop_pct / 100, 0.05)
-            desired_distance = structure_distance if underlying_structure_distance > 0.05 else fallback_stop
-            premium_risk_cap = entry * max(0.0, settings.paper_trade_risk_pct_of_deployed) / 100
-            # Avoid the old 1.5%-of-premium micro-stop. Let structure/Greeks
-            # define the stop, with a premium-risk ceiling. Quantity is reduced
-            # to fit deterministic rupee risk and existing loss-lock limits.
-            stop_distance = min(desired_distance, premium_risk_cap)
-            if is_scalp:
-                stop_distance = min(stop_distance, settings.scalp_max_stop_points)
+            market_context = best.get("marketContext") or {}
+            atr_pct = max(0.0, float(market_context.get("atrPct") or 0.0))
+            underlying_atr_points = spot * atr_pct / 100.0
+            underlying_stop_plan = calculate_underlying_stop_distance(
+                best["action"], spot, previous_low, previous_high, buffer_points,
+                underlying_atr_points, settings.multi_index_min_stop_atr,
+            )
+            underlying_structure_distance = float(underlying_stop_plan["distancePoints"])
+            spread_pct = max(0.0, float(option.get("spreadPct") or 0.0))
+            option_stop_plan = calculate_option_premium_stop_distance(
+                entry, delta, gamma, theta, underlying_structure_distance,
+                settings.option_expected_hold_minutes, spread_pct,
+                settings.minimum_stop_spread_multiple,
+            )
+            delta_component = option_stop_plan["deltaPoints"]
+            gamma_component = option_stop_plan["gammaPoints"]
+            theta_component = option_stop_plan["thetaPoints"]
+            structure_distance = option_stop_plan["greekDistancePoints"]
+            stop_distance = round(float(option_stop_plan["distancePoints"]), 2)
             stop = round(max(0.05, entry - stop_distance), 2)
             stop_distance = round(entry - stop, 2)
-            spread_pct = max(0.0, float(option.get("spreadPct") or 0.0))
-            spread_points = entry * spread_pct / 100.0
-            execution_buffer = 2.0 * spread_points + max(0.05, entry * 0.001)
-            if stop_distance <= 0.0:
+            spread_points = float(option_stop_plan["spreadPoints"])
+            execution_buffer = float(option_stop_plan["spreadFloorPoints"])
+            decision["riskPlan"] = {
+                "underlyingStop": underlying_stop_plan,
+                "optionPremiumStop": option_stop_plan,
+                "stopPoints": stop_distance,
+                "stopPrice": stop,
+                "stopPolicy": "ATR_FLOORED_STRUCTURE_PLUS_GREEKS_AND_SPREAD",
+            }
+            if stop_distance <= 0.0 or stop_distance >= entry:
                 reason = "INVALID_NET_STOP_DISTANCE"
                 decision.update({
                     "action": "NO_TRADE", "reason": reason,
                     "executionGate": self._mark_signal_block(
                         live_observations, best, stage="SCALP_TARGET_RISK",
-                        reason=reason, details={"stopPoints": stop_distance},
+                        reason=reason, details={"stopPoints": stop_distance, "entry": entry},
+                    ),
+                })
+                self.state.last_decision = decision
+                return decision
+            if is_scalp and stop_distance > float(settings.scalp_max_stop_points):
+                reason = "STRUCTURE_STOP_EXCEEDS_MAX_PREMIUM_RISK"
+                decision.update({
+                    "action": "NO_TRADE", "reason": reason,
+                    "executionGate": self._mark_signal_block(
+                        live_observations, best, stage="SCALP_TARGET_RISK",
+                        reason=reason, details={
+                            "stopPoints": stop_distance,
+                            "maxStopPoints": settings.scalp_max_stop_points,
+                            "underlyingStop": underlying_stop_plan,
+                            "optionPremiumStop": option_stop_plan,
+                        },
                     ),
                 })
                 self.state.last_decision = decision
@@ -1902,6 +1966,17 @@ class TradingEngine:
                 qty = max(0, min(lots_cash, lots_risk)) * lot_size
                 risk_limit = per_trade_budget
                 sizing_details = {"cashLots": max(0, lots_cash), "riskLots": max(0, lots_risk), "selectedLots": qty // lot_size, "cashBudget": round(deployable, 2), "riskBudget": round(per_trade_budget, 2), "slippagePerUnit": round(slippage_per_unit, 2), "feesPerUnit": round(estimated_stop_fees, 2), "netTargetPct": settings.paper_net_target_pct_of_deployed, "netStopPct": settings.paper_net_stop_pct_of_deployed}
+                # Keep the structure-derived stop fixed. If exact charges exceed the
+                # rupee risk budget, reduce whole lots instead of tightening the SL.
+                while qty > 0:
+                    trial_costs = estimate_paper_costs(
+                        entry, stop, qty, exchange=exchange, synthetic=synthetic_demo,
+                    )
+                    trial_net_stop = (stop - entry) * qty - float(trial_costs["total"])
+                    if trial_net_stop >= -risk_limit - 1.0:
+                        break
+                    qty -= lot_size
+                sizing_details["selectedLots"] = qty // lot_size
             if qty <= 0:
                 one_lot_risk = round(max(0.0, entry - stop) * lot_size, 2)
                 one_lot_cost = round(entry * lot_size, 2)
@@ -1936,38 +2011,67 @@ class TradingEngine:
 
             deployed_capital = round(entry * qty, 2)
             net_target_budget = deployed_capital * settings.paper_net_target_pct_of_deployed / 100.0
-            net_stop_budget = deployed_capital * settings.paper_net_stop_pct_of_deployed / 100.0
+            # The stop is a market-structure invalidation, not a percentage clamp.
+            # The deterministic rupee budget controls quantity; it never compresses SL.
+            net_stop_budget = risk_limit
 
-            # Solve exit prices iteratively because BSE brokerage, STT, GST and
-            # transaction charges depend on the estimated exit turnover.
-            target_distance = max(0.05, entry * settings.paper_net_target_pct_of_deployed / 100.0)
+            target_distance = calculate_scalp_target_distance(
+                entry, stop_distance, settings.paper_net_target_pct_of_deployed,
+                settings.reward_risk_ratio, settings.scalp_min_target_points,
+                settings.scalp_max_target_points,
+            )
+            if target_distance is None:
+                reason = "REQUIRED_REWARD_RISK_TARGET_EXCEEDS_SCALP_MAX"
+                decision.update({
+                    "action": "NO_TRADE", "reason": reason,
+                    "executionGate": self._mark_signal_block(
+                        live_observations, best, stage="SCALP_TARGET_RISK",
+                        reason=reason, details={
+                            "stopPoints": stop_distance,
+                            "minimumRewardRisk": settings.reward_risk_ratio,
+                            "minimumTargetPoints": settings.scalp_min_target_points,
+                            "maximumTargetPoints": settings.scalp_max_target_points,
+                        },
+                    ),
+                })
+                self.state.last_decision = decision
+                return decision
+
+            # Solve target prices iteratively because transaction charges depend on exit turnover.
             for _ in range(8):
                 target = round(entry + target_distance, 2)
                 target_costs = estimate_paper_costs(
                     entry, target, qty, exchange=exchange, synthetic=synthetic_demo,
                 )
-                target_distance = max(0.05, (net_target_budget + float(target_costs["total"])) / qty)
+                target_distance = max(
+                    target_distance,
+                    (net_target_budget + float(target_costs["total"])) / qty,
+                )
             target = round(entry + target_distance, 2)
             target_costs = estimate_paper_costs(
                 entry, target, qty, exchange=exchange, synthetic=synthetic_demo,
             )
             expected_target_net = round((target - entry) * qty - float(target_costs["total"]), 2)
 
-            stop_distance = min(stop_distance, entry * settings.paper_net_stop_pct_of_deployed / 100.0)
-            for _ in range(8):
-                stop = round(max(0.05, entry - stop_distance), 2)
-                stop_costs = estimate_paper_costs(
-                    entry, stop, qty, exchange=exchange, synthetic=synthetic_demo,
-                )
-                allowed_stop_distance = (net_stop_budget - float(stop_costs["total"])) / qty
-                if allowed_stop_distance <= 0:
-                    break
-                stop_distance = min(stop_distance, allowed_stop_distance)
             stop = round(max(0.05, entry - stop_distance), 2)
             stop_costs = estimate_paper_costs(
                 entry, stop, qty, exchange=exchange, synthetic=synthetic_demo,
             )
             expected_stop_net = round((stop - entry) * qty - float(stop_costs["total"]), 2)
+            if target_distance > settings.scalp_max_target_points:
+                reason = "NET_TARGET_EXCEEDS_SCALP_MAX_AFTER_COSTS"
+                decision.update({
+                    "action": "NO_TRADE", "reason": reason,
+                    "executionGate": self._mark_signal_block(
+                        live_observations, best, stage="SCALP_TARGET_RISK",
+                        reason=reason, details={
+                            "targetPoints": round(target_distance, 2),
+                            "maximumTargetPoints": settings.scalp_max_target_points,
+                        },
+                    ),
+                })
+                self.state.last_decision = decision
+                return decision
             if expected_target_net < net_target_budget - 1.0 or expected_stop_net < -net_stop_budget - 1.0:
                 reason = "NET_TARGET_STOP_UNACHIEVABLE_AFTER_COSTS"
                 decision.update({
@@ -2017,10 +2121,17 @@ class TradingEngine:
                 "quoteTime": option.get("quoteTime") or datetime.now(IST).isoformat(),
                 "entryTime": datetime.now(IST).isoformat(),
                 "tradeStyle": "SCALP" if is_scalp else "SWING",
-                "stopModel": "liquidity sweep invalidation mapped to premium via delta; risk capped; trailing after progress",
+                "stopModel": "ATR-floored swing structure mapped through delta/gamma/theta with spread buffer; whole-lot quantity reduced to fit rupee risk; stop never compressed to fit capital",
                 "previousCandleLow": previous_low,
                 "previousCandleHigh": previous_high,
                 "structureStopDistance": round(stop_distance, 2),
+                "initialStop": stop,
+                "initialTarget": target,
+                "initialStopDistance": round(entry - stop, 2),
+                "stopPlan": {"underlying": underlying_stop_plan, "optionPremium": option_stop_plan},
+                "stopRiskBudgetRupees": round(net_stop_budget, 2),
+                "expectedStopNet": expected_stop_net,
+                "expectedTargetNet": expected_target_net,
                 "optionFilterTier": option.get("filterTier", "STRICT"),
                 "moneyness": option.get("moneyness", "UNKNOWN"),
                 "atmStrike": option.get("atmStrike"),
@@ -2036,7 +2147,7 @@ class TradingEngine:
                 "estimatedTargetCosts": target_costs,
                 "estimatedStopCosts": stop_costs,
                 "exchange": exchange,
-                "paperScalpPolicy": {"maxAllocationPct": min(90.0, max(0.0, settings.capital_usage_pct)), "maxRiskRupees": round(per_trade_budget, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "net_2.5pct_deployed_after_estimated_charges", "stop": "net_1.5pct_deployed_after_estimated_charges"},
+                "paperScalpPolicy": {"maxAllocationPct": min(90.0, max(0.0, settings.capital_usage_pct)), "maxRiskRupees": round(per_trade_budget, 2), "maxDailyTrades": min(settings.max_trades_per_day, 5), "target": "net_2.5pct_deployed_after_estimated_charges", "stop": "ATR_floored_structure_stop; whole_lot_quantity_sized_to_rupee_risk_budget"},
                 "paperStopBufferPoints": buffer_points,
                 "remainingLossHeadroomAtEntry": round(hard_headroom, 2),
                 "firstTarget": target,
@@ -2074,6 +2185,7 @@ class TradingEngine:
                 "structureRiskPct": option.get("structureRiskPct"),
                 "thetaBurnPct": option.get("thetaBurnPct"),
                 "underlyingStructureDistance": round(underlying_structure_distance, 2),
+                "underlyingAtrPoints": round(underlying_atr_points, 2),
                 "initialRisk": initial_risk,
                 "riskLimit": round(risk_limit, 2),
                 "capitalAtEntry": round(capital, 2),
