@@ -246,7 +246,11 @@ class UpstoxService:
         for response_key, item in data.items():
             instrument_key = str(item.get("instrument_token") or response_key)
             if instrument_key not in requested:
-                continue
+                response_alias = str(response_key).replace(":", "|")
+                if response_alias in requested:
+                    instrument_key = response_alias
+                else:
+                    continue
             depth = item.get("depth") or {}
             bids = depth.get("buy") or []
             asks = depth.get("sell") or []
