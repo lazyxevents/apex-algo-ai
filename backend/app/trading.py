@@ -1728,8 +1728,27 @@ class TradingEngine:
         phase = self._market_phase()
         decision: dict = {"phase": phase, "action": "NO_TRADE", "provider": provider.status()}
         try:
-            adaptive_learner.learn()
-            decision["postTradeReviewsQueued"] = live_learning_service.queue_unreviewed_closed_trades(limit=1)
+            # Learning maintenance is advisory/background work. A transient database
+            # timeout must not prevent the live market scanner from collecting signals.
+            # Execution remains fail-closed later because risk authorization and trade
+            # persistence still require a healthy database.
+            try:
+                decision["learningMaintenance"] = {
+                    "status": "COMPLETED",
+                    "result": adaptive_learner.learn(),
+                }
+            except Exception as exc:
+                decision["learningMaintenance"] = {
+                    "status": "DEGRADED",
+                    "error": f"{type(exc).__name__}: {str(exc)[:180]}",
+                }
+            try:
+                decision["postTradeReviewsQueued"] = live_learning_service.queue_unreviewed_closed_trades(limit=1)
+            except Exception as exc:
+                decision["postTradeReviewQueue"] = {
+                    "status": "DEGRADED",
+                    "error": f"{type(exc).__name__}: {str(exc)[:180]}",
+                }
             now_ist = datetime.now(IST)
             today_key = now_ist.date().isoformat()
             hm = now_ist.strftime("%H:%M")
