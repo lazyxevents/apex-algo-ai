@@ -222,28 +222,43 @@ class DatasetModelService:
         return sorted(insights, key=lambda x: (x["samples"], abs(x["winRate"] - 50)), reverse=True)[:24]
 
     def snapshot(self) -> dict:
-        with SessionLocal() as db:
-            total=int(db.scalar(select(func.count(LearningSample.id))) or 0)
-            wins=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.label==1)) or 0)
-            latest=db.execute(select(ModelEvaluation).order_by(ModelEvaluation.id.desc()).limit(1)).scalar_one_or_none()
-            recent_rows=list(db.execute(
-                select(LearningSample).order_by(LearningSample.id.desc()).limit(5000)
-            ).scalars().all())
-            scalp=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.strategy=="SMC_SCALP_V2")) or 0)
-            swing=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.strategy=="SMC_SWING_V2")) or 0)
-        return {
-            "datasetSize":total,
-            "positiveLabels":wins,
-            "negativeLabels":max(0,total-wins),
-            "labelRate":round(wins/total,4) if total else 0.0,
-            "strategySamples":{"SMC_SCALP_V2":scalp,"SMC_SWING_V2":swing},
-            "patternInsights":self._pattern_insights(recent_rows),
-            "latestCandidate": None if not latest else {
-                "version":latest.version,
-                "status":latest.status,
-                "samples":latest.samples,
-                "metrics":json.loads(latest.metrics_json or "{}"),
-            },
-        }
+        try:
+            with SessionLocal() as db:
+                total=int(db.scalar(select(func.count(LearningSample.id))) or 0)
+                wins=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.label==1)) or 0)
+                latest=db.execute(select(ModelEvaluation).order_by(ModelEvaluation.id.desc()).limit(1)).scalar_one_or_none()
+                recent_rows=list(db.execute(
+                    select(LearningSample).order_by(LearningSample.id.desc()).limit(5000)
+                ).scalars().all())
+                scalp=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.strategy=="SMC_SCALP_V2")) or 0)
+                swing=int(db.scalar(select(func.count(LearningSample.id)).where(LearningSample.strategy=="SMC_SWING_V2")) or 0)
+            return {
+                "available": True,
+                "datasetSize":total,
+                "positiveLabels":wins,
+                "negativeLabels":max(0,total-wins),
+                "labelRate":round(wins/total,4) if total else 0.0,
+                "strategySamples":{"SMC_SCALP_V2":scalp,"SMC_SWING_V2":swing},
+                "patternInsights":self._pattern_insights(recent_rows),
+                "latestCandidate": None if not latest else {
+                    "version":latest.version,
+                    "status":latest.status,
+                    "samples":latest.samples,
+                    "metrics":json.loads(latest.metrics_json or "{}"),
+                },
+            }
+        except Exception as exc:
+            # This research-only snapshot must never take the system status API down.
+            return {
+                "available": False,
+                "datasetSize": 0,
+                "positiveLabels": 0,
+                "negativeLabels": 0,
+                "labelRate": 0.0,
+                "strategySamples": {"SMC_SCALP_V2": 0, "SMC_SWING_V2": 0},
+                "patternInsights": [],
+                "latestCandidate": None,
+                "error": f"{type(exc).__name__}: {str(exc)[:180]}",
+            }
 
 dataset_model_service=DatasetModelService()
