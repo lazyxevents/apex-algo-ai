@@ -4,6 +4,7 @@ from pathlib import Path
 
 from sqlalchemy import DateTime, String, Text, create_engine, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
+from pymongo import MongoClient
 
 
 class Base(DeclarativeBase):
@@ -31,7 +32,32 @@ def normalize_database_url(database_url: str) -> str:
 
 
 class PaperTradeStore:
-    def __init__(self, database_url: str):
+    def __init__(
+        self,
+        database_url: str,
+        mongo_uri: str = "",
+        mongo_database: str = "apgoai",
+    ):
+        self.mongo_client = None
+        self.mongo_collection = None
+        self.engine = None
+
+        # Reuse the existing APEX MongoDB Atlas database for durable Forex trades.
+        if mongo_uri.strip():
+            self.mongo_client = MongoClient(
+                mongo_uri,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=5000,
+                socketTimeoutMS=10000,
+                retryWrites=True,
+                appname="APEX-Indian-Forex",
+            )
+            self.mongo_client.admin.command("ping")
+            self.mongo_collection = self.mongo_client[mongo_database]["indian_forex_paper_trades"]
+            self.mongo_collection.create_index("opened_at")
+            self.mongo_collection.create_index("status")
+            return
+
         database_url = normalize_database_url(database_url)
         if database_url.startswith("sqlite:///"):
             raw_path = database_url.removeprefix("sqlite:///")
@@ -46,6 +72,18 @@ class PaperTradeStore:
 
     def save_trade(self, trade) -> None:
         payload = trade.model_dump_json()
+        if self.mongo_collection is not None:
+            self.mongo_collection.replace_one(
+                {"_id": trade.id},
+                {
+                    "_id": trade.id,
+                    "status": trade.status,
+                    "opened_at": trade.opened_at,
+                    "payload": payload,
+                },
+                upsert=True,
+            )
+            return
         with Session(self.engine) as session:
             row = session.get(PaperTradeRow, trade.id)
             if row is None:
@@ -60,6 +98,11 @@ class PaperTradeStore:
             session.commit()
 
     def load_trades(self) -> list[str]:
+        if self.mongo_collection is not None:
+            rows = self.mongo_collection.find(
+                {}, {"payload": 1, "_id": 0}
+            ).sort("opened_at", 1)
+            return [row["payload"] for row in rows if row.get("payload")]
         with Session(self.engine) as session:
             rows = session.scalars(
                 select(PaperTradeRow).order_by(PaperTradeRow.opened_at.asc())
@@ -67,4 +110,7 @@ class PaperTradeStore:
             return [row.payload for row in rows]
 
     def close(self) -> None:
-        self.engine.dispose()
+        if self.mongo_client is not None:
+            self.mongo_client.close()
+        if self.engine is not None:
+            self.engine.dispose()

@@ -8,6 +8,7 @@ Environment variables:
 - `OANDA_ACCESS_TOKEN` and `OANDA_ACCOUNT_ID` for OANDA practice only.
 - `OANDA_ENVIRONMENT=practice`.
 - `MT5_BRIDGE_TOKEN` shared with the MT5 Expert Advisor.
-- `DATABASE_URL` for the Forex paper-trade ledger.
+- Existing `MONGODB_URI` / `MONGODB_DATABASE` for durable Forex paper trades (dedicated `indian_forex_paper_trades` collection).
+- `FOREX_DATABASE_URL` for SQLite fallback when MongoDB is not configured.
 
 No live broker order-placement API is exposed. SQLite on Render's ephemeral filesystem is not durable across instance replacement.

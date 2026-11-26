@@ -132,7 +132,11 @@ async def consume_oanda_stream(instruments: list[str]) -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     global trade_store
-    trade_store = PaperTradeStore(settings.database_url)
+    trade_store = PaperTradeStore(
+        settings.forex_database_url,
+        mongo_uri=settings.mongodb_uri,
+        mongo_database=settings.mongodb_database,
+    )
     paper.restore_trades([
         PaperTrade.model_validate_json(payload)
         for payload in trade_store.load_trades()

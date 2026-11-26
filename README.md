@@ -260,4 +260,4 @@ The Forex engine lives in `backend/indian_forex/` and is mounted by the existing
 - MT5 bridge status: `/api/indian-forex/api/v1/mt5/status`
 - Forex research: `/api/indian-forex/api/v1/research/...`
 
-The Indian index/options backend routes are preserved. Forex uses separate OANDA practice and MT5 bridge environment variables. Live Forex order execution remains disabled. The configured default SQLite paper ledger is on Render's ephemeral filesystem and is not durable across instance replacement; use a persistent database URL before relying on long-term paper-trade history.
+The Indian index/options backend routes are preserved. Forex uses separate OANDA practice and MT5 bridge environment variables. Live Forex order execution remains disabled. Forex paper trades reuse the existing APEX MongoDB Atlas database when MONGODB_URI is configured (dedicated indian_forex_paper_trades collection). SQLite is only the local fallback and is ephemeral on Render.

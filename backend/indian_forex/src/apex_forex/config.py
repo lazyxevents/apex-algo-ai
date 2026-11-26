@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     app_host: str = "127.0.0.1"
     app_port: int = 8000
     database_url: str = "sqlite:///./data/apex.db"
+    # Forex ledger reuses APEX MongoDB; SQLite is the local fallback.
+    forex_database_url: str = "sqlite:///./indian_forex.db"
+    mongodb_uri: str = ""
+    mongodb_database: str = "apgoai"
 
     # OANDA v20 practice environment. APEX deliberately rejects live configuration.
     oanda_access_token: str = ""

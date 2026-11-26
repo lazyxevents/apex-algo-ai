@@ -33,7 +33,7 @@ services:
       - key: ALLOW_LIVE_ORDERS
         value: "false"
       # Indian Forex runs inside this same backend service.
-      - key: DATABASE_URL
+      - key: FOREX_DATABASE_URL
         value: sqlite:///./indian_forex.db
       - key: OANDA_ACCESS_TOKEN
         sync: false
