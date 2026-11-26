@@ -6,7 +6,7 @@
 #property version   "1.00"
 #property description "APEX Forex market-data bridge. Does not place orders."
 
-input string InpApexEndpoint = "https://YOUR-APEX-HOST/api/v1/mt5/ingest";
+input string InpApexEndpoint = "https://apex-algo-backend.onrender.com/api/indian-forex/api/v1/mt5/ingest";
 input string InpBridgeSecret = "SET_THE_SAME_MT5_BRIDGE_TOKEN";
 input int    InpTimerMilliseconds = 500;
 input int    InpRequestTimeoutMs = 5000;
