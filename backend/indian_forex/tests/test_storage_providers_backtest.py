@@ -51,3 +51,14 @@ def test_backtest_is_conservative_when_stop_and_target_touch_same_bar():
     assert len(trades) == 1
     assert trades[0].exit_reason == "STOP_LOSS"
     assert trades[0].net_pnl < 0
+
+
+def test_render_postgres_urls_use_psycopg3_driver():
+    from apex_forex.storage import normalize_database_url
+
+    assert normalize_database_url("postgres://user:pass@host/db") == (
+        "postgresql+psycopg://user:pass@host/db"
+    )
+    assert normalize_database_url("postgresql://user:pass@host/db") == (
+        "postgresql+psycopg://user:pass@host/db"
+    )

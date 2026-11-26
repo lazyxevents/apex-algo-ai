@@ -19,8 +19,20 @@ class PaperTradeRow(Base):
     payload: Mapped[str] = mapped_column(Text)
 
 
+def normalize_database_url(database_url: str) -> str:
+    """Use psycopg 3 for PostgreSQL URLs, including Render's legacy postgres:// form."""
+    if database_url.startswith("postgres://"):
+        return "postgresql+psycopg://" + database_url.removeprefix("postgres://")
+    if database_url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + database_url.removeprefix("postgresql://")
+    if database_url.startswith("postgresql+psycopg2://"):
+        return "postgresql+psycopg://" + database_url.removeprefix("postgresql+psycopg2://")
+    return database_url
+
+
 class PaperTradeStore:
     def __init__(self, database_url: str):
+        database_url = normalize_database_url(database_url)
         if database_url.startswith("sqlite:///"):
             raw_path = database_url.removeprefix("sqlite:///")
             if raw_path != ":memory:":
