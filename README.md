@@ -248,3 +248,16 @@ Dhan Web access tokens last 24 hours. APEX can renew an **active Dhan Web-genera
 5. Keep `TRADING_MODE=PAPER` and `ALLOW_LIVE_ORDERS=false` until data, fills and safety controls are verified.
 
 Dhan API documentation: https://dhanhq.co/docs/v2/authentication/
+
+
+## Indian Forex module — same backend
+
+The Forex engine lives in `backend/indian_forex/` and is mounted by the existing FastAPI application at `/api/indian-forex`. It runs inside the existing Render web service; no second backend service is created.
+
+- Forex Swagger: `/api/indian-forex/docs`
+- Forex health: `/api/indian-forex/health`
+- MT5 bridge ingest: `/api/indian-forex/api/v1/mt5/ingest`
+- MT5 bridge status: `/api/indian-forex/api/v1/mt5/status`
+- Forex research: `/api/indian-forex/api/v1/research/...`
+
+The Indian index/options backend routes are preserved. Forex uses separate OANDA practice and MT5 bridge environment variables. Live Forex order execution remains disabled. The configured default SQLite paper ledger is on Render's ephemeral filesystem and is not durable across instance replacement; use a persistent database URL before relying on long-term paper-trade history.

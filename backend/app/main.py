@@ -1,4 +1,6 @@
 import asyncio
+import sys
+from pathlib import Path
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Literal
@@ -23,6 +25,14 @@ from .strategy import adaptive_learner
 from .strategy_lab import LAB_STRATEGIES, strategy_lab
 from .trading import trading_engine
 from .upstox import upstox_service
+
+
+# Indian Forex is a namespaced sub-application inside this same backend process.
+_INDIAN_FOREX_SRC = Path(__file__).resolve().parents[1] / "indian_forex" / "src"
+if str(_INDIAN_FOREX_SRC) not in sys.path:
+    sys.path.insert(0, str(_INDIAN_FOREX_SRC))
+from apex_forex.api.main import app as indian_forex_app
+from apex_forex.api.main import lifespan as indian_forex_lifespan
 
 
 def get_market_service():
@@ -80,21 +90,25 @@ async def position_monitor_loop():
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     init_db()
-    automation_task = asyncio.create_task(automation_loop())
-    position_task = asyncio.create_task(position_monitor_loop())
-    learning_task = asyncio.create_task(learning_loop()) if settings.learning_worker_enabled else None
-    yield
-    automation_task.cancel()
-    position_task.cancel()
-    if learning_task:
-        learning_task.cancel()
-    for task in (automation_task, position_task, learning_task):
-        if task is None:
-            continue
+    # Keep both market engines under the same Render web process/lifecycle.
+    async with indian_forex_lifespan(indian_forex_app):
+        automation_task = asyncio.create_task(automation_loop())
+        position_task = asyncio.create_task(position_monitor_loop())
+        learning_task = asyncio.create_task(learning_loop()) if settings.learning_worker_enabled else None
         try:
-            await task
-        except asyncio.CancelledError:
-            pass
+            yield
+        finally:
+            automation_task.cancel()
+            position_task.cancel()
+            if learning_task:
+                learning_task.cancel()
+            for task in (automation_task, position_task, learning_task):
+                if task is None:
+                    continue
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
 
 app = FastAPI(title="APEX Algo AI", version="0.6.0", lifespan=lifespan)
@@ -105,6 +119,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# One Render service exposes the Forex API under its own route namespace.
+app.mount("/api/indian-forex", indian_forex_app, name="indian-forex")
 
 
 class ModeRequest(BaseModel):
