@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     mongodb_uri: str = ""
     mongodb_database: str = "apgoai"
 
+    # Twelve Data is a market-data source only; it is not a broker.
+    twelve_data_api_key: str = ""
+    twelve_data_timeout_seconds: float = 12.0
+
     # OANDA v20 practice environment. APEX deliberately rejects live configuration.
     oanda_access_token: str = ""
     oanda_account_id: str = ""
