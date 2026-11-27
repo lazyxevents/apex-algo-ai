@@ -57,6 +57,7 @@ class OllamaAdvisor:
                 "calls": self._call_count,
                 "successes": self._success_count,
                 "rateLimits": self._rate_limit_count,
+                "cooldownRemainingSeconds": max(0, int(self._rate_limited_until - time.monotonic() + 0.999)),
             }
 
     @property
