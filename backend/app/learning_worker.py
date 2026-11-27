@@ -7,6 +7,7 @@ from threading import Lock
 from zoneinfo import ZoneInfo
 
 from .core import SessionLocal, settings
+from .agent_monitor import agent_monitor
 from .dataset_model import dataset_model_service
 from .llm_research import ollama_research
 from .market_research import build_market_research
@@ -68,6 +69,7 @@ class ContinuousLearningWorker:
         self.state.stage = stage
         self.state.currentTask = task
         self.state.lastHeartbeatAt = datetime.now(IST).isoformat()
+        agent_monitor.transition_learning(stage, task)
 
     @staticmethod
     def _activity(kind: str, stage: str, title: str, detail: dict | None = None) -> None:
@@ -180,6 +182,7 @@ class ContinuousLearningWorker:
 
             self.state.enabled = True
             self.state.running = True
+            agent_monitor.begin("learning_orchestrator", "Starting scheduled research and learning cycle")
             self.state.lastError = None
             phase = self._research_phase(started)
             self.state.researchPhase = phase
@@ -355,6 +358,10 @@ class ContinuousLearningWorker:
             return self.snapshot()
         finally:
             self.state.running = False
+            if self.state.stage == "error":
+                agent_monitor.fail("learning_orchestrator", self.state.lastError or "Learning cycle failed")
+            else:
+                agent_monitor.finish("learning_orchestrator", "Waiting for next scheduled learning cycle")
             self._lock.release()
 
 
