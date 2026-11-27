@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .core import db_health, init_db, settings
+from .agent_monitor import agent_monitor
 from .dataset_model import dataset_model_service
 from .dhan import dhan_service
 from .kite import kite_service
@@ -55,9 +56,12 @@ async def automation_loop():
             try:
                 if settings.market_data_provider.strip().lower() == "dhan":
                     await asyncio.to_thread(dhan_service.renew_token_if_due)
+                agent_monitor.begin("market_scanner", "Running scheduled market scan and signal evaluation")
                 await asyncio.to_thread(trading_engine.automation_cycle, market_service)
+                agent_monitor.finish("market_scanner", "Waiting for next scheduled scan")
             except Exception as exc:
                 # Never let one provider/strategy failure kill the long-running scan loop.
+                agent_monitor.fail("market_scanner", str(exc))
                 trading_engine.state.last_error = f"automation loop recovered: {exc}"
             delay = max(15, settings.auto_scan_interval_seconds)
             completed_at = datetime.now(timezone.utc)
@@ -79,8 +83,11 @@ async def position_monitor_loop():
     try:
         while True:
             try:
+                agent_monitor.begin("position_monitor", "Checking open positions, stops and targets")
                 await asyncio.to_thread(trading_engine.monitor_open_positions, market_service)
+                agent_monitor.finish("position_monitor", "Waiting for next position-monitor tick")
             except Exception as exc:
+                agent_monitor.fail("position_monitor", str(exc))
                 trading_engine.state.last_error = f"position monitor: {exc}"
             await asyncio.sleep(max(1.0, settings.position_monitor_interval_seconds))
     finally:
@@ -223,6 +230,12 @@ def readiness_diagnostics():
         except Exception:
             result["neural"] = {"state": "unavailable"}
     return result
+
+
+@app.get("/api/agents/status")
+def agent_status():
+    """Read-only live telemetry for actual in-process APEX workers."""
+    return agent_monitor.snapshot()
 
 
 @app.get("/api/system/status")

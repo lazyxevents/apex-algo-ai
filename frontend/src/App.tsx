@@ -1,4 +1,5 @@
 import IntelligencePanel from './IntelligencePanel'
+import AgentMonitor from './AgentMonitor'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 
 type Status = any
@@ -1895,6 +1896,7 @@ export default function App() {
       </section>
     </div>}
 
+    <AgentMonitor />
     <IntelligencePanel />
 
     <footer className="apex-footer">
