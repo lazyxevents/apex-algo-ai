@@ -111,6 +111,7 @@ class AgentMonitor:
             agent["lastError"] = str(error)[:300]
 
     def transition_learning(self, stage: str, task: str) -> None:
+        self.heartbeat("learning_orchestrator", task)
         stage = str(stage or "").lower()
         mapping = {
             "source_research": "llm_research",
