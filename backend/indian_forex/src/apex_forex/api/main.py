@@ -16,6 +16,7 @@ from apex_forex.research.strategy_lab import evaluate_strategy, metrics_dict
 from apex_forex.research.strategy_catalog import generate_signal, strategy_catalog
 from apex_forex.risk_sizing import calculate_position_size, position_size_dict
 from apex_forex.providers.oanda import OandaForexClient, OandaProviderError
+from apex_forex.providers.twelvedata import TwelveDataForexClient, TwelveDataProviderError
 from apex_forex.risk import RiskEngine
 from apex_forex.storage import PaperTradeStore
 
@@ -87,6 +88,10 @@ class BracketBacktestRequest(BaseModel):
     target: float = Field(gt=0)
     fee_per_side: float = Field(default=0, ge=0)
     slippage: float = Field(default=0, ge=0)
+
+
+def twelve_data_client() -> TwelveDataForexClient:
+    return TwelveDataForexClient(settings.twelve_data_api_key, settings.twelve_data_timeout_seconds)
 
 
 def oanda_client() -> OandaForexClient:
@@ -184,6 +189,7 @@ async def health():
         "latest_tick_count": len(latest_ticks),
         "mt5_bridge_configured": bool(settings.mt5_bridge_token),
         "mt5_tick_count": sum(1 for key in latest_ticks if key.startswith("MT5:")),
+        "twelve_data_configured": bool(settings.twelve_data_api_key),
     }
 
 
@@ -201,6 +207,10 @@ async def get_public_config():
                 "role": "MT5 terminal Expert Advisor market-data bridge; paper execution only",
                 "live_order_execution": False,
             },
+            "twelve_data": {
+                "configured": bool(settings.twelve_data_api_key),
+                "role": "Forex market-data prices and historical OHLC candles; no bid/ask or broker execution",
+            },
             "oanda": {
                 "configured": bool(settings.oanda_access_token and settings.oanda_account_id),
                 "environment": "practice",
@@ -214,6 +224,15 @@ async def get_public_config():
 async def provider_status():
     return {
         "providers": [
+            {
+                "name": "Twelve Data",
+                "configured": bool(settings.twelve_data_api_key),
+                "connected": False,
+                "environment": "market-data REST API",
+                "capabilities": ["on_demand_prices", "historical_ohlc_candles"],
+                "quote_type": "price-only; bid/ask unavailable from this adapter",
+                "execution": "market data only; paper execution requires a separate bid/ask source",
+            },
             {
                 "name": "MetaTrader 5 terminal bridge",
                 "configured": bool(settings.mt5_bridge_token),
@@ -249,6 +268,61 @@ async def provider_status():
         ],
         "live_order_execution": False,
     }
+
+
+@app.get("/api/v1/twelvedata/status")
+async def twelve_data_status():
+    return {
+        "provider": "TWELVE_DATA",
+        "configured": bool(settings.twelve_data_api_key),
+        "mode": "MARKET_DATA_ONLY",
+        "capabilities": ["on_demand_prices", "historical_ohlc_candles"],
+        "bid_ask_available": False,
+        "live_order_execution": False,
+    }
+
+
+@app.post("/api/v1/twelvedata/pricing")
+async def twelve_data_pricing(request: PricingRequest):
+    try:
+        quotes = await twelve_data_client().prices(request.instruments)
+        received = []
+        for quote in quotes:
+            symbol_key = quote["symbol"].replace("/", "_")
+            tick = MarketTick(
+                instrument_key=f"TWELVE_DATA:{symbol_key}",
+                ltp=quote["price"],
+                exchange_timestamp_ms=None,
+            )
+            latest_ticks[tick.instrument_key] = tick
+            received.append({
+                **quote,
+                "instrument_key": tick.instrument_key,
+                "age_seconds": round(tick.age_seconds, 3),
+            })
+        return {
+            "provider": "TWELVE_DATA",
+            "count": len(received),
+            "quotes": received,
+            "quote_type": "price_only_no_bid_ask",
+            "paper_execution_eligible": False,
+        }
+    except TwelveDataProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/twelvedata/candles")
+async def twelve_data_candles(request: CandleRequest):
+    try:
+        return await twelve_data_client().candles(
+            request.instrument, request.granularity, request.count
+        )
+    except TwelveDataProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/api/v1/forex/accounts")

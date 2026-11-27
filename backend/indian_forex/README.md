@@ -21,6 +21,9 @@ The EA sends sampled Market Watch bid/ask snapshots. It does not place, modify o
 
 ## Providers and safety
 
+- Twelve Data uses `TWELVE_DATA_API_KEY` for on-demand Forex prices and historical OHLC candles. API endpoints: `/api/indian-forex/api/v1/twelvedata/status`, `/api/indian-forex/api/v1/twelvedata/pricing`, and `/api/indian-forex/api/v1/twelvedata/candles`.
+- Twelve Data price responses are price-only in this adapter; they are not bid/ask quotes and are not used for paper fills. Use MT5 bid/ask bridge for paper execution quotes. Low-tier API credit limits apply; pricing requests are capped at 8 symbols and queried sequentially.
+
 - OANDA v20 is practice-only and needs `OANDA_ACCESS_TOKEN` and `OANDA_ACCOUNT_ID`.
 - MT5 needs `MT5_BRIDGE_TOKEN` configured on Render and the same value in the EA.
 - The module reuses the existing APEX `MONGODB_URI` / `MONGODB_DATABASE` for its own `indian_forex_paper_trades` collection. SQLite is a local fallback only.
