@@ -289,12 +289,24 @@ class NeuralModelService:
             "sourceMaxSampleId": source_max_sample_id,
         }
 
+        minimum_holdout = max(100, int(settings.neural_min_oos_samples))
+        minimum_class = max(10, int(settings.neural_min_oos_per_class))
+        valid_positive = int(y_valid.sum())
+        valid_negative = int(len(y_valid) - valid_positive)
+        test_positive = int(y_test.sum())
+        test_negative = int(len(y_test) - test_positive)
         valid_ok = (
-            result["validation"]["auc"] >= settings.neural_promotion_min_auc
+            len(y_valid) >= minimum_holdout
+            and valid_positive >= minimum_class
+            and valid_negative >= minimum_class
+            and result["validation"]["auc"] >= settings.neural_promotion_min_auc
             and result["validation"]["brier"] <= settings.neural_promotion_max_brier
         )
         test_ok = (
-            result["outOfSample"]["auc"] >= settings.neural_promotion_min_auc
+            len(y_test) >= minimum_holdout
+            and test_positive >= minimum_class
+            and test_negative >= minimum_class
+            and result["outOfSample"]["auc"] >= settings.neural_promotion_min_auc
             and result["outOfSample"]["brier"] <= settings.neural_promotion_max_brier
         )
 
@@ -316,10 +328,21 @@ class NeuralModelService:
                     result["outOfSample"]["auc"] >= float(old_test.get("auc", 0.5)) - 0.01
                     and result["outOfSample"]["brier"] <= float(old_test.get("brier", 1.0)) + 0.01
                 )
-            promote = bool(valid_ok and test_ok and beats_current)
+            promotion_gates_passed = bool(valid_ok and test_ok and beats_current)
+            promote = bool(settings.neural_auto_promote_enabled and promotion_gates_passed)
             version = "nn-" + datetime.now(IST).strftime("%Y%m%d-%H%M%S")
             role = "PRODUCTION" if promote else "CANDIDATE"
             status = "PROMOTED" if promote else "SHADOW"
+            result["promotion"] = {
+                "eligible": promotion_gates_passed,
+                "automaticPromotionEnabled": bool(settings.neural_auto_promote_enabled),
+                "promoted": promote,
+                "validationGatePassed": bool(valid_ok),
+                "outOfSampleGatePassed": bool(test_ok),
+                "beatsCurrentProduction": bool(beats_current),
+                "minimumHoldoutSamples": minimum_holdout,
+                "minimumPerClass": minimum_class,
+            }
             if promote:
                 db.execute(update(NeuralModelArtifact).where(
                     NeuralModelArtifact.role == "PRODUCTION",
@@ -441,6 +464,8 @@ class NeuralModelService:
             "kind": "real_numpy_mlp",
             "automaticTraining": "postmarket/weekend",
             "weightUpdatePolicy": "never during live candles; retrain after labels are known",
+            "automaticPromotionEnabled": bool(settings.neural_auto_promote_enabled),
+            "promotionPolicy": "candidate-only until live-strategy feature/label alignment and independent approval are verified",
             "minimumLabeledSamples": settings.neural_min_labeled_samples,
             "inferenceWeight": settings.neural_inference_weight,
             "modelsTrained": total,

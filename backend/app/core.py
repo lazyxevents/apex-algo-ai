@@ -153,6 +153,9 @@ class Settings(BaseSettings):
     neural_l2: float = 0.0005
     neural_promotion_min_auc: float = 0.54
     neural_promotion_max_brier: float = 0.25
+    neural_min_oos_samples: int = 100
+    neural_min_oos_per_class: int = 10
+    neural_auto_promote_enabled: bool = False
     neural_inference_weight: float = 0.15
 
     push_notifications_enabled: bool = True
