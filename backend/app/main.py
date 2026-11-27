@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .core import db_health, init_db, settings
 from .agent_monitor import agent_monitor
+from .llm_advisor import ollama_advisor
 from .dataset_model import dataset_model_service
 from .dhan import dhan_service
 from .kite import kite_service
@@ -235,7 +236,9 @@ def readiness_diagnostics():
 @app.get("/api/agents/status")
 def agent_status():
     """Read-only live telemetry for actual in-process APEX workers."""
-    return agent_monitor.snapshot()
+    snapshot = agent_monitor.snapshot()
+    snapshot["llm"] = ollama_advisor.snapshot()
+    return snapshot
 
 
 @app.get("/api/system/status")
